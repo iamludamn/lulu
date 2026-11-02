@@ -1,0 +1,36 @@
+{
+  "name": "@lulu/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./protocol/*": {
+      "types": "./dist/protocol/*",
+      "default": "./dist/protocol/*"
+    },
+    "./*": {
+      "workerd": {
+        "types": "./dist/*",
+        "default": "./dist/*"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.3.0",
+    "@earendil-works/pi-ai": "1.3.0",
+    "@earendil-works/pi-codemode": "1.3.0",
+    "@earendil-works/pi-coding-agent": "1.2.0",
+    "@earendil-works/pi-durable": "1.3.0",
+    "@earendil-works/pi-mcp": "1.2.0",
+    "aws4fetch": "^1.0.20",
+    "e2b": "^2.61.0",
+    "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
+}

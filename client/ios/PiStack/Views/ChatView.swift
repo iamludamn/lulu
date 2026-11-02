@@ -1,0 +1,158 @@
+import PiStackKit
+import SwiftUI
+
+struct ChatView: View {
+    let bot: BotSummary
+    let store: BotStore
+    let api: Api
+    @Binding var draft: String
+    var composing: FocusState<Bool>.Binding
+    let onKept: (Page) -> Void
+    @State private var pinned = true
+    @State private var sent = 0
+    @Environment(\.topInset) private var topInset
+    @State private var opening: ArtifactAddress?
+
+    private static let bottom = "bottom"
+    private static let suggestions = ["今天有什么安排？", "把我关心的数据做成组件", "总结一下你记住了我什么"]
+
+    private var snapshot: BotStore.Snapshot { store.snapshot }
+    private var connected: Bool { snapshot.link == .online }
+    private var busy: Bool { live(of: snapshot.view).busy }
+    private var reconnecting: Bool { snapshot.link == .offline && snapshot.halt == nil }
+
+    var body: some View {
+        let rows = chatRows(snapshot)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 4) {
+                    ForEach(rows) { row in
+                        MessageRow(row: row, store: store, botId: bot.id, api: api, onOpen: { opening = $0 }, onKept: onKept)
+                            .equatable()
+                            .padding(.bottom, row.tail ? 10 : 0)
+                            .transition(transition(row))
+                    }
+                    Color.clear.frame(height: 1).id(Self.bottom)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .frame(maxWidth: 720)
+                .frame(maxWidth: .infinity)
+                .animation(.spring(duration: 0.45, bounce: 0), value: rows.map(\.id))
+            }
+            .defaultScrollAnchor(.bottom)
+            .defaultScrollAnchor(.bottom, for: .sizeChanges)
+            .scrollClipDisabled()
+            .contentMargins(.top, topInset, for: .scrollContent)
+            .scrollDismissesKeyboard(.interactively)
+            .onScrollGeometryChange(for: Bool.self) { $0.visibleRect.maxY > $0.contentSize.height - 24 } action: { _, near in
+                pinned = near
+            }
+            .onChange(of: signature(rows)) {
+                if pinned { proxy.scrollTo(Self.bottom) }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if !pinned {
+                    Button {
+                        pinned = true
+                        withAnimation { proxy.scrollTo(Self.bottom) }
+                    } label: {
+                        Image(systemName: "arrow.down").font(.headline).frame(width: 32, height: 32)
+                    }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .padding(16)
+                    .transition(.scale.combined(with: .opacity))
+                }
+            }
+            .animation(.snappy, value: pinned)
+        }
+        .overlay { gate(rows) }
+        .overlay(alignment: .top) {
+            if reconnecting {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text("正在重连…")
+                }
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .glassEffect(.regular, in: .capsule)
+                .padding(.top, 4)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy, value: reconnecting)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if snapshot.halt == nil {
+                Composer(draft: $draft, connected: connected, busy: busy, placeholder: placeholder, focused: composing, onSend: send)
+            }
+        }
+        .artifactViewer($opening, botId: bot.id, api: api)
+        .sensoryFeedback(.impact(weight: .light), trigger: sent)
+        .sensoryFeedback(.success, trigger: busy) { old, new in old && !new }
+    }
+
+    private func transition(_ row: ChatRow) -> AnyTransition {
+        if row.card != nil { return .asymmetric(insertion: .scale(scale: 0.85).combined(with: .opacity), removal: .identity) }
+        guard row.role == .user || row.typing else { return .identity }
+        return .asymmetric(
+            insertion: .scale(scale: 0.92, anchor: row.role == .user ? .bottomTrailing : .bottomLeading).combined(with: .opacity),
+            removal: .identity
+        )
+    }
+
+    private var placeholder: String {
+        connected ? "给 \(bot.name) 发消息" : "连接中…"
+    }
+
+    private func signature(_ rows: [ChatRow]) -> [Int] {
+        [rows.count, rows.last?.typing == true ? 1 : 0, rows.last?.text.count ?? 0]
+    }
+
+    private func send() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        pinned = true
+        sent += 1
+        store.submit(text)
+        draft = ""
+    }
+
+    @ViewBuilder
+    private func gate(_ rows: [ChatRow]) -> some View {
+        switch snapshot.halt {
+        case .notFound:
+            ContentUnavailableView("bot 不存在", systemImage: "questionmark.bubble")
+        case nil:
+            if snapshot.view == nil {
+                ProgressView()
+            } else if rows.isEmpty {
+                welcome
+            }
+        }
+    }
+
+    private var welcome: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("你好，我是 \(bot.name)").font(.largeTitle.weight(.bold))
+                Text("交给我的事，我会记住并替你跟进。").font(.title3).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Self.suggestions, id: \.self) { text in
+                    Button {
+                        draft = text
+                        composing.wrappedValue = true
+                    } label: {
+                        Text(text).font(.subheadline.weight(.medium)).padding(.horizontal, 4).padding(.vertical, 4)
+                    }
+                    .buttonStyle(.glass)
+                    .tint(.primary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 24)
+    }
+}

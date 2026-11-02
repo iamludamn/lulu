@@ -1,0 +1,19 @@
+interface Env {
+  readonly BOTS: DurableObjectNamespace<import("./objects.js").Bot>;
+  readonly REGISTRY: DurableObjectNamespace<import("./objects.js").Registry>;
+  readonly MEMORY: DurableObjectNamespace<import("./objects.js").Memory>;
+  readonly ARTIFACTS: DurableObjectNamespace<import("./objects.js").Artifact>;
+  readonly S3_ENDPOINT?: string;
+  readonly S3_BUCKET?: string;
+  readonly S3_REGION?: string;
+  readonly S3_ACCESS_KEY_ID?: string;
+  readonly S3_SECRET_ACCESS_KEY?: string;
+  readonly OPENAI_API_KEY?: string;
+  readonly OPENCODE_API_KEY?: string;
+  readonly LULU_MODEL?: string;
+  readonly TAVILY_API_KEY?: string;
+  readonly EXA_API_KEY?: string;
+  readonly DOUBAO_API_KEY?: string;
+  readonly LULU_MCP: KVNamespace;
+  readonly MCP_ENCRYPTION_KEY?: string;
+}
