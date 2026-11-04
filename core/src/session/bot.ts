@@ -166,6 +166,7 @@ export class BotSession {
         },
       },
       BACKGROUND_CONTEXT,
+      this.#snapshotFailed("progress"),
     );
     trackSnapshot(
       harness,
@@ -181,6 +182,7 @@ export class BotSession {
         },
       },
       BACKGROUND_CONTEXT,
+      this.#snapshotFailed("layout"),
     );
     await harness.commit(async (tx) => {
       const delivery = await tx.doc(DeliveryDoc);
@@ -188,6 +190,15 @@ export class BotSession {
       delivery.since = Math.max(0, ...(await tx.doc(ChatDoc)).messages.map((message) => message.id ?? 0));
     }, BACKGROUND_CONTEXT);
     await this.#refreshAlarm();
+  }
+
+  #snapshotFailed(snapshot: string): (error: unknown) => void {
+    return (error) => {
+      reportError("Snapshot refresh failed", error, { snapshot });
+      void this.#host.telemetry
+        .startSpan({ name: "bot.snapshot", attributes: { "lulu.bot.id": this.#host.name, "lulu.snapshot": snapshot } }, () => Promise.reject(error))
+        .catch(() => undefined);
+    };
   }
 
   fetch(request: Request): Promise<Response> {
