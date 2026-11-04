@@ -21,6 +21,7 @@ function platformServers(host: DurableHost): Record<string, McpServerConfig> {
 function mcpServices(host: DurableHost): McpHostServices {
   return {
     env: host.env,
+    telemetry: host.telemetry,
     readMcpAuth: () => host.readMcpAuth(),
     writeMcpAuth: (content) => host.writeMcpAuth(content),
   };
