@@ -25,3 +25,37 @@
 * 账号下有两个 Cloudflare 账号，所有 wrangler 命令必须设置 `CLOUDFLARE_ACCOUNT_ID`。`apps/cf` 的配置名是 `lulu`，`wrangler delete` 一类的命令要显式写 `--name`。
 * `@lulu/core` 对外导出的是 `dist`，改完源码必须先在仓库根目录 `npm run build`（同时构建 core 和 web），wrangler 不会自己编译。部署用 `wrangler deploy`，密钥用 `--secrets-file` 带上：`E2B_API_KEY`、`S3_*`、`OPENCODE_API_KEY`、`DOUBAO_API_KEY`、`MCP_ENCRYPTION_KEY`。
 * 本地 `wrangler dev` 同样要先 build；8787 常被占用，需要时指定 `--port` 和 `--inspector-port`。
+
+## Git Workflow
+
+### Commits
+
+* Follow [Conventional Commits](https://www.conventionalcommits.org/): `<type>(<scope>): <summary>`. Types: `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `build`, `ci`, `chore`, `revert`.
+* Scope is the affected area, such as `core`, `cf`, `web`, `ios`. Omit it when the change spans everything.
+* Summary is imperative, lowercase, no trailing period, at most 72 characters.
+* Breaking changes add `!` after the type or scope and a `BREAKING CHANGE:` footer.
+* The body explains *why* when it is not obvious. Wrap at 72 columns. Do not restate the diff.
+* Each commit is one logical change and leaves the tree building (`npm run build` at the root).
+* Stage explicit paths with `git add <path>`, not `git add -A`. The working tree often holds unrelated in-progress work.
+* Before committing, check `git diff --staged` for secrets such as API keys, `.dev.vars`, and `--secrets-file` contents.
+* Never bypass hooks (`--no-verify`) or signing unless the user explicitly asks.
+* End every commit message with the trailer `Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>`.
+
+### Branches
+
+* Name branches `<type>/<short-kebab-description>`, for example `feat/otlp-observability`.
+* Branch from the integration branch `lulu`. Never branch from or open a PR against `main` (PiStack product line).
+* Keep one topic per branch. Rebase onto the latest `lulu` before opening a PR.
+* Force-push only your own feature branch, and only with `--force-with-lease`. Never force-push `lulu` or `main`.
+
+### Pull Requests
+
+* Title uses the same Conventional Commit format as commit summaries.
+* Body has a `## Summary` section (what and why) and a `## Test plan` section (how it was verified, or what was not verified).
+* Squash-merge feature branches so `lulu` keeps one Conventional Commit per change.
+* End the PR body with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
+
+### Agent Behavior
+
+* Do not commit, push, or open a PR unless the user asks.
+* Do not delete branches, stashes, or uncommitted changes without confirming with the user.
