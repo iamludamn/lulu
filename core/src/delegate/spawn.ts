@@ -48,7 +48,9 @@ export async function createRun(tx: Tx, start: RunStart): Promise<{ runId: strin
   const anchor = await tx.createTask(DelegateAnchor, { runId: start.runId }, { ownership: { kind: "conversation" }, conversationId: start.parentId, background: true });
   const ownership = { kind: "task", taskId: anchor } as const;
   const child = start.forkAt === null ? await tx.createConversation({ ownership }) : await tx.forkConversation(start.parentId, start.forkAt, { ownership });
-  (await tx.doc(SandboxDoc, child.id)).key = start.runId;
+  const binding = await tx.doc(SandboxDoc, child.id);
+  binding.key = start.runId;
+  binding.owner = start.parentId;
   (await tx.doc(ProviderDoc, child.id)).sessionId = (await tx.doc(ProviderDoc, start.parentId)).sessionId;
   draft.conversationId = child.id;
   draft.model = start.model;

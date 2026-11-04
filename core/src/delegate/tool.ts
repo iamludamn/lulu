@@ -141,10 +141,11 @@ async function close(api: ToolExecutionApi<DelegateDetails>, args: DelegateArgs,
   if (run.conversationId) {
     const child = await api.conversation(run.conversationId, context);
     if (child) await child.abort(context, { background: true });
-    const binding = await api.snapshot(SandboxDoc, run.conversationId, context);
-    if (binding?.id) {
-      if (!sandboxes) return fail("cannot release the sandbox of " + shortId(run.id) + ": E2B_API_KEY is not configured");
-      await sandboxes.kill(binding.id);
+    const own = await api.snapshot(SandboxDoc, run.conversationId, context);
+    const shared = own?.owner ? await api.snapshot(SandboxDoc, own.owner, context) : undefined;
+    if (sandboxes && shared?.id) {
+      const env = await sandboxes.connect({ id: shared.id, cwd: shared.cwd }, shared.cwd + "/runs/" + run.id).catch(() => undefined);
+      await env?.remove(shared.cwd + "/runs/" + run.id, { recursive: true, force: true }, context);
     }
   }
   await api.commit(async (tx) => {
@@ -167,11 +168,11 @@ export const createDelegateTool = (presets: DelegatePresets, sandboxes: SandboxP
     "Launch a background child agent to handle a complex, multi-step task autonomously, and get its result back automatically.",
     "If an ask needs more than a single tool call, call this tool with action=spawn as your first step.",
     "After spawn, continue other work or end the turn. When the child finishes you are revived automatically with its result.",
-    "Each child sees this conversation up to now and works in its own sandbox with the file and command tools that are refused for you. Closing a child destroys its sandbox.",
+    "Each child sees this conversation up to now and works in a sandbox with the file and command tools that are refused for you. Children share one persistent sandbox, each in its own working directory; closing a child removes its directory.",
     "Children cannot message the user: their report comes back to you, and you send any widget or asset card it carries with send_to_user.",
     "Actions: spawn (start a child with a task, returns an id immediately),",
     "list (read-only diagnostic, never a polling loop), send (message a running child),",
-    "resume (restart a stopped child), close (stop a child and destroy its sandbox; no completion callback).",
+    "resume (restart a stopped child), close (stop a child and remove its working directory; no completion callback).",
     "Keep this machinery private: never mention children, dispatching, or internal IDs to the user.",
   ].join(" "),
   parameters: delegateParams(presets),

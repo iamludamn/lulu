@@ -1,17 +1,17 @@
 import type { Context } from "@earendil-works/chord";
-import { defineExtension, type ToolExecutionApi, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
+import { defineExtension, type ConversationId, type ToolExecutionApi, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { SandboxDoc } from "./doc.js";
-import type { SandboxHandle, SandboxProvider } from "./provider.js";
+import { isSandboxGone, type SandboxHandle, type SandboxProvider } from "./provider.js";
 
 export const CODING_TOOLS = ["read", "write", "edit", "bash"];
 
 const NO_ENVIRONMENT = "no execution environment: E2B_API_KEY is not configured";
 
-async function bindSandbox(api: ToolExecutionApi, key: string, sandboxes: SandboxProvider, context: Context): Promise<SandboxHandle> {
+async function bindSandbox(api: ToolExecutionApi, holder: ConversationId, key: string, sandboxes: SandboxProvider, context: Context): Promise<SandboxHandle> {
   const created = (await api.memo<SandboxHandle>("pistack.sandbox", context)) ?? (await api.memo("pistack.sandbox", await sandboxes.create(key), context));
   return api.commit(async (tx) => {
-    const binding = await tx.doc(SandboxDoc, api.conversationId);
+    const binding = await tx.doc(SandboxDoc, holder);
     if (!binding.id) {
       binding.id = created.id;
       binding.cwd = created.cwd;
@@ -23,11 +23,29 @@ async function bindSandbox(api: ToolExecutionApi, key: string, sandboxes: Sandbo
 const fail = (text: string): ToolExecutionResult => ({ output: [{ type: "text", text }], isError: true });
 
 async function connectSandbox(api: ToolExecutionApi, sandboxes: SandboxProvider | undefined, context: Context): Promise<ExecutionEnv | { error: string }> {
-  const binding = await api.snapshot(SandboxDoc, api.conversationId, context);
-  if (!binding?.key || sandboxes === undefined) return { error: NO_ENVIRONMENT };
+  const own = await api.snapshot(SandboxDoc, api.conversationId, context);
+  if (!own?.key || sandboxes === undefined) return { error: NO_ENVIRONMENT };
+  const holder = own.owner ?? api.conversationId;
+  const shared = own.owner === null ? own : await api.snapshot(SandboxDoc, holder, context);
+  const workdir = (cwd: string): string => (own.owner === null ? cwd : `${cwd}/runs/${own.key}`);
+  const createKey = (epoch: number): string => (own.owner === null ? own.key! : `shared:${epoch}`);
   try {
-    const sandbox = binding.id ? { id: binding.id, cwd: binding.cwd } : await bindSandbox(api, binding.key, sandboxes, context);
-    return await sandboxes.connect(sandbox);
+    const handle = shared?.id ? { id: shared.id, cwd: shared.cwd } : await bindSandbox(api, holder, createKey(shared?.epoch ?? 0), sandboxes, context);
+    try {
+      return await sandboxes.connect(handle, workdir(handle.cwd));
+    } catch (error) {
+      if (!isSandboxGone(error)) throw error;
+      const reset = await api.commit(async (tx) => {
+        const binding = await tx.doc(SandboxDoc, holder);
+        if (binding.id === handle.id) {
+          binding.id = null;
+          binding.epoch += 1;
+        }
+        return { id: binding.id, cwd: binding.cwd, epoch: binding.epoch };
+      }, context);
+      const rebound = reset.id ? { id: reset.id, cwd: reset.cwd } : await bindSandbox(api, holder, createKey(reset.epoch), sandboxes, context);
+      return await sandboxes.connect(rebound, workdir(rebound.cwd));
+    }
   } catch (error) {
     return { error: `sandbox is unavailable: ${error instanceof Error ? error.message : String(error)}` };
   }
