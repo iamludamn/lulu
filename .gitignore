@@ -11,3 +11,4 @@ client/ios/PiStackKit/.build/
 client/ios/.build/
 client/ios/build/
 experiments/*/data/
+.secrets.json
