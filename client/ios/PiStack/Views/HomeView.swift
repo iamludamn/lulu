@@ -51,6 +51,7 @@ struct HomeView: View {
         .safeAreaBar(edge: .top, spacing: 0) {
             topBar.onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { barBottom = $0 }
         }
+        .artifactViewer(botId: bot.id, api: api)
         .sheet(isPresented: $inspector) { InspectorView(store: store, botId: bot.id, api: api) }
         .sensoryFeedback(.selection, trigger: page)
         .task { store.start() }

@@ -6,7 +6,7 @@ struct MessageRow: View, Equatable {
     let store: BotStore
     let botId: String
     let api: Api
-    let onOpen: (ArtifactAddress) -> Void
+    let onOpen: (ArtifactAddress, String) -> Void
     let onKept: (Page) -> Void
 
     static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.row == rhs.row }
@@ -90,9 +90,11 @@ struct MessageRow: View, Equatable {
             }
         case .asset(let ref, let title, let summary):
             let address = ArtifactAddress(ref)
+            let source = "chat-\(row.id)"
             kept(destination: .assets, label: "收进资产", symbol: "tray.and.arrow.down") {
-                Button { address.map(onOpen) } label: { assetFace(address, title: title, summary: summary) }
+                Button { address.map { onOpen($0, source) } } label: { assetFace(address, title: title, summary: summary) }
                     .buttonStyle(.plain)
+                    .artifactSource(source, radius: 22)
             }
         }
     }
