@@ -27,12 +27,11 @@ async function connectSandbox(api: ToolExecutionApi, sandboxes: SandboxProvider 
   if (!own?.key || sandboxes === undefined) return { error: NO_ENVIRONMENT };
   const holder = own.owner ?? api.conversationId;
   const shared = own.owner === null ? own : await api.snapshot(SandboxDoc, holder, context);
-  const workdir = (cwd: string): string => (own.owner === null ? cwd : `${cwd}/runs/${own.key}`);
   const createKey = (epoch: number): string => (own.owner === null ? own.key! : `shared:${epoch}`);
   try {
     const handle = shared?.id ? { id: shared.id, cwd: shared.cwd } : await bindSandbox(api, holder, createKey(shared?.epoch ?? 0), sandboxes, context);
     try {
-      return await sandboxes.connect(handle, workdir(handle.cwd));
+      return await sandboxes.connect(handle);
     } catch (error) {
       if (!isSandboxGone(error)) throw error;
       const reset = await api.commit(async (tx) => {
@@ -44,7 +43,7 @@ async function connectSandbox(api: ToolExecutionApi, sandboxes: SandboxProvider 
         return { id: binding.id, cwd: binding.cwd, epoch: binding.epoch };
       }, context);
       const rebound = reset.id ? { id: reset.id, cwd: reset.cwd } : await bindSandbox(api, holder, createKey(reset.epoch), sandboxes, context);
-      return await sandboxes.connect(rebound, workdir(rebound.cwd));
+      return await sandboxes.connect(rebound);
     }
   } catch (error) {
     return { error: `sandbox is unavailable: ${error instanceof Error ? error.message : String(error)}` };

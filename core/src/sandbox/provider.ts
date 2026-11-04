@@ -14,7 +14,7 @@ export type SandboxHandle = { id: string; cwd: string };
 
 export interface SandboxProvider {
   create(key: string): Promise<SandboxHandle>;
-  connect(handle: SandboxHandle, cwd: string): Promise<ExecutionEnv>;
+  connect(handle: SandboxHandle): Promise<ExecutionEnv>;
 }
 
 export const isSandboxGone = (error: unknown): boolean => error instanceof NotFoundError;
@@ -49,11 +49,9 @@ export function createSandboxProvider(env: Environment, scope: string, telemetry
         return { id: sandbox.sandboxId, cwd: home.stdout.trim() };
       });
     },
-    connect(handle, cwd) {
+    connect(handle) {
       return telemetry.startSpan({ name: "sandbox.connect", attributes: { "lulu.bot.id": scope, "lulu.sandbox.id": handle.id } }, async () => {
-        const sandbox = await Sandbox.connect(handle.id, { apiKey, timeoutMs: SANDBOX_IDLE_MS });
-        await sandbox.files.makeDir(cwd);
-        return new SandboxExecutionEnv(sandbox, cwd, telemetry);
+        return new SandboxExecutionEnv(await Sandbox.connect(handle.id, { apiKey, timeoutMs: SANDBOX_IDLE_MS }), handle.cwd, telemetry);
       });
     },
   };
