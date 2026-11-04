@@ -39,7 +39,7 @@ export function createSandboxProvider(env: Environment, scope: string, telemetry
   const template = env.E2B_TEMPLATE;
   return {
     create(key) {
-      return telemetry.startSpan({ name: "sandbox.create", attributes: { "lulu.bot.id": scope, "lulu.sandbox.template": template ?? "default" } }, async (span) => {
+      return telemetry.startSpan({ name: "sandbox.create", attributes: { "lulu.bot.id": scope, "lulu.sandbox.key": key, "lulu.sandbox.template": template ?? "default" } }, async (span) => {
         void sweep(apiKey).catch(() => undefined);
         const options = { apiKey, idempotencyKey: await idempotencyKeyOf(scope, key), timeoutMs: SANDBOX_IDLE_MS, metadata: METADATA, lifecycle: { onTimeout: "pause" as const } };
         const sandbox = template ? await Sandbox.create(template, options) : await Sandbox.create(options);
