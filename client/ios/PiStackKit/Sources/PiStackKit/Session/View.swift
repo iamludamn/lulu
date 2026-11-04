@@ -16,6 +16,7 @@ public struct Live: Sendable {
 }
 
 public let sendTool = "send_to_user"
+let hiddenTools: Set<String> = [sendTool, "codemode"]
 
 public enum TimelineItem: Identifiable, Sendable {
     case entry(ChatEntry)
@@ -158,7 +159,7 @@ public func liveStatus(of view: ConversationView?) -> String? {
         }
         guard entry.kind == "pi.assistant" else { continue }
         let running = (entry.model ?? []).flatMap { $0["content"]?.array ?? [] }.compactMap { block -> String? in
-            guard block["type"]?.string == "toolCall", let name = block["name"]?.string, name != sendTool, let id = block["id"]?.string, !answered.contains(id) else { return nil }
+            guard block["type"]?.string == "toolCall", let name = block["name"]?.string, !hiddenTools.contains(name), let id = block["id"]?.string, !answered.contains(id) else { return nil }
             return name
         }
         return running.isEmpty ? nil : "正在使用 " + running.joined(separator: "、")
