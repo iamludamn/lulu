@@ -28,8 +28,8 @@
 
 ## 密钥与 ENV
 
-* 项目用到的密钥与环境变量只存放在项目 ENV：`apps/cf/.dev.vars`（`wrangler dev`）和 `apps/cf/.secrets.json`（`--secrets-file` 部署）。两者都已 gitignore，权限保持 600，不进仓库、PR、commit、ticket 和对话。
-* 有多个 T3 environment（omarchy、Mac 等）时，ENV 要在各设备间保持一致：任一设备新增或更新密钥后，用 `scp` 同步到其他环境的同一路径，并比对 sha256。新环境缺 ENV 时，先从已有环境拉取，不要让用户手动操作。
+* 项目用到的密钥统一放在仓库根目录的 `.env` 文件（`KEY="value"` 格式，已 gitignore，权限 600），不进仓库、PR、commit、ticket 和对话。部署时 `.env` 可直接作为 `--secrets-file`。
+* 有多个 T3 environment（omarchy、Mac 等）时，`.env` 要在各设备间保持一致：任一设备新增或更新密钥后，用 `scp` 同步到其他环境仓库根目录的 `.env`，并比对 sha256。新环境缺 `.env` 时，先从已有环境拉取，不要让用户手动操作。
 * Mac 上的仓库在 `~/AACS/lulu`，SSH 用 `a1234@wujiahaodemacbook-pro.tailfdc8bd.ts.net`；用短主机名会因 known_hosts 报 host key 验证失败。
 
 ## Git Workflow
