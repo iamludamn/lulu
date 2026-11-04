@@ -95,14 +95,6 @@ export class ArtifactObject {
         (error: unknown) => Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 404 }),
       );
     }
-    if (pathname === "/wipe" && request.method === "POST") return this.#serial(async () => {
-      if (this.#store !== undefined) {
-        const all = await this.#host.storage.list<Version>({ prefix: "ver:" });
-        await this.#store.remove([...all.values()].map((entry) => entry.key));
-      }
-      await this.#host.storage.deleteAll();
-      return new Response(null, { status: 204 });
-    });
     return Promise.resolve(new Response(null, { status: 404 }));
   }
 

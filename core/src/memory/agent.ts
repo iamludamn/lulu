@@ -1,3 +1,5 @@
+import type { TelemetryContext } from "@earendil-works/pi-telemetry";
+import { traceHarness } from "../telemetry/agent.js";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai/models";
 import {
@@ -27,6 +29,7 @@ export type MemoryAgentOptions = {
   readonly models: Models;
   readonly model: ModelRef;
   readonly sessionId: string;
+  readonly telemetry: TelemetryContext;
 };
 
 export type MemoryRun = { committed: boolean };
@@ -63,6 +66,7 @@ export class MemoryAgent {
   readonly #models: Models;
   readonly #model: ModelRef;
   readonly #sessionId: string;
+  readonly #telemetry: TelemetryContext;
   #harness!: Harness;
   #root!: Conversation;
   #tail: Promise<unknown> = Promise.resolve();
@@ -72,6 +76,7 @@ export class MemoryAgent {
     this.#models = options.models;
     this.#model = options.model;
     this.#sessionId = options.sessionId;
+    this.#telemetry = options.telemetry;
   }
 
   async start(storage: Storage): Promise<void> {
@@ -94,6 +99,7 @@ export class MemoryAgent {
     );
     const root = await harness.root(BACKGROUND_CONTEXT, { agent: { model: this.#model, thinkingLevel: "off" } });
     await root.configure({ model: this.#model }, BACKGROUND_CONTEXT);
+    traceHarness(harness, this.#telemetry, { "lulu.agent": "memory" })(root.id);
     harness.resume();
     this.#harness = harness;
     this.#root = root;

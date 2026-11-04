@@ -1,11 +1,24 @@
-import { createModels, type Models } from "@earendil-works/pi-ai/models";
+import { createModels, type Models, type Provider } from "@earendil-works/pi-ai/models";
+import { deepseekProvider } from "@earendil-works/pi-ai/providers/deepseek";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
 import type { ModelRef as DurableModelRef } from "@earendil-works/pi-durable";
 import type { Environment } from "../host/types.js";
 import type { ModelConfig, ModelRef } from "../protocol/contract.js";
 
-const DEFAULT_MODEL: ModelRef = { provider: "opencode-go", id: "deepseek-v4.1-flash" };
+const DEFAULT_MODEL: ModelRef = { provider: "deepseek", id: "deepseek-flash" };
+
+const withMidConvoSystem = <T extends { readonly api: string }>(model: T): T =>
+  model.api === "openai-completions" ? { ...model, compat: { ...(model as { compat?: object }).compat, supportsMidConvoSystemMessages: true } } : model;
+
+function deepseek(): Provider {
+  const base = deepseekProvider();
+  return {
+    ...base,
+    getModels: () => base.getModels().map(withMidConvoSystem),
+    getAllModels: () => base.getAllModels?.().map(withMidConvoSystem) ?? base.getModels().map(withMidConvoSystem),
+  };
+}
 
 function parseModel(raw: string | undefined): ModelRef | undefined {
   const text = (raw ?? "").trim();
@@ -27,6 +40,7 @@ export function createChatModels(env: Environment): Models {
     },
   });
   models.setProvider(openaiProvider());
+  models.setProvider(deepseek());
   models.setProvider(opencodeGoProvider());
   return models;
 }

@@ -44,12 +44,11 @@ export class MemoryObject {
     if (pathname === "/listing") return this.#listing();
     if (pathname === "/file") return this.#file(request);
     if (pathname === "/touch" && request.method === "POST") return this.#touch();
-    if (pathname === "/wipe") return this.#wipe();
     return new Response(null, { status: 404 });
   }
 
   alarm(): Promise<void> {
-    return this.#serial(() => this.#scheduled());
+    return this.#host.telemetry.startSpan({ name: "memory.alarm", attributes: { "lulu.bot.id": this.#host.name } }, () => this.#serial(() => this.#scheduled()));
   }
 
   async #listing(): Promise<Response> {
@@ -94,7 +93,7 @@ export class MemoryObject {
       await this.#host.storage.put({ [CURSOR_KEY]: source.through });
       return;
     }
-    const agent = new MemoryAgent({ files: this.#files, models: this.#models, model: source.model, sessionId: this.#host.id });
+    const agent = new MemoryAgent({ files: this.#files, models: this.#models, model: source.model, sessionId: this.#host.id, telemetry: this.#host.telemetry });
     await agent.start(this.#storage);
     try {
       await agent.remember(`remember:${since}-${source.through}`, source.episodes, source.through);
@@ -112,13 +111,5 @@ export class MemoryObject {
     const response = await this.#host.objects.BOTS.getByName(this.#host.name).fetch(`https://bot/memory/source?after=${after}`);
     if (!response.ok) throw new Error(`bot source failed (${response.status})`);
     return (await response.json()) as EpisodeSource;
-  }
-
-  #wipe(): Promise<Response> {
-    return this.#serial(async () => {
-      await this.#host.alarm.delete();
-      await this.#host.storage.deleteAll();
-      return new Response(null, { status: 204 });
-    });
   }
 }

@@ -14,6 +14,7 @@ import {
   type ShellExecOptions,
   type ShellExecResult,
 } from "@earendil-works/pi-durable/env";
+import type { TelemetryContext } from "@earendil-works/pi-telemetry";
 import { CommandExitError, FileType, NotFoundError, TimeoutError, type EntryInfo, type Sandbox } from "e2b";
 
 export const SANDBOX_IDLE_MS = 120_000;
@@ -90,11 +91,13 @@ export class SandboxExecutionEnv implements ExecutionEnv {
   readonly id: string;
   cwd: string;
   readonly #sandbox: Sandbox;
+  readonly #telemetry: TelemetryContext;
 
-  constructor(sandbox: Sandbox, cwd: string) {
+  constructor(sandbox: Sandbox, cwd: string, telemetry: TelemetryContext) {
     this.id = `e2b:${sandbox.sandboxId}`;
     this.cwd = cwd;
     this.#sandbox = sandbox;
+    this.#telemetry = telemetry;
   }
 
   async absolutePath(path: string): Promise<Result<string, FileError>> {
@@ -171,7 +174,19 @@ export class SandboxExecutionEnv implements ExecutionEnv {
     return attempt("tmp", async () => (await this.#sandbox.commands.run(`mktemp -d ${quote(`/tmp/${prefix ?? "tmp-"}XXXXXX`)}`)).stdout.trim());
   }
 
-  async exec(command: string | readonly string[], options: ShellExecOptions | undefined, context: Context): Promise<Result<ShellExecResult, ExecutionError>> {
+  exec(command: string | readonly string[], options: ShellExecOptions | undefined, context: Context): Promise<Result<ShellExecResult, ExecutionError>> {
+    return this.#telemetry.startSpan(
+      { name: "sandbox.exec", attributes: { "lulu.sandbox.id": this.#sandbox.sandboxId, "lulu.sandbox.exec.timeout_s": options?.timeout ?? 0 } },
+      async (span) => {
+        const result = await this.#exec(command, options, context);
+        if (result.ok) span.setAttributes({ "lulu.sandbox.exec.exit_code": result.value.exitCode });
+        else span.setStatus({ status: "error", error: { name: result.error.code, message: result.error.message } });
+        return result;
+      },
+    );
+  }
+
+  async #exec(command: string | readonly string[], options: ShellExecOptions | undefined, context: Context): Promise<Result<ShellExecResult, ExecutionError>> {
     const signal = context.abortSignal;
     if (signal?.aborted) return err(new ExecutionError("aborted", "aborted"));
     const line = typeof command === "string" ? command : command.map(quote).join(" ");

@@ -5,7 +5,6 @@ import { chatModelRef } from "../agent/models.js";
 import type { DurableHost, Socket } from "../host/types.js";
 import type { MessageProgress, ModelRef, SessionProgress } from "../protocol/contract.js";
 import type { ClientMessage, ServerMessage } from "../protocol/wire.js";
-import { botStore } from "../registry/bots.js";
 import { spokenText, sentIn } from "../send/sent.js";
 import type { Written } from "../voice/call.js";
 import type { Update, Writer } from "../voice/line.js";
@@ -58,10 +57,9 @@ export class VoiceSession {
     const apiKey = host.env.DOUBAO_API_KEY;
     if (apiKey === undefined) throw new Error("Voice is not configured");
     if (this.#voices.has(socket)) throw new Error("Voice is already running");
-    const agentName = (await botStore(host).get(host.name))?.name ?? VOICE_DEFAULT_NAMES.agent;
     const relay = new VoiceRelay(
       {
-        agentName,
+        agentName: VOICE_DEFAULT_NAMES.agent,
         userName: VOICE_DEFAULT_NAMES.user,
         send: (event) => this.#deps.send(socket, { type: "voice", event }),
         ask: async (request) => {

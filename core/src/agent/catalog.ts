@@ -38,8 +38,8 @@ const contextFallback = (error: unknown): string => {
 
 export const CATALOG: Record<string, (deps: HarnessDeps) => Extension> = {
   coding: () => CodingTools,
-  environment: ({ host }) => createEnvironmentExtension(createSandboxProvider(host.env, host.name)),
-  delegate: ({ host }) => createDelegateExtension(DelegateAgents, createSandboxProvider(host.env, host.name)),
+  environment: ({ host }) => createEnvironmentExtension(createSandboxProvider(host.env, host.name, host.telemetry)),
+  delegate: ({ host }) => createDelegateExtension(DelegateAgents, createSandboxProvider(host.env, host.name, host.telemetry)),
   cron: () => CronExtension,
   panel: () => PanelExtension,
   send: ({ host }) =>

@@ -7,7 +7,6 @@ import { ChatDoc, linkChatMessage, recordChatMessage, trackProgress, trackSnapsh
 import type { EpisodeSource } from "../memory/doc.js";
 import { episodesOf } from "../memory/episodes.js";
 import type { McpStatus, ModelRef, SessionProgress } from "../protocol/contract.js";
-import { DelegateIndex, RunFamily } from "../delegate/runs.js";
 import { RECOVERY_ALARM_DELAY_MS, abortRuns, fireSchedules, nextAlarmAt, replaceAlarm, scheduleEntries } from "../cron/alarm.js";
 import { CRON_KIND } from "../cron/doc.js";
 import { PanelDoc } from "../panel/doc.js";
@@ -22,14 +21,17 @@ import { MAX_CLIENT_FRAME_CHARACTERS, type ClientMessage, type ServerMessage } f
 import { parseFrame } from "./frame.js";
 import { createChatHarnessOptions, reconnectChatMcp } from "../agent/chat.js";
 import { chatModelConfig, chatModelRef, createChatModels, durableModel } from "../agent/models.js";
-import { SandboxDoc } from "../sandbox/doc.js";
-import { createSandboxProvider } from "../sandbox/provider.js";
 import { memoryTouch } from "../memory/client.js";
+import { RecallDoc } from "../memory/doc.js";
+import { judgeRecall } from "../memory/recall.js";
+import { traceHarness } from "../telemetry/agent.js";
 import { SOCKET_OPEN, type DurableHost, type Socket } from "../host/types.js";
 
 const MEMORY_SOURCE_ENTRIES = 200;
+const RECALL_ENTRIES = 8;
 const MODEL_KEY = "model";
-const INITIALIZED_KEY = "executor-token";
+const STATE_INTERVAL_MS = 50;
+const PROGRESS_WAIT_MS = 500;
 
 type ClientAttachment = { readonly role: "client"; readonly ready: boolean };
 type HelloMessage = Extract<ClientMessage, { type: "hello" }>;
@@ -54,6 +56,13 @@ export class BotSession {
   #mcpHost: McpHost | undefined = undefined;
   #botServers: Record<string, McpServerConfig> = {};
   #progress: SessionProgress = { messages: [], hiddenEntries: [] };
+  readonly #sentEntries = new Map<string, string>();
+  #sentRest = "";
+  #cooling = false;
+  #awaiting = 0;
+  #waitTimer: ReturnType<typeof setTimeout> | undefined = undefined;
+  readonly #deferred: Array<() => void> = [];
+  #dirty = false;
   #alarmUpdate: Promise<void> = Promise.resolve();
   #prompts: Promise<void> = Promise.resolve();
   readonly #handshakes = new WeakMap<Socket, Promise<boolean>>();
@@ -106,6 +115,15 @@ export class BotSession {
       BACKGROUND_CONTEXT,
     );
     this.#harness = harness;
+    const trace = traceHarness(harness, this.#host.telemetry, { "lulu.bot.id": this.#host.name });
+    harness.subscribeCommits(() => {
+      this.#awaiting += 1;
+      this.#waitTimer ??= setTimeout(() => {
+        this.#waitTimer = undefined;
+        this.#awaiting = 0;
+        this.#broadcastState();
+      }, PROGRESS_WAIT_MS);
+    });
     harness.subscribeCommits((publication) => {
       if (publication.changes.some((change) => change.type === "document" && change.record.kind === CRON_KIND)) {
         void this.#refreshAlarm().catch((error: unknown) => reportError("Schedule alarm reconciliation failed", error));
@@ -122,6 +140,7 @@ export class BotSession {
     const root = await harness.root(BACKGROUND_CONTEXT, { agent: { model, thinkingLevel: "off" } });
     await root.configure({ model, tools: null }, BACKGROUND_CONTEXT);
     this.#root = root;
+    trace(root.id);
 
     this.#view = await root.viewState(BACKGROUND_CONTEXT);
     this.#view.subscribe((_value, _context, delivery) => {
@@ -135,6 +154,11 @@ export class BotSession {
       {
         replace: (_context, value) => {
           this.#progress = value;
+          this.#awaiting = Math.max(0, this.#awaiting - 1);
+          if (this.#awaiting === 0) {
+            clearTimeout(this.#waitTimer);
+            this.#waitTimer = undefined;
+          }
           void this.#voice.settle().catch((error: unknown) => reportError("Voice settle failed", error));
           this.#chase();
           void this.#settleMakes();
@@ -168,15 +192,13 @@ export class BotSession {
 
   fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
-    if (pathname === "/init") return this.#init();
-    if (pathname === "/wipe") return this.#wipe();
     if (pathname === "/memory/source") return this.#memorySource(request);
     if (pathname === "/schedules") return this.#schedulesResponse();
-    return this.#upgrade();
+    return Promise.resolve(this.#upgrade());
   }
 
   alarm(): Promise<void> {
-    return this.#runAlarm();
+    return this.#host.telemetry.startSpan({ name: "bot.alarm", attributes: { "lulu.bot.id": this.#host.name } }, () => this.#runAlarm());
   }
 
   async webSocketMessage(socket: Socket, message: string | ArrayBuffer): Promise<void> {
@@ -214,7 +236,10 @@ export class BotSession {
     }
 
     try {
-      await this.#handle(socket, frame);
+      await this.#host.telemetry.startSpan(
+        { name: `bot.command ${frame.type}`, attributes: { "lulu.bot.id": this.#host.name, "lulu.command": frame.type } },
+        () => this.#handle(socket, frame),
+      );
     } catch (error) {
       reportError("Bot command failed", error, { command: frame.type });
       this.#send(socket, {
@@ -305,6 +330,7 @@ export class BotSession {
   async #submitPrompt(socket: Socket, command: Extract<Command, { type: "prompt.submit" }>): Promise<void> {
     void memoryTouch(this.#host, this.#host.name).catch((error: unknown) => reportError("Memory touch failed", error));
     const content = command.content;
+    await this.#recall(command.requestId, content);
     await recordChatMessage(this.#harness, this.#view, command.requestId, content);
     const submission = await this.#root.submit(
       {
@@ -319,6 +345,17 @@ export class BotSession {
     void this.#refreshAlarm().catch((error: unknown) => reportError("Prompt alarm reconciliation failed", error));
     this.#broadcastState();
     this.#send(socket, { type: "result", requestId: command.requestId, ok: true });
+  }
+
+  async #recall(requestId: string, content: string): Promise<void> {
+    if ((await this.#harness.snapshot(RecallDoc, BACKGROUND_CONTEXT))?.requestId === requestId) return;
+    const turns = [...episodesOf(this.#view.value.entries.slice(-RECALL_ENTRIES)), { role: "user" as const, text: content }];
+    const decision = await judgeRecall(this.#host.env, this.#host.telemetry, turns);
+    await this.#harness.commit(async (tx) => {
+      const recall = await tx.doc(RecallDoc);
+      recall.requestId = requestId;
+      recall.inject = decision.inject;
+    }, BACKGROUND_CONTEXT);
   }
 
   #inPromptOrder<T>(task: () => Promise<T>): Promise<T> {
@@ -369,52 +406,19 @@ export class BotSession {
     return this.#settling;
   }
 
-  async #init(): Promise<Response> {
-    return this.#host.blockConcurrencyWhile(async () => {
-      if (await this.#initialized()) return Response.json({ error: "Bot already initialized" }, { status: 409 });
-      await this.#host.storage.put({ [INITIALIZED_KEY]: true });
-      return new Response(null, { status: 201 });
-    });
-  }
-
-  async #wipe(): Promise<Response> {
-    for (const socket of this.#host.sockets.all()) socket.close(4404, "Unknown bot");
-    await this.#releaseSandboxes().catch((error: unknown) => reportError("Sandbox release failed", error));
-    await this.#host.storage.deleteAll();
-    return new Response(null, { status: 204 });
-  }
-
-  async #releaseSandboxes(): Promise<void> {
-    const sandboxes = createSandboxProvider(this.#host.env, this.#host.name);
-    if (sandboxes === undefined) return;
-    const runs = (await this.#harness.snapshot(DelegateIndex, BACKGROUND_CONTEXT))?.ids ?? [];
-    const children = await Promise.all(runs.map(async (id) => (await this.#harness.snapshot(RunFamily, id, BACKGROUND_CONTEXT))?.conversationId ?? null));
-    for (const conversationId of [this.#root.id, ...children]) {
-      if (conversationId === null) continue;
-      const id = (await this.#harness.snapshot(SandboxDoc, conversationId, BACKGROUND_CONTEXT))?.id;
-      if (!id) continue;
-      await sandboxes.kill(id).catch((error: unknown) => reportError("Sandbox release failed", error, { sandbox: id }));
-    }
-  }
-
-  async #upgrade(): Promise<Response> {
-    const { server, response } = this.#host.sockets.upgrade(idleClient());
-    if (!(await this.#initialized())) server.close(4404, "Unknown bot");
-    return response;
-  }
-
-  async #initialized(): Promise<boolean> {
-    return (await this.#host.storage.get(INITIALIZED_KEY)) !== undefined;
+  #upgrade(): Response {
+    return this.#host.sockets.upgrade(idleClient()).response;
   }
 
   #config() {
     return chatModelConfig(this.#models, this.#host.env, this.#selected);
   }
 
-  #stateMessage(): ServerMessage {
+  #stateMessage(entries: ConversationView["entries"] = this.#view.value.entries): ServerMessage {
+    const { conversation, docs, entries: all } = this.#view.value;
     return {
       type: "state",
-      view: this.#view.value,
+      view: { conversation, docs, order: all.map((entry) => String(entry.id)), entries },
       progress: this.#progress,
       mcp: this.#mcp,
       panel: this.#panel,
@@ -433,7 +437,36 @@ export class BotSession {
   }
 
   #broadcastState(): void {
-    this.#broadcast(this.#stateMessage());
+    if (this.#cooling || this.#awaiting > 0) {
+      this.#dirty = true;
+      return;
+    }
+    this.#cooling = true;
+    setTimeout(() => {
+      this.#cooling = false;
+      if (this.#dirty) {
+        this.#dirty = false;
+        this.#broadcastState();
+      }
+    }, STATE_INTERVAL_MS);
+    this.#publishState();
+  }
+
+  #publishState(): void {
+    this.#diffAndSend();
+    for (const send of this.#deferred.splice(0)) send();
+  }
+
+  #diffAndSend(): void {
+    const bodies = new Map(this.#view.value.entries.map((entry) => [String(entry.id), JSON.stringify(entry)]));
+    const changed = this.#view.value.entries.filter((entry) => this.#sentEntries.get(String(entry.id)) !== bodies.get(String(entry.id)));
+    const { view, ...rest } = this.#stateMessage(changed) as Extract<ServerMessage, { type: "state" }>;
+    const signature = JSON.stringify({ ...rest, view: { ...view, entries: [] } });
+    if (changed.length === 0 && signature === this.#sentRest) return;
+    this.#sentEntries.clear();
+    for (const [id, body] of bodies) this.#sentEntries.set(id, body);
+    this.#sentRest = signature;
+    this.#broadcast({ view, ...rest });
   }
 
   #broadcast(message: ServerMessage): void {
@@ -441,6 +474,13 @@ export class BotSession {
   }
 
   #send(socket: Socket, message: ServerMessage): void {
+    if (message.type === "result") {
+      if (this.#awaiting > 0) {
+        this.#deferred.push(() => this.#send(socket, message));
+        return;
+      }
+      this.#publishState();
+    }
     if (socket.readyState !== SOCKET_OPEN) return;
     socket.send(JSON.stringify(message));
   }

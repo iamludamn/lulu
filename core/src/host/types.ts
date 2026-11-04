@@ -1,5 +1,5 @@
 import type { CodemodeToolOptions } from "@earendil-works/pi-durable/codemode";
-import type { RegistryStub } from "../registry/bots.js";
+import type { TelemetryContext } from "@earendil-works/pi-telemetry";
 
 export type Environment = Readonly<Record<string, string | undefined>>;
 
@@ -38,7 +38,6 @@ export interface DurableSockets {
   attachment(socket: Socket): unknown;
   attach(socket: Socket, attachment: unknown): void;
   upgrade(attachment: unknown): { server: Socket; response: Response };
-  reject(code: number, reason: string): Response;
 }
 
 export interface KeyValue {
@@ -54,6 +53,7 @@ export interface UpstreamHandlers {
 
 export interface DurableHost {
   readonly env: Environment;
+  readonly telemetry: TelemetryContext;
   readMcpAuth(): Promise<string | undefined>;
   writeMcpAuth(content: string): Promise<void>;
   readonly name: string;
@@ -65,12 +65,10 @@ export interface DurableHost {
     readonly BOTS: ObjectNamespace;
     readonly MEMORY: ObjectNamespace;
     readonly ARTIFACTS: ObjectNamespace;
-    readonly REGISTRY: ObjectNamespace<RegistryStub>;
   };
   readonly kv: KeyValue;
   readonly sandbox: CodemodeToolOptions["sandbox"];
   connect(url: string, headers: Record<string, string>, handlers: UpstreamHandlers): Promise<{ status: number; socket: Socket | undefined }>;
-  blockConcurrencyWhile<T>(task: () => Promise<T>): Promise<T>;
   abort(reason: string): void;
 }
 
