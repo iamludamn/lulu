@@ -11,9 +11,11 @@ import { expireRuns, fireDue, nextAlarm } from "./engine.js";
 export const RECOVERY_ALARM_DELAY_MS = 60_000;
 const SELF_ADVANCING_KINDS: ReadonlySet<string> = new Set(["running", "ready", "completing"]);
 
-export function fireSchedules(harness: Harness, parentId: ConversationId, selected: ModelRef, now: number): Promise<ConversationId[]> {
+export type AlarmOutcome = { fired: string[]; expired: ConversationId[] };
+
+export function fireSchedules(harness: Harness, parentId: ConversationId, selected: ModelRef, now: number): Promise<AlarmOutcome> {
   return harness.commit(async (tx) => {
-    await fireDue(tx, now, (draft, job, runId) =>
+    const fired = await fireDue(tx, now, (draft, job, runId) =>
       createRun(draft, {
         runId,
         task: job.prompt,
@@ -29,7 +31,7 @@ export function fireSchedules(harness: Harness, parentId: ConversationId, select
         thinkingLevel: null,
       }),
     );
-    return expireRuns(tx, now);
+    return { fired, expired: await expireRuns(tx, now) };
   }, BACKGROUND_CONTEXT);
 }
 
