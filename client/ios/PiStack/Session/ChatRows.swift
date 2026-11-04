@@ -88,8 +88,8 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
         case .order: rows.append(notice(request, "order"))
         }
     }
-    let state = live(of: snapshot.view)
-    if state.busy {
+    let replying = snapshot.progress?.messages.contains { $0.state == .processing } ?? false
+    if live(of: snapshot.view).busy && (making.isEmpty || replying) {
         var row = ChatRow(id: "live", role: .assistant, text: liveStatus(of: snapshot.view) ?? "")
         row.typing = true
         rows.append(row)

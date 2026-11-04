@@ -150,19 +150,35 @@ struct MessageRow: View, Equatable {
             .accessibilityLabel("助手正在输入")
     }
 
+    private var generating: some View {
+        HStack(spacing: 6) {
+            ProgressView().controlSize(.mini)
+            Text("生成中…")
+        }
+        .font(.caption2.weight(.medium))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .opacity(row.footer == .generating ? 1 : 0)
+        .animation(.snappy, value: row.footer)
+        .accessibilityHidden(row.footer != .generating)
+    }
+
     @ViewBuilder
     private var footer: some View {
+        if row.widgetSource {
+            generating
+        } else {
+            status
+        }
+    }
+
+    @ViewBuilder
+    private var status: some View {
         switch row.footer {
         case .read:
             Text("已读").font(.caption2.weight(.medium)).foregroundStyle(.secondary).padding(.horizontal, 8)
-        case .generating:
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.mini)
-                Text("生成中…")
-            }
-            .font(.caption2.weight(.medium))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 8)
+        case .generating, nil:
+            EmptyView()
         case .failed(let requestId):
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.circle.fill")
@@ -174,7 +190,6 @@ struct MessageRow: View, Equatable {
             .font(.caption)
             .foregroundStyle(.red)
             .padding(.horizontal, 8)
-        case nil: EmptyView()
         }
     }
 
