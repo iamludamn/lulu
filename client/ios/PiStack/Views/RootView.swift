@@ -7,8 +7,11 @@ struct RootView: View {
         Group {
             if let api = model.api {
                 if let bot = model.bot {
-                    HomeView(bot: bot, api: api)
-                        .id(bot.id)
+                    NavigationStack {
+                        HomeView(bot: bot, api: api)
+                            .toolbarVisibility(.hidden, for: .navigationBar)
+                    }
+                    .id(bot.id)
                 } else if let error = model.error {
                     ContentUnavailableView {
                         Label("连接失败", systemImage: "wifi.exclamationmark")
