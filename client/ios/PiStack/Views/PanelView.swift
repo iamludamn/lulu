@@ -135,7 +135,7 @@ private struct WidgetCard: View {
     let onEdit: () -> Void
 
     var body: some View {
-        let card = WidgetFace(widget: widget, botId: botId, api: api, interactive: true, onPrompt: onPrompt)
+        WidgetFace(widget: widget, botId: botId, api: api, interactive: true, onPrompt: onPrompt)
             .frosted(26)
             .contentShape(.rect(cornerRadius: 26, style: .continuous))
             .contextMenu {
@@ -148,20 +148,8 @@ private struct WidgetCard: View {
                     Button("从视图移除", systemImage: "trash", role: .destructive) { onDrop(origin) }
                 }
             }
-        Group {
-            if let ask = widget.ask, !isInteractive {
-                Button { onPrompt(ask) } label: { card }.buttonStyle(.plain)
-            } else {
-                card
+            .editable(editing, seed: abs(widget.id.hashValue), radius: 26) {
+                if let origin = widget.origin { onDrop(origin) }
             }
-        }
-        .editable(editing, seed: abs(widget.id.hashValue), radius: 26) {
-            if let origin = widget.origin { onDrop(origin) }
-        }
-    }
-
-    private var isInteractive: Bool {
-        if case .actions = widget.body { return true }
-        return false
     }
 }

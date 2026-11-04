@@ -28,15 +28,9 @@ struct MessageRow: View, Equatable {
                 if let card = row.card {
                     cardRow(card)
                 } else {
-                    message(mine: row.role == .user)
+                    messageStack(mine: row.role == .user)
                 }
             }
-        }
-    }
-
-    private func message(mine: Bool) -> some View {
-        SwipeToAct(enabled: row.widgetSource, onTrigger: { store.makeWidget(origin: row.id) }) {
-            messageStack(mine: mine)
         }
     }
 
