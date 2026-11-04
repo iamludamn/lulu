@@ -1,7 +1,10 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
 import { watchEvents, type AgentEvent, type ConversationId, type Harness } from "@earendil-works/pi-durable";
 import type { SpanAttributes, TelemetryContext, TelemetrySpan } from "@earendil-works/pi-telemetry";
+import { isSensitive } from "../memory/guard.js";
+
+const FAILURE_CHARACTERS = 300;
 
 type Held = { readonly span: TelemetrySpan; end(): void };
 
@@ -20,6 +23,16 @@ function hold(parent: TelemetryContext, name: string, attributes: SpanAttributes
 
 function failed(held: Held, message: string): void {
   held.span.setStatus({ status: "error", error: { name: "Error", message } });
+}
+
+function failureText(result: ToolResultMessage): string {
+  const text = result.content
+    .flatMap((part) => (part.type === "text" ? [part.text] : []))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (text === "") return "tool returned an error";
+  return isSensitive(text) ? "tool returned an error: [redacted]" : text.slice(0, FAILURE_CHARACTERS);
 }
 
 class ConversationTrace {
@@ -74,7 +87,7 @@ class ConversationTrace {
         if (tool === undefined) return;
         const result = event.entry?.model?.[0];
         if (event.entry === undefined && event.result === undefined) failed(tool, "tool call did not complete");
-        else if (result?.role === "toolResult" && result.isError) failed(tool, "tool returned an error");
+        else if (result?.role === "toolResult" && result.isError) failed(tool, failureText(result));
         tool.end();
         this.#tools.delete(event.toolCallId);
         return;
