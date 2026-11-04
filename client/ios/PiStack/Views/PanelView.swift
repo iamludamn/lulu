@@ -10,6 +10,7 @@ struct PanelView: View {
     let onDraft: (String) -> Void
     let onDrop: (String) -> Void
     let onOrder: ([String]) -> Void
+    let onCompose: () -> Void
     @Environment(\.topInset) private var topInset
     @State private var editing = false
 
@@ -42,8 +43,21 @@ struct PanelView: View {
             }
         }
         .contentMargins(.top, topInset, for: .scrollContent)
+        .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         .doneBar(editing) { editing = false }
         .onChange(of: widgets.isEmpty) { _, empty in if empty { editing = false } }
+    }
+
+    private var composer: some View {
+        Button(action: onCompose) {
+            Text("给 \(botName) 发消息")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 13)
+        }
+        .buttonStyle(.plain)
+        .composerChrome()
     }
 
     private func rows(_ widgets: [PanelWidget]) -> [[PanelWidget]] {
