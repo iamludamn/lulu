@@ -11,10 +11,6 @@
         "class_name": "Bot",
       },
       {
-        "name": "REGISTRY",
-        "class_name": "Registry",
-      },
-      {
         "name": "MEMORY",
         "class_name": "Memory",
       },
@@ -35,11 +31,19 @@
       "tag": "v1",
       "new_sqlite_classes": ["Bot", "Registry", "Memory", "Artifact"],
     },
+    {
+      "tag": "v2",
+      "deleted_classes": ["Registry"],
+    },
   ],
   "assets": {
     "directory": "../../client/web/dist",
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"],
+  },
+  "vars": {
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "https://api.honeycomb.io",
+    "OTEL_SERVICE_NAME": "lulu",
   },
   "observability": {
     "enabled": true,

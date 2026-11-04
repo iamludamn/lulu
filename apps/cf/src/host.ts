@@ -1,6 +1,7 @@
 import { createInlineCodemodeSandbox } from "@earendil-works/pi-codemode/cloudflare";
 import { mcpStore } from "@lulu/core/agent/mcp-store.js";
 import type { DurableHost, DurableSockets, Environment, KeyValue, Socket } from "@lulu/core/host/types.js";
+import { createTelemetry } from "@lulu/core/telemetry/otlp.js";
 import type { ApiHost } from "@lulu/core/server/api.js";
 
 const stringsOf = (env: Env): Environment =>
@@ -11,13 +12,6 @@ const kvOf = (kv: KVNamespace): KeyValue => ({
   put: (key, value) => kv.put(key, value),
   list: async (prefix) => (await kv.list({ prefix })).keys.map((key) => key.name),
 });
-
-const rejectSocket = (code: number, reason: string): Response => {
-  const pair = new WebSocketPair();
-  pair[1].accept();
-  pair[1].close(code, reason);
-  return new Response(null, { status: 101, webSocket: pair[0] });
-};
 
 const socketsOf = (ctx: DurableObjectState): DurableSockets => ({
   all: () => ctx.getWebSockets(),
@@ -30,7 +24,6 @@ const socketsOf = (ctx: DurableObjectState): DurableSockets => ({
     server.serializeAttachment(attachment);
     return { server, response: new Response(null, { status: 101, webSocket: pair[0] }) };
   },
-  reject: rejectSocket,
 });
 
 const connect: DurableHost["connect"] = async (url, headers, handlers) => {
@@ -47,10 +40,12 @@ export function durableHost(ctx: DurableObjectState, env: Env): DurableHost {
   const name = ctx.id.name;
   if (name === undefined) throw new Error("Object must be addressed by name");
   const environment = stringsOf(env);
+  const telemetry = createTelemetry(environment, (task) => ctx.waitUntil(task));
   const kv = kvOf(env.LULU_MCP);
   const mcp = mcpStore({ env: environment, kv }, name);
   return {
     env: environment,
+    telemetry,
     readMcpAuth: () => mcp.readAuth(),
     writeMcpAuth: (content) => mcp.writeAuth(content),
     name,
@@ -68,19 +63,19 @@ export function durableHost(ctx: DurableObjectState, env: Env): DurableHost {
       delete: () => ctx.storage.deleteAlarm(),
     },
     sockets: socketsOf(ctx),
-    objects: { BOTS: env.BOTS, MEMORY: env.MEMORY, ARTIFACTS: env.ARTIFACTS, REGISTRY: env.REGISTRY },
+    objects: { BOTS: env.BOTS, MEMORY: env.MEMORY, ARTIFACTS: env.ARTIFACTS },
     kv,
     sandbox: createInlineCodemodeSandbox(),
     connect,
-    blockConcurrencyWhile: (task) => ctx.blockConcurrencyWhile(task),
     abort: (reason) => ctx.abort(reason),
   };
 }
 
-export function workerHost(env: Env): ApiHost {
+export function workerHost(env: Env, ctx: ExecutionContext): ApiHost {
+  const environment = stringsOf(env);
   return {
-    env: stringsOf(env),
-    objects: { BOTS: env.BOTS, MEMORY: env.MEMORY, ARTIFACTS: env.ARTIFACTS, REGISTRY: env.REGISTRY },
-    sockets: { reject: rejectSocket },
+    env: environment,
+    telemetry: createTelemetry(environment, (task) => ctx.waitUntil(task)),
+    objects: { BOTS: env.BOTS, MEMORY: env.MEMORY, ARTIFACTS: env.ARTIFACTS },
   };
 }

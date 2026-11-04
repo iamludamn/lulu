@@ -1,8 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
-import type { BotRecord } from "@lulu/core/registry/bots.js";
 import { BotSession } from "@lulu/core/session/bot.js";
-import { RegistryObject } from "@lulu/core/registry/object.js";
 import { MemoryObject } from "@lulu/core/memory/object.js";
 import { ArtifactObject } from "@lulu/core/artifact/object.js";
 import { durableHost } from "./host.js";
@@ -37,36 +35,6 @@ export class Bot extends DurableObject<Env> {
 
   override webSocketError(socket: WebSocket): void {
     this.#session.webSocketError(socket);
-  }
-}
-
-export class Registry extends DurableObject<Env> {
-  readonly #registry: RegistryObject;
-
-  constructor(ctx: DurableObjectState, env: Env) {
-    super(ctx, env);
-    this.#registry = new RegistryObject(durableHost(ctx, env));
-    void ctx.blockConcurrencyWhile(() => this.#registry.boot());
-  }
-
-  list(): Promise<BotRecord[]> {
-    return this.#registry.list();
-  }
-
-  get(id: string): Promise<BotRecord | undefined> {
-    return this.#registry.get(id);
-  }
-
-  add(record: BotRecord): Promise<void> {
-    return this.#registry.add(record);
-  }
-
-  rename(id: string, name: string): Promise<BotRecord | undefined> {
-    return this.#registry.rename(id, name);
-  }
-
-  remove(id: string): Promise<void> {
-    return this.#registry.remove(id);
   }
 }
 
