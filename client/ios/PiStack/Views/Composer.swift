@@ -33,10 +33,16 @@ struct Composer: View {
             }
         }
         .padding(.trailing, canSend ? 0 : 14)
-        .frame(minHeight: 48)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 24, style: .continuous))
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
+        .composerChrome()
         .animation(.snappy(duration: 0.2), value: canSend)
+    }
+}
+
+extension View {
+    func composerChrome() -> some View {
+        frame(minHeight: 48)
+            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 24, style: .continuous))
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
     }
 }
