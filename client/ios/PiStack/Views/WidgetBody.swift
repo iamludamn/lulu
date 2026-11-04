@@ -245,25 +245,29 @@ struct WidgetBody: View {
     }
 
     private func media(_ src: String, caption: String?) -> some View {
-        AsyncImage(url: resolve(src)) { phase in
-            switch phase {
-            case .success(let image): image.resizable().scaledToFill()
-            case .failure: Image(systemName: "photo").font(.largeTitle).foregroundStyle(.secondary)
-            default: ProgressView()
+        Color.clear
+            .overlay {
+                AsyncImage(url: resolve(src)) { phase in
+                    switch phase {
+                    case .success(let image): image.resizable().scaledToFill()
+                    case .failure: Image(systemName: "photo").font(.largeTitle).foregroundStyle(.secondary)
+                    default: ProgressView()
+                    }
+                }
             }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipShape(.rect(cornerRadius: 16, style: .continuous))
-        .overlay(alignment: .bottomLeading) {
-            if let caption {
-                Text(caption)
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .glassEffect(.regular, in: .capsule)
-                    .padding(8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(height: widget.size == .l ? 240 : nil)
+            .clipShape(.rect(cornerRadius: 16, style: .continuous))
+            .overlay(alignment: .bottomLeading) {
+                if let caption {
+                    Text(caption)
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .glassEffect(.regular, in: .capsule)
+                        .padding(8)
+                }
             }
-        }
     }
 
     private func resolve(_ src: String) -> URL? {

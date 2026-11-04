@@ -40,6 +40,20 @@ func keptOrigins(_ snapshot: BotStore.Snapshot) -> Set<String> {
     return kept
 }
 
+private func awaiting(_ snapshot: BotStore.Snapshot, entries: [ChatEntry]) -> Bool {
+    let sending = snapshot.requests.contains { request in
+        guard request.state == .sending, case .submit = request.command.kind else { return false }
+        return true
+    }
+    if sending { return true }
+    let finals = entries.filter(\.final).map(\.position)
+    return (snapshot.progress?.messages ?? []).contains { message in
+        guard message.error == nil, message.state != .done else { return false }
+        guard let placed = message.entry.flatMap { Double($0) } else { return true }
+        return !finals.contains { $0 > placed }
+    }
+}
+
 func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
     var rows: [ChatRow] = []
     var last: Date?
@@ -48,22 +62,28 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
         guard request.state == .sending, case .makeWidget(let origin) = request.command.kind else { return nil }
         return origin
     })
-    for item in timeline(chatEntries(snapshot.view, hidden: snapshot.progress?.hiddenEntries ?? []), snapshot.progress?.messages ?? []) {
+    let entries = chatEntries(snapshot.view, hidden: snapshot.progress?.hiddenEntries ?? [])
+    let messages = snapshot.progress?.messages ?? []
+    let submitted = Set(messages.compactMap(\.requestId))
+    func stamp(_ time: Date?, before id: String) {
+        guard let time else { return }
+        if last == nil || time.timeIntervalSince(last!) > stampGap {
+            rows.append(ChatRow(id: "stamp-\(id)", role: .stamp, text: stampText(time)))
+        }
+        last = time
+    }
+    for item in timeline(entries, messages) {
         switch item {
         case .entry(let entry):
             if entry.card != nil && kept.contains(entry.id) { continue }
-            if let time = entry.time {
-                if last == nil || time.timeIntervalSince(last!) > stampGap {
-                    rows.append(ChatRow(id: "stamp-\(entry.id)", role: .stamp, text: stampText(time)))
-                }
-                last = time
-            }
+            stamp(entry.time, before: entry.id)
             var row = ChatRow(id: entry.id, role: entry.role == .user ? .user : .assistant, text: entry.text)
             row.card = entry.card
             row.read = entry.role == .user
             if making.contains(entry.id) { row.footer = .generating }
             rows.append(row)
         case .prompt(let message):
+            stamp(message.at.map { Date(timeIntervalSince1970: $0 / 1000) }, before: item.id)
             var row = ChatRow(id: item.id, role: .user, text: message.text)
             if message.error != nil {
                 row.footer = .failed(requestId: nil)
@@ -76,6 +96,8 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
     for request in snapshot.requests {
         switch request.command.kind {
         case .submit(let text):
+            if request.state != .failed && submitted.contains(request.id) { continue }
+            stamp(request.at, before: request.id)
             var row = ChatRow(id: request.id, role: .user, text: text)
             row.sending = request.state == .sending
             if request.state == .failed { row.footer = .failed(requestId: request.id) }
@@ -88,15 +110,15 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
         case .order: rows.append(notice(request, "order"))
         }
     }
-    let replying = snapshot.progress?.messages.contains { $0.state == .processing } ?? false
-    if live(of: snapshot.view).busy && (making.isEmpty || replying) {
-        var row = ChatRow(id: "live", role: .assistant, text: liveStatus(of: snapshot.view) ?? "")
-        row.typing = true
-        rows.append(row)
-    }
     rows = rows.filter { $0.role != .system || $0.notice != nil }
     if let last = rows.lastIndex(where: { $0.role == .user }), rows[last].footer == nil, rows[last].read {
         rows[last].footer = .read
+    }
+    if awaiting(snapshot, entries: entries) {
+        let text = liveStatus(of: snapshot.view) ?? subtasks(of: snapshot.progress).first(where: \.running)?.description ?? ""
+        var row = ChatRow(id: "live", role: .assistant, text: text)
+        row.typing = true
+        rows.append(row)
     }
     for index in rows.indices where rows[index].isBubble {
         let next = index + 1 < rows.count ? rows[index + 1].role : nil

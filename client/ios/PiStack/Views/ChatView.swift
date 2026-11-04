@@ -30,7 +30,7 @@ struct ChatView: View {
                         MessageRow(row: row, store: store, botId: bot.id, api: api, onOpen: openArtifact, onKept: onKept)
                             .equatable()
                             .padding(.bottom, row.tail ? 10 : 0)
-                            .transition(transition(row))
+                            .transition(.opacity.animation(.easeOut(duration: 0.2)))
                     }
                     Color.clear.frame(height: 1).id(Self.bottom)
                 }
@@ -38,18 +38,20 @@ struct ChatView: View {
                 .padding(.top, 8)
                 .frame(maxWidth: 720)
                 .frame(maxWidth: .infinity)
-                .animation(.spring(duration: 0.45, bounce: 0), value: rows.map(\.id))
             }
             .defaultScrollAnchor(.bottom)
-            .defaultScrollAnchor(.bottom, for: .sizeChanges)
+            .defaultScrollAnchor(pinned ? .bottom : nil, for: .sizeChanges)
             .scrollClipDisabled()
             .contentMargins(.top, topInset, for: .scrollContent)
             .scrollDismissesKeyboard(.interactively)
             .onScrollGeometryChange(for: Bool.self) { $0.visibleRect.maxY > $0.contentSize.height - 24 } action: { _, near in
                 pinned = near
             }
-            .onChange(of: signature(rows)) {
-                if pinned { proxy.scrollTo(Self.bottom) }
+            .onChange(of: sent) {
+                Task {
+                    try? await Task.sleep(for: .milliseconds(60))
+                    proxy.scrollTo(Self.bottom)
+                }
             }
             .overlay(alignment: .bottomTrailing) {
                 if !pinned {
@@ -85,28 +87,15 @@ struct ChatView: View {
         .animation(.snappy, value: reconnecting)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if snapshot.halt == nil {
-                Composer(draft: $draft, connected: connected, busy: busy, placeholder: placeholder, focused: composing, onSend: send)
+                Composer(draft: $draft, busy: busy, placeholder: placeholder, focused: composing, onSend: send)
             }
         }
         .sensoryFeedback(.impact(weight: .light), trigger: sent)
         .sensoryFeedback(.success, trigger: busy) { old, new in old && !new }
     }
 
-    private func transition(_ row: ChatRow) -> AnyTransition {
-        if row.card != nil { return .asymmetric(insertion: .scale(scale: 0.85).combined(with: .opacity), removal: .identity) }
-        guard row.role == .user || row.typing else { return .identity }
-        return .asymmetric(
-            insertion: .scale(scale: 0.92, anchor: row.role == .user ? .bottomTrailing : .bottomLeading).combined(with: .opacity),
-            removal: .identity
-        )
-    }
-
     private var placeholder: String {
         connected ? "给 \(bot.name) 发消息" : "连接中…"
-    }
-
-    private func signature(_ rows: [ChatRow]) -> [Int] {
-        [rows.count, rows.last?.typing == true ? 1 : 0, rows.last?.text.count ?? 0]
     }
 
     private func send() {

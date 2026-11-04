@@ -9,6 +9,7 @@ public struct ChatEntry: Identifiable, Sendable {
     public let text: String
     public let card: SentCard?
     public let time: Date?
+    public let final: Bool
 }
 
 public struct Live: Sendable {
@@ -25,7 +26,7 @@ public enum TimelineItem: Identifiable, Sendable {
     public var id: String {
         switch self {
         case .entry(let entry): entry.id
-        case .prompt(let message): "prompt-\(message.id)"
+        case .prompt(let message): message.requestId ?? "prompt-\(message.id)"
         }
     }
 }
@@ -52,15 +53,16 @@ func messageTime(_ model: [JSONValue]?) -> Date? {
     return nil
 }
 
-func sentEntries(_ model: [JSONValue]?, position: Double, time: Date?) -> [ChatEntry] {
+func sentEntries(_ model: [JSONValue]?, position: Double, time: Date?, delivered: Set<String>) -> [ChatEntry] {
     var entries: [ChatEntry] = []
     for message in model ?? [] {
         for block in message["content"]?.array ?? [] where block["type"]?.string == "toolCall" && block["name"]?.string == sendTool {
-            guard let id = block["id"]?.string, let input = block["arguments"] else { continue }
+            guard let id = block["id"]?.string, delivered.contains(id), let input = block["arguments"] else { continue }
+            let final = input["end_turn"] == .bool(true)
             if input["type"]?.string == "text", let content = input["content"]?.string, !content.isEmpty {
-                entries.append(ChatEntry(id: id, position: position, role: .assistant, text: content, card: nil, time: time))
+                entries.append(ChatEntry(id: id, position: position, role: .assistant, text: content, card: nil, time: time, final: final))
             } else if let card = sentCard(input["widget"]) {
-                entries.append(ChatEntry(id: id, position: position, role: .assistant, text: "", card: card, time: time))
+                entries.append(ChatEntry(id: id, position: position, role: .assistant, text: "", card: card, time: time, final: final))
             }
         }
     }
@@ -80,37 +82,43 @@ func sentCard(_ widget: JSONValue?) -> SentCard? {
     }
 }
 
-func finished(_ turn: [ConversationEntry]) -> Bool {
-    guard let reason = turn.last?.model?.last?["stopReason"]?.string else { return false }
-    return reason != "toolUse"
+func deliveredCalls(_ view: ConversationView?) -> Set<String> {
+    var delivered = Set<String>()
+    for entry in view?.entries ?? [] where entry.kind == "pi.tool-result" {
+        for message in entry.model ?? [] where message["role"]?.string == "toolResult" && message["isError"] != .bool(true) {
+            if let id = message["toolCallId"]?.string { delivered.insert(id) }
+        }
+    }
+    return delivered
 }
 
 public func chatEntries(_ view: ConversationView?, hidden: [String]) -> [ChatEntry] {
     let skipped = Set(hidden)
+    let delivered = deliveredCalls(view)
     var result: [ChatEntry] = []
     var turn: [ConversationEntry] = []
-    func close(settled: Bool) {
-        let sent = turn.flatMap { sentEntries($0.model, position: Double($0.id) ?? .infinity, time: messageTime($0.model)) }
+    func close(fallback: Bool) {
+        let sent = turn.flatMap { sentEntries($0.model, position: Double($0.id) ?? .infinity, time: messageTime($0.model), delivered: delivered) }
         if !sent.isEmpty {
             result += sent
-        } else if settled, let last = turn.last(where: { !messageText($0.model).isEmpty }) {
-            result.append(ChatEntry(id: last.id, position: Double(last.id) ?? .infinity, role: .assistant, text: messageText(last.model), card: nil, time: messageTime(last.model)))
+        } else if fallback, let last = turn.last(where: { !messageText($0.model).isEmpty }) {
+            result.append(ChatEntry(id: last.id, position: Double(last.id) ?? .infinity, role: .assistant, text: messageText(last.model), card: nil, time: messageTime(last.model), final: false))
         }
         turn = []
     }
     for entry in view?.entries ?? [] where !skipped.contains(entry.id) {
         switch entry.kind {
         case "pi.user":
-            close(settled: true)
+            close(fallback: true)
             let text = messageText(entry.model)
-            if !text.isEmpty { result.append(ChatEntry(id: entry.id, position: Double(entry.id) ?? .infinity, role: .user, text: text, card: nil, time: messageTime(entry.model))) }
+            if !text.isEmpty { result.append(ChatEntry(id: entry.id, position: Double(entry.id) ?? .infinity, role: .user, text: text, card: nil, time: messageTime(entry.model), final: false)) }
         case "pi.assistant":
             turn.append(entry)
         default:
             break
         }
     }
-    close(settled: finished(turn))
+    close(fallback: false)
     return result
 }
 

@@ -12,6 +12,7 @@ public final class BotStore {
         public let command: Command
         public var state: State
         public var error: String?
+        public let at: Date
 
         public var id: String { command.requestId }
     }
@@ -164,7 +165,7 @@ public final class BotStore {
 
     private func dispatch(_ command: Command) {
         snapshot.requests.removeAll { $0.id == command.requestId }
-        snapshot.requests.append(Request(command: command, state: .sending))
+        snapshot.requests.append(Request(command: command, state: .sending, at: .now))
         transmit(command.frame)
     }
 
