@@ -9,6 +9,7 @@ struct ChatView: View {
     var composing: FocusState<Bool>.Binding
     let onKept: (Page) -> Void
     @State private var pinned = true
+    @State private var dragging = false
     @State private var sent = 0
     @Environment(\.topInset) private var topInset
     @Environment(\.openArtifact) private var openArtifact
@@ -44,8 +45,11 @@ struct ChatView: View {
             .scrollClipDisabled()
             .contentMargins(.top, topInset, for: .scrollContent)
             .scrollDismissesKeyboard(.interactively)
+            .onScrollPhaseChange { _, phase in
+                dragging = phase == .interacting || phase == .decelerating
+            }
             .onScrollGeometryChange(for: Bool.self) { $0.visibleRect.maxY > $0.contentSize.height - 24 } action: { _, near in
-                pinned = near
+                if dragging || near { pinned = near }
             }
             .onChange(of: sent) {
                 Task {

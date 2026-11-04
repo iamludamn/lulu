@@ -42,14 +42,17 @@ func keptOrigins(_ snapshot: BotStore.Snapshot) -> Set<String> {
 
 private func awaiting(_ snapshot: BotStore.Snapshot, entries: [ChatEntry]) -> Bool {
     let sending = snapshot.requests.contains { request in
-        guard request.state == .sending, case .submit = request.command.kind else { return false }
+        guard snapshot.link == .online, request.state == .sending, case .submit = request.command.kind else { return false }
         return true
     }
     if sending { return true }
     let finals = entries.filter(\.final).map(\.position)
-    return (snapshot.progress?.messages ?? []).contains { message in
-        guard message.error == nil, message.state != .done else { return false }
-        guard let placed = message.entry.flatMap { Double($0) } else { return true }
+    let messages = snapshot.progress?.messages ?? []
+    let busy = live(of: snapshot.view).busy
+    return messages.contains { message in
+        let latest = message.id == messages.last?.id
+        guard message.error == nil, message.state != .done || (busy && latest) else { return false }
+        guard let placed = message.entry.flatMap({ Double($0) }) else { return true }
         return !finals.contains { $0 > placed }
     }
 }
