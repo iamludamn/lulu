@@ -19,13 +19,25 @@ public struct ConversationEntry: Decodable, Identifiable, Sendable {
     }
 }
 
-public struct ConversationView: Decodable, Sendable {
+public struct ConversationView: Sendable {
     public let entries: [ConversationEntry]
     public let docs: [String: JSONValue]
 }
 
+public struct ViewFrame: Decodable, Sendable {
+    let entries: [ConversationEntry]
+    let order: [String]
+    let docs: [String: JSONValue]
+
+    func applied(to view: ConversationView?) -> ConversationView {
+        var known = Dictionary(uniqueKeysWithValues: (view?.entries ?? []).map { ($0.id, $0) })
+        for entry in entries { known[entry.id] = entry }
+        return ConversationView(entries: order.compactMap { known[$0] }, docs: docs)
+    }
+}
+
 public enum ServerMessage: Decodable, Sendable {
-    case state(view: ConversationView, progress: SessionProgress, mcp: [McpStatus], panel: PanelState, assets: [AssetItem])
+    case state(view: ViewFrame, progress: SessionProgress, mcp: [McpStatus], panel: PanelState, assets: [AssetItem])
     case models(ModelConfig)
     case voice
     case result(requestId: String, error: String?)
@@ -37,7 +49,7 @@ public enum ServerMessage: Decodable, Sendable {
         switch try container.decode(String.self, forKey: .type) {
         case "state":
             self = .state(
-                view: try container.decode(ConversationView.self, forKey: .view),
+                view: try container.decode(ViewFrame.self, forKey: .view),
                 progress: try container.decode(SessionProgress.self, forKey: .progress),
                 mcp: try container.decode([McpStatus].self, forKey: .mcp),
                 panel: (try? container.decodeIfPresent(PanelState.self, forKey: .panel)) ?? PanelState(),

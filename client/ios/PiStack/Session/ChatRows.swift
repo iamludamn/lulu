@@ -90,7 +90,7 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
     }
     let state = live(of: snapshot.view)
     if state.busy {
-        var row = ChatRow(id: "live", role: .assistant, text: "")
+        var row = ChatRow(id: "live", role: .assistant, text: liveStatus(of: snapshot.view) ?? "")
         row.typing = true
         rows.append(row)
     }

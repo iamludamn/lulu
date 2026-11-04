@@ -67,22 +67,6 @@ public struct Api: Sendable {
         try JSONDecoder().decode(type, from: data)
     }
 
-    public func listBots() async throws -> [BotSummary] {
-        try decode([BotSummary].self, try await call("/api/bots", failure: "加载 bot 列表失败"))
-    }
-
-    public func createBot(name: String) async throws -> BotSummary {
-        try decode(BotSummary.self, try await call("/api/bots", method: "POST", body: ["name": name], failure: "创建 bot 失败"))
-    }
-
-    public func renameBot(_ id: String, name: String) async throws {
-        _ = try await call("/api/bots/\(id)", method: "PATCH", body: ["name": name], failure: "改名失败")
-    }
-
-    public func deleteBot(_ id: String) async throws {
-        _ = try await call("/api/bots/\(id)", method: "DELETE", failure: "删除失败")
-    }
-
     public func memory(_ id: String) async throws -> MemoryListing {
         try decode(MemoryListing.self, try await call("/api/bots/\(id)/memory", failure: "加载记忆失败"))
     }

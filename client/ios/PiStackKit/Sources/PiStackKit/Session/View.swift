@@ -79,6 +79,11 @@ func sentCard(_ widget: JSONValue?) -> SentCard? {
     }
 }
 
+func finished(_ turn: [ConversationEntry]) -> Bool {
+    guard let reason = turn.last?.model?.last?["stopReason"]?.string else { return false }
+    return reason != "toolUse"
+}
+
 public func chatEntries(_ view: ConversationView?, hidden: [String]) -> [ChatEntry] {
     let skipped = Set(hidden)
     var result: [ChatEntry] = []
@@ -104,7 +109,7 @@ public func chatEntries(_ view: ConversationView?, hidden: [String]) -> [ChatEnt
             break
         }
     }
-    close(settled: !live(of: view).busy)
+    close(settled: finished(turn))
     return result
 }
 
@@ -141,4 +146,22 @@ public func subtasks(of progress: SessionProgress?) -> [SubtaskProgress] {
 
 public func live(of view: ConversationView?) -> Live {
     Live(busy: view?.docs[liveDoc]?["run"] != nil)
+}
+
+public func liveStatus(of view: ConversationView?) -> String? {
+    guard live(of: view).busy else { return nil }
+    var answered = Set<String>()
+    for entry in (view?.entries ?? []).reversed() {
+        if entry.kind == "pi.user" { return nil }
+        for message in entry.model ?? [] {
+            if message["role"]?.string == "toolResult", let id = message["toolCallId"]?.string { answered.insert(id) }
+        }
+        guard entry.kind == "pi.assistant" else { continue }
+        let running = (entry.model ?? []).flatMap { $0["content"]?.array ?? [] }.compactMap { block -> String? in
+            guard block["type"]?.string == "toolCall", let name = block["name"]?.string, name != sendTool, let id = block["id"]?.string, !answered.contains(id) else { return nil }
+            return name
+        }
+        return running.isEmpty ? nil : "正在使用 " + running.joined(separator: "、")
+    }
+    return nil
 }

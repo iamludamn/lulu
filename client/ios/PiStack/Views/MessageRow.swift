@@ -135,7 +135,12 @@ struct MessageRow: View, Equatable {
     }
 
     private var live: some View {
-        TypingDots()
+        HStack(spacing: 8) {
+            TypingDots()
+            if !row.text.isEmpty {
+                Text(row.text).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
             .frosted(20)
@@ -147,6 +152,7 @@ struct MessageRow: View, Equatable {
             }
             .padding(.leading, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .animation(.snappy, value: row.text)
             .accessibilityLabel("助手正在输入")
     }
 
