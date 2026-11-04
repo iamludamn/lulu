@@ -115,23 +115,22 @@ export function trackSnapshot<T>(
   compute: (context: Context) => Promise<T>,
   sink: { replace(context: Context, value: T): void },
   context: Context,
+  onError: (error: unknown) => void,
 ): () => void {
   let queue: Promise<void> = Promise.resolve();
-  let failed = false;
   const refresh = (): void => {
-    if (failed) return;
-    queue = queue
-      .then(async () => sink.replace(context, await compute(context)))
-      .catch((error: unknown) => {
-        failed = true;
-        console.error("snapshot refresh stopped", error);
-      });
+    queue = queue.then(async () => sink.replace(context, await compute(context))).catch(onError);
   };
   const unsubscribe = harness.subscribeCommits(() => setTimeout(refresh));
   refresh();
   return unsubscribe;
 }
 
-export function trackProgress(harness: Harness, progress: { replace(context: Context, value: SessionProgress): void }, context: Context): () => void {
-  return trackSnapshot(harness, (ctx) => computeProgress(harness, ctx), progress, context);
+export function trackProgress(
+  harness: Harness,
+  progress: { replace(context: Context, value: SessionProgress): void },
+  context: Context,
+  onError: (error: unknown) => void,
+): () => void {
+  return trackSnapshot(harness, (ctx) => computeProgress(harness, ctx), progress, context, onError);
 }
