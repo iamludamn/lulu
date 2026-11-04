@@ -5,7 +5,7 @@ import type { MessageProgress, MessageState, SessionProgress, SubtaskProgress } 
 import { DelegateIndex, RunFamily, type RunDoc } from "../delegate/runs.js";
 import { DeliveryDoc, MakeDoc } from "../send/doc.js";
 
-export type ChatMessage = { requestId: string; id: number | null; text: string; after: number | null };
+export type ChatMessage = { requestId: string; id: number | null; text: string; after: number | null; at: number };
 
 export function lastEntryId(view: ConversationView | undefined): number | null {
   const last = view?.entries.at(-1);
@@ -25,7 +25,7 @@ export async function recordChatMessage(harness: Harness, view: { readonly value
   await harness.commit(async (tx) => {
     const chat = await tx.doc(ChatDoc);
     if (chat.messages.some((message) => message.requestId === requestId)) return;
-    chat.messages.push({ requestId, id: null, text, after: lastEntryId(view.value) });
+    chat.messages.push({ requestId, id: null, text, after: lastEntryId(view.value), at: Date.now() });
   }, BACKGROUND_CONTEXT);
 }
 
@@ -79,6 +79,8 @@ export async function computeProgress(harness: Harness, context: Context): Promi
     const pending = subtasks.some((subtask) => subtask.running) || (await noticePending(harness, runs, id, context));
     messages.push({
       id: message.id,
+      requestId: message.requestId,
+      at: message.at ?? null,
       entry: record?.entry ? String(record.entry) : null,
       answer: record?.answer ? String(record.answer) : null,
       text: message.text,

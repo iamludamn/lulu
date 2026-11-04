@@ -22,6 +22,8 @@ export interface SubtaskProgress {
 
 export interface MessageProgress {
   id: number;
+  requestId: string;
+  at: number | null;
   entry: string | null;
   answer: string | null;
   text: string;
