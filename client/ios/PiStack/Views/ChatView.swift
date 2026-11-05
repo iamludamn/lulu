@@ -11,6 +11,7 @@ struct ChatView: View {
     @State private var pinned = true
     @State private var dragging = false
     @State private var sent = 0
+    @State private var limit = 40
     @Environment(\.topInset) private var topInset
     @Environment(\.openArtifact) private var openArtifact
 
@@ -27,7 +28,15 @@ struct ChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 4) {
-                    ForEach(rows) { row in
+                    if rows.count > limit {
+                        Button("更早的消息") { revealEarlier(rows, proxy) }
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .id("earlier")
+                    }
+                    ForEach(rows.suffix(limit)) { row in
                         MessageRow(row: row, store: store, botId: bot.id, api: api, onOpen: openArtifact, onKept: onKept)
                             .equatable()
                             .padding(.bottom, row.tail ? 10 : 0)
@@ -100,6 +109,15 @@ struct ChatView: View {
 
     private var placeholder: String {
         connected ? "给 \(bot.name) 发消息" : "连接中…"
+    }
+
+    private func revealEarlier(_ rows: [ChatRow], _ proxy: ScrollViewProxy) {
+        guard let anchor = rows.suffix(limit).first?.id else { return }
+        limit += 40
+        Task {
+            try? await Task.sleep(for: .milliseconds(60))
+            proxy.scrollTo(anchor, anchor: .top)
+        }
     }
 
     private func send() {
