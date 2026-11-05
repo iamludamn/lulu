@@ -194,7 +194,7 @@ export class SandboxExecutionEnv implements ExecutionEnv {
     const emit = (stream: "stdout" | "stderr") => (text: string): void => options?.onOutput?.(text, context, { stream });
     let handle;
     try {
-      await this.#sandbox.setTimeout(options?.timeout === undefined ? UNBOUNDED_COMMAND_MS : options.timeout * 1000 + SANDBOX_IDLE_MS);
+      await this.#extend(options?.timeout === undefined ? UNBOUNDED_COMMAND_MS : options.timeout * 1000 + SANDBOX_IDLE_MS);
       handle = await this.#sandbox.commands.run(line, {
         background: true,
         cwd: options?.cwd === undefined ? this.cwd : resolvePath(this.cwd, options.cwd),
@@ -220,8 +220,17 @@ export class SandboxExecutionEnv implements ExecutionEnv {
       return err(new ExecutionError("unknown", toError(error).message, toError(error)));
     } finally {
       signal?.removeEventListener("abort", stop);
-      await this.#sandbox.setTimeout(SANDBOX_IDLE_MS).catch(() => undefined);
+      await this.#settle().catch(() => undefined);
     }
+  }
+
+  async #extend(ms: number): Promise<void> {
+    const { endAt } = await this.#sandbox.getInfo();
+    if (endAt.getTime() - Date.now() < ms) await this.#sandbox.setTimeout(ms);
+  }
+
+  async #settle(): Promise<void> {
+    if ((await this.#sandbox.commands.list()).length === 0) await this.#sandbox.setTimeout(SANDBOX_IDLE_MS);
   }
 
   async openTextLineReader(): Promise<Result<never, FileError>> {
