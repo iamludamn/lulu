@@ -66,7 +66,7 @@ struct ChatView: View {
             .onScrollGeometryChange(for: Bool.self) { $0.visibleRect.maxY > $0.contentSize.height - 24 } action: { _, near in
                 if dragging || near { pinned = near }
             }
-            .onScrollGeometryChange(for: Extent.self) { Extent(offset: $0.contentOffset.y, height: $0.contentSize.height) } action: { _, extent in
+            .onScrollGeometryChange(for: Extent.self) { Extent(offset: $0.contentOffset.y + $0.contentInsets.top, height: $0.contentSize.height) } action: { _, extent in
                 if let reveal = metrics.reveal, extent.height != reveal.height {
                     metrics.reveal = nil
                     position.scrollTo(y: reveal.offset + extent.height - reveal.height)
