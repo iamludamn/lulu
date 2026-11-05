@@ -12,6 +12,7 @@ struct ChatView: View {
     @State private var dragging = false
     @State private var sent = 0
     @State private var floor: String?
+    @State private var revealing = false
     @Environment(\.topInset) private var topInset
     @Environment(\.openArtifact) private var openArtifact
 
@@ -31,7 +32,7 @@ struct ChatView: View {
             ScrollView {
                 VStack(spacing: 4) {
                     if start > 0 {
-                        Button("更早的消息") { revealEarlier(rows, start, proxy) }
+                        Button("更早的消息") { revealEarlier(rows, start) }
                             .buttonStyle(.plain)
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(.secondary)
@@ -53,7 +54,7 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity)
             }
             .defaultScrollAnchor(.bottom)
-            .defaultScrollAnchor(pinned ? .bottom : nil, for: .sizeChanges)
+            .defaultScrollAnchor(pinned || revealing ? .bottom : nil, for: .sizeChanges)
             .scrollClipDisabled()
             .contentMargins(.top, topInset, for: .scrollContent)
             .scrollDismissesKeyboard(.interactively)
@@ -117,12 +118,12 @@ struct ChatView: View {
         connected ? "给 \(bot.name) 发消息" : "连接中…"
     }
 
-    private func revealEarlier(_ rows: [ChatRow], _ start: Int, _ proxy: ScrollViewProxy) {
-        let anchor = rows[start].id
+    private func revealEarlier(_ rows: [ChatRow], _ start: Int) {
+        revealing = true
         floor = rows[max(0, start - Self.page)].id
         Task {
-            try? await Task.sleep(for: .milliseconds(60))
-            proxy.scrollTo(anchor, anchor: .top)
+            try? await Task.sleep(for: .milliseconds(300))
+            revealing = false
         }
     }
 

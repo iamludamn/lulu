@@ -121,8 +121,9 @@ struct HomeView: View {
             withAnimation(.easeOut(duration: 0.15)) { veiled = true }
             try? await Task.sleep(for: .milliseconds(150))
             withTransaction(Transaction(animation: nil)) { page = .chat }
-            composing = true
             withAnimation(.easeIn(duration: 0.25)) { veiled = false }
+            try? await Task.sleep(for: .milliseconds(250))
+            composing = true
         }
     }
 
