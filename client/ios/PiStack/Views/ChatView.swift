@@ -26,7 +26,7 @@ struct ChatView: View {
         let rows = chatRows(snapshot)
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 4) {
+                VStack(spacing: 4) {
                     ForEach(rows) { row in
                         MessageRow(row: row, store: store, botId: bot.id, api: api, onOpen: openArtifact, onKept: onKept)
                             .equatable()
@@ -84,7 +84,7 @@ struct ChatView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .glassEffect(.regular, in: .capsule)
-                .padding(.top, 4)
+                .padding(.top, topInset + 4)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }

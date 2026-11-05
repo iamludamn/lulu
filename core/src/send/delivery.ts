@@ -12,7 +12,7 @@ export const NUDGE_PROMPT =
   "Do not assume an earlier acknowledgement delivered the result. Deliver it now by actually calling send_to_user with end_turn true. " +
   "If you cannot tell what they last asked, say you may have missed it and ask them to resend; never claim work you cannot see.";
 
-type Entries = readonly { id?: unknown; kind?: unknown; model?: unknown }[];
+export type Entries = readonly { id?: unknown; kind?: unknown; model?: unknown }[];
 
 export type Owed = { message: number; requestId: string };
 

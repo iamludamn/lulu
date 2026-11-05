@@ -166,6 +166,7 @@ export class BotSession {
           this.#broadcastState();
         },
       },
+      () => this.#view.value.entries,
       BACKGROUND_CONTEXT,
       this.#snapshotFailed("progress"),
     );

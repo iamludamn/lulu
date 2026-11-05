@@ -3,6 +3,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { type ConversationView, defineDoc, type Harness, type SubmissionId } from "@earendil-works/pi-durable";
 import type { MessageProgress, MessageState, SessionProgress, SubtaskProgress } from "../protocol/contract.js";
 import { DelegateIndex, RunFamily, type RunDoc } from "../delegate/runs.js";
+import { owedDeliveries, type Entries } from "../send/delivery.js";
 import { DeliveryDoc, MakeDoc } from "../send/doc.js";
 
 export type ChatMessage = { requestId: string; id: number | null; text: string; after: number | null; at: number };
@@ -65,10 +66,11 @@ function stateOf(status: string | undefined, pending: boolean): MessageState {
   return "done";
 }
 
-export async function computeProgress(harness: Harness, context: Context): Promise<SessionProgress> {
+export async function computeProgress(harness: Harness, entries: () => Entries, context: Context): Promise<SessionProgress> {
   const chat = await harness.snapshot(ChatDoc, context);
   const index = await harness.snapshot(DelegateIndex, context);
   const runs = (await Promise.all((index?.ids ?? []).map((id) => harness.snapshot(RunFamily, id, context)))).filter((run): run is RunDoc => run !== undefined);
+  const owed = new Set((await owedDeliveries(harness, entries(), context)).map((item) => item.message));
   const messages: MessageProgress[] = [];
   for (const message of chat?.messages ?? []) {
     if (message.id === null) continue;
@@ -85,7 +87,7 @@ export async function computeProgress(harness: Harness, context: Context): Promi
       answer: record?.answer ? String(record.answer) : null,
       text: message.text,
       after: message.after,
-      state: stateOf(record?.status, pending),
+      state: owed.has(message.id) ? "processing" : stateOf(record?.status, pending),
       error: record?.status === "unanswered" && record.reason !== "aborted" ? record.reason : null,
       subtasks,
     });
@@ -131,8 +133,9 @@ export function trackSnapshot<T>(
 export function trackProgress(
   harness: Harness,
   progress: { replace(context: Context, value: SessionProgress): void },
+  entries: () => Entries,
   context: Context,
   onError: (error: unknown) => void,
 ): () => void {
-  return trackSnapshot(harness, (ctx) => computeProgress(harness, ctx), progress, context, onError);
+  return trackSnapshot(harness, (ctx) => computeProgress(harness, entries, ctx), progress, context, onError);
 }
