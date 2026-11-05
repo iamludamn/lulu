@@ -44,9 +44,7 @@ struct HomeView: View {
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
-        .overlay {
-            if veiled { Wallpaper().transition(.opacity) }
-        }
+        .opacity(veiled ? 0 : 1)
         .environment(\.keepTargets, targets)
         .environment(\.topInset, barBottom)
         .environment(\.keepPull) { page, progress in pull = progress > 0 ? (page, progress) : nil }
@@ -123,10 +121,8 @@ struct HomeView: View {
             withAnimation(.easeOut(duration: 0.15)) { veiled = true }
             try? await Task.sleep(for: .milliseconds(150))
             withTransaction(Transaction(animation: nil)) { page = .chat }
-            try? await Task.sleep(for: .milliseconds(50))
-            withAnimation(.easeOut(duration: 0.25)) { veiled = false }
-            try? await Task.sleep(for: .milliseconds(250))
             composing = true
+            withAnimation(.easeIn(duration: 0.25)) { veiled = false }
         }
     }
 
