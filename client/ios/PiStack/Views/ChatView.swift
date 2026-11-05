@@ -11,11 +11,12 @@ struct ChatView: View {
     @State private var pinned = true
     @State private var dragging = false
     @State private var sent = 0
-    @State private var limit = 40
+    @State private var floor: String?
     @Environment(\.topInset) private var topInset
     @Environment(\.openArtifact) private var openArtifact
 
     private static let bottom = "bottom"
+    private static let page = 40
     private static let suggestions = ["今天有什么安排？", "把我关心的数据做成组件", "总结一下你记住了我什么"]
 
     private var snapshot: BotStore.Snapshot { store.snapshot }
@@ -25,18 +26,20 @@ struct ChatView: View {
 
     var body: some View {
         let rows = chatRows(snapshot)
+        let start = floor.flatMap { id in rows.firstIndex { $0.id == id } } ?? max(0, rows.count - Self.page)
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 4) {
-                    if rows.count > limit {
-                        Button("更早的消息") { revealEarlier(rows, proxy) }
+                    if start > 0 {
+                        Button("更早的消息") { revealEarlier(rows, start, proxy) }
+                            .buttonStyle(.plain)
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 8)
                             .id("earlier")
                     }
-                    ForEach(rows.suffix(limit)) { row in
+                    ForEach(rows[start...]) { row in
                         MessageRow(row: row, store: store, botId: bot.id, api: api, onOpen: openArtifact, onKept: onKept)
                             .equatable()
                             .padding(.bottom, row.tail ? 10 : 0)
@@ -59,6 +62,9 @@ struct ChatView: View {
             }
             .onScrollGeometryChange(for: Bool.self) { $0.visibleRect.maxY > $0.contentSize.height - 24 } action: { _, near in
                 if dragging || near { pinned = near }
+            }
+            .onChange(of: rows.count > Self.page, initial: true) { _, long in
+                if long, floor == nil { floor = rows[rows.count - Self.page].id }
             }
             .onChange(of: sent) {
                 Task {
@@ -111,9 +117,9 @@ struct ChatView: View {
         connected ? "给 \(bot.name) 发消息" : "连接中…"
     }
 
-    private func revealEarlier(_ rows: [ChatRow], _ proxy: ScrollViewProxy) {
-        guard let anchor = rows.suffix(limit).first?.id else { return }
-        limit += 40
+    private func revealEarlier(_ rows: [ChatRow], _ start: Int, _ proxy: ScrollViewProxy) {
+        let anchor = rows[start].id
+        floor = rows[max(0, start - Self.page)].id
         Task {
             try? await Task.sleep(for: .milliseconds(60))
             proxy.scrollTo(anchor, anchor: .top)
