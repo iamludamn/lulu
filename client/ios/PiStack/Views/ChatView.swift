@@ -12,7 +12,8 @@ struct ChatView: View {
     @State private var dragging = false
     @State private var sent = 0
     @State private var floor: String?
-    @State private var revealing = false
+    @State private var position = ScrollPosition()
+    @State private var metrics = Metrics()
     @Environment(\.topInset) private var topInset
     @Environment(\.openArtifact) private var openArtifact
 
@@ -54,7 +55,8 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity)
             }
             .defaultScrollAnchor(.bottom)
-            .defaultScrollAnchor(pinned || revealing ? .bottom : nil, for: .sizeChanges)
+            .defaultScrollAnchor(pinned ? .bottom : nil, for: .sizeChanges)
+            .scrollPosition($position)
             .scrollClipDisabled()
             .contentMargins(.top, topInset, for: .scrollContent)
             .scrollDismissesKeyboard(.interactively)
@@ -63,6 +65,13 @@ struct ChatView: View {
             }
             .onScrollGeometryChange(for: Bool.self) { $0.visibleRect.maxY > $0.contentSize.height - 24 } action: { _, near in
                 if dragging || near { pinned = near }
+            }
+            .onScrollGeometryChange(for: Extent.self) { Extent(offset: $0.contentOffset.y, height: $0.contentSize.height) } action: { _, extent in
+                if let reveal = metrics.reveal, extent.height != reveal.height {
+                    metrics.reveal = nil
+                    position.scrollTo(y: reveal.offset + extent.height - reveal.height)
+                }
+                metrics.extent = extent
             }
             .onChange(of: rows.count > Self.page, initial: true) { _, long in
                 if long, floor == nil { floor = rows[rows.count - Self.page].id }
@@ -119,12 +128,8 @@ struct ChatView: View {
     }
 
     private func revealEarlier(_ rows: [ChatRow], _ start: Int) {
-        revealing = true
+        metrics.reveal = metrics.extent
         floor = rows[max(0, start - Self.page)].id
-        Task {
-            try? await Task.sleep(for: .milliseconds(300))
-            revealing = false
-        }
     }
 
     private func send() {
@@ -172,4 +177,14 @@ struct ChatView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 24)
     }
+}
+
+private struct Extent: Equatable {
+    var offset: CGFloat = 0
+    var height: CGFloat = 0
+}
+
+private final class Metrics {
+    var extent = Extent()
+    var reveal: Extent?
 }

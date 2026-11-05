@@ -44,7 +44,9 @@ struct HomeView: View {
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
-        .opacity(veiled ? 0 : 1)
+        .overlay {
+            if veiled { Wallpaper().transition(.opacity) }
+        }
         .environment(\.keepTargets, targets)
         .environment(\.topInset, barBottom)
         .environment(\.keepPull) { page, progress in pull = progress > 0 ? (page, progress) : nil }
