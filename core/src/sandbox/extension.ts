@@ -27,7 +27,7 @@ async function connectSandbox(api: ToolExecutionApi, sandboxes: SandboxProvider 
   if (!own?.key || sandboxes === undefined) return { error: NO_ENVIRONMENT };
   const holder = own.owner ?? api.conversationId;
   const shared = own.owner === null ? own : await api.snapshot(SandboxDoc, holder, context);
-  const createKey = (epoch: number): string => (own.owner === null ? own.key! : `shared:${epoch}`);
+  const createKey = (epoch: number): string => (own.owner === null ? `${own.key}:${epoch}` : `shared:${epoch}`);
   try {
     const handle = shared?.id ? { id: shared.id, cwd: shared.cwd } : await bindSandbox(api, holder, createKey(shared?.epoch ?? 0), sandboxes, context);
     try {
