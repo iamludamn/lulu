@@ -60,6 +60,7 @@ function failureText(result: ToolResultMessage): string {
 class ConversationTrace {
   readonly #telemetry: TelemetryContext;
   readonly #attributes: SpanAttributes;
+  readonly #scope: SpanAttributes;
   #run: Held | undefined = undefined;
   #totals = emptyTotals();
   #turn: Held | undefined = undefined;
@@ -70,6 +71,7 @@ class ConversationTrace {
   constructor(telemetry: TelemetryContext, attributes: SpanAttributes) {
     this.#telemetry = telemetry;
     this.#attributes = attributes;
+    this.#scope = { "lulu.bot.id": attributes["lulu.bot.id"], "lulu.agent": attributes["lulu.agent"], "lulu.conversation.kind": attributes["lulu.conversation.kind"] };
   }
 
   apply(event: AgentEvent): void {
@@ -83,14 +85,14 @@ class ConversationTrace {
         return;
       case "turn_start":
         if (this.#turn === undefined) this.#totals.turns += 1;
-        this.#turn ??= hold(this.#parent(), "lulu.turn", {});
+        this.#turn ??= this.#child(this.#parent(), "lulu.turn", {});
         return;
       case "turn_end":
         this.#turn?.end();
         this.#turn = undefined;
         return;
       case "message_start":
-        if (event.message.role === "assistant") this.#message ??= hold(this.#parent(), "chat", { "gen_ai.operation.name": "chat" });
+        if (event.message.role === "assistant") this.#message ??= this.#child(this.#parent(), "chat", { "gen_ai.operation.name": "chat" });
         return;
       case "message_end":
         this.#finishMessage(event.entry.model?.[0]);
@@ -101,7 +103,7 @@ class ConversationTrace {
         const parent = event.parentToolCallId === undefined ? undefined : this.#tools.get(event.parentToolCallId)?.span;
         this.#tools.set(
           event.toolCallId,
-          hold(parent ?? this.#parent(), `execute_tool ${event.toolName}`, {
+          this.#child(parent ?? this.#parent(), `execute_tool ${event.toolName}`, {
             "gen_ai.operation.name": "execute_tool",
             "gen_ai.tool.name": event.toolName,
             "gen_ai.tool.call.id": event.toolCallId,
@@ -124,7 +126,7 @@ class ConversationTrace {
       }
       case "compaction_start":
         this.#totals.compactions += 1;
-        this.#compactions.set(String(event.taskId), hold(this.#parent(), "lulu.compaction", { "lulu.compaction.reason": event.reason, "lulu.compaction.blocking": event.blocking }));
+        this.#compactions.set(String(event.taskId), this.#child(this.#parent(), "lulu.compaction", { "lulu.compaction.reason": event.reason, "lulu.compaction.blocking": event.blocking }));
         return;
       case "compaction_end": {
         const compaction = this.#compactions.get(String(event.taskId));
@@ -153,6 +155,10 @@ class ConversationTrace {
 
   close(): void {
     this.#close();
+  }
+
+  #child(parent: TelemetryContext, name: string, attributes: SpanAttributes): Held {
+    return hold(parent, name, { ...this.#scope, ...attributes });
   }
 
   #parent(): TelemetryContext {
