@@ -92,12 +92,14 @@ export class SandboxExecutionEnv implements ExecutionEnv {
   cwd: string;
   readonly #sandbox: Sandbox;
   readonly #telemetry: TelemetryContext;
+  readonly #scope: string;
 
-  constructor(sandbox: Sandbox, cwd: string, telemetry: TelemetryContext) {
+  constructor(sandbox: Sandbox, cwd: string, telemetry: TelemetryContext, scope: string) {
     this.id = `e2b:${sandbox.sandboxId}`;
     this.cwd = cwd;
     this.#sandbox = sandbox;
     this.#telemetry = telemetry;
+    this.#scope = scope;
   }
 
   async absolutePath(path: string): Promise<Result<string, FileError>> {
@@ -176,7 +178,7 @@ export class SandboxExecutionEnv implements ExecutionEnv {
 
   exec(command: string | readonly string[], options: ShellExecOptions | undefined, context: Context): Promise<Result<ShellExecResult, ExecutionError>> {
     return this.#telemetry.startSpan(
-      { name: "sandbox.exec", attributes: { "lulu.sandbox.id": this.#sandbox.sandboxId, "lulu.sandbox.exec.timeout_s": options?.timeout ?? 0 } },
+      { name: "sandbox.exec", attributes: { "lulu.bot.id": this.#scope, "lulu.sandbox.id": this.#sandbox.sandboxId, "lulu.sandbox.exec.timeout_s": options?.timeout ?? 0 } },
       async (span) => {
         const result = await this.#exec(command, options, context);
         if (result.ok) span.setAttributes({ "lulu.sandbox.exec.exit_code": result.value.exitCode });

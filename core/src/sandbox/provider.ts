@@ -51,7 +51,7 @@ export function createSandboxProvider(env: Environment, scope: string, telemetry
     },
     connect(handle) {
       return telemetry.startSpan({ name: "sandbox.connect", attributes: { "lulu.bot.id": scope, "lulu.sandbox.id": handle.id } }, async () => {
-        return new SandboxExecutionEnv(await Sandbox.connect(handle.id, { apiKey, timeoutMs: SANDBOX_IDLE_MS }), handle.cwd, telemetry);
+        return new SandboxExecutionEnv(await Sandbox.connect(handle.id, { apiKey, timeoutMs: SANDBOX_IDLE_MS }), handle.cwd, telemetry, scope);
       });
     },
   };
