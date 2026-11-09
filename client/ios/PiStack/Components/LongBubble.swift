@@ -36,6 +36,7 @@ private struct FlowingBorder: ViewModifier {
     ])
 
     private var idle: Bool { paused || !visible || reduceMotion }
+    private var light: Bool { scheme == .light }
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
@@ -48,23 +49,26 @@ private struct FlowingBorder: ViewModifier {
     private func glow(_ shape: RoundedRectangle) -> some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: idle)) { context in
             let breath = reduceMotion ? 0 : sin(context.date.timeIntervalSinceReferenceDate * 2 * .pi / Self.period)
-            shape.stroke(Color.white, lineWidth: 3)
-                .blur(radius: 8)
-                .opacity(0.38 + 0.14 * breath)
+            shape.stroke(Color.white, lineWidth: light ? 4 : 3)
+                .blur(radius: light ? 10 : 8)
+                .opacity(light ? 0.62 + 0.2 * breath : 0.38 + 0.14 * breath)
         }
         .allowsHitTesting(false)
     }
 
     private func border(_ shape: RoundedRectangle) -> some View {
         ZStack {
-            shape.strokeBorder(scheme == .light ? Color.black.opacity(0.06) : Color.white.opacity(0.3), lineWidth: 0.6)
+            shape.strokeBorder(light ? Color.black.opacity(0.06) : Color.white.opacity(0.3), lineWidth: 0.6)
             if reduceMotion {
                 shape.strokeBorder(Color.white.opacity(0.55), lineWidth: 1.2)
             } else {
                 TimelineView(.animation(minimumInterval: 1.0 / 30, paused: idle)) { context in
                     let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: Self.period) / Self.period
-                    shape.strokeBorder(AngularGradient(gradient: Self.streak, center: .center, angle: .degrees(turn * 360)), lineWidth: scheme == .light ? 1.6 : 1.2)
-                        .shadow(color: .black.opacity(scheme == .light ? 0.22 : 0), radius: 1.2)
+                    let sweep = AngularGradient(gradient: Self.streak, center: .center, angle: .degrees(turn * 360))
+                    ZStack {
+                        if light { shape.stroke(sweep, lineWidth: 6).blur(radius: 4) }
+                        shape.strokeBorder(sweep, lineWidth: light ? 2 : 1.2)
+                    }
                 }
             }
         }
@@ -109,6 +113,7 @@ struct LongReader: View {
         .offset(y: drag)
         .onAppear { withAnimation(.easeIn(duration: 0.2).delay(0.15)) { settled = true } }
         .accessibilityAddTraits(.isModal)
+        .accessibilityAction(.escape) { close() }
     }
 
     private var surface: some View {
@@ -126,12 +131,6 @@ struct LongReader: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button(action: close) {
-                    Image(systemName: "xmark").font(.caption.weight(.bold)).frame(width: 28, height: 28)
-                }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .accessibilityLabel("关闭")
             }
         }
         .padding(.horizontal, 16)
