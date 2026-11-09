@@ -20,6 +20,13 @@ struct HTMLDocument: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let bridge {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("刷新", systemImage: "arrow.clockwise") { Task { await bridge.refresh() } }
+                }
+            }
+        }
     }
 }
 
@@ -48,7 +55,9 @@ struct HTMLPage: UIViewRepresentable {
         view.scrollView.isScrollEnabled = interactive
         view.isUserInteractionEnabled = interactive
         context.coordinator.dark = dark
-        view.loadHTMLString(HTMLTheme.prepared(html, network: bridge != nil), baseURL: nil)
+        let prepared = HTMLTheme.prepared(html, network: bridge != nil)
+        bridge?.attach(view, html: prepared)
+        view.loadHTMLString(prepared, baseURL: nil)
         return view
     }
 

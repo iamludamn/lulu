@@ -169,7 +169,11 @@ private struct WidgetCard: View {
                 if let ask = widget.ask {
                     Button("询问", systemImage: "bubble.left") { onPrompt(ask) }
                 }
-                Button("让 bot 刷新", systemImage: "arrow.clockwise") { onPrompt("刷新视图组件 \(widget.id)") }
+                if widget.isSpace {
+                    Button("刷新", systemImage: "arrow.clockwise") { NotificationCenter.default.post(name: .spaceRefresh, object: widget.id) }
+                } else {
+                    Button("让 bot 刷新", systemImage: "arrow.clockwise") { onPrompt("刷新视图组件 \(widget.id)") }
+                }
                 Button("调整排布", systemImage: "square.grid.2x2", action: onEdit)
                 if let origin = widget.origin {
                     Button("从视图移除", systemImage: "trash", role: .destructive) { onDrop(origin) }
@@ -178,8 +182,8 @@ private struct WidgetCard: View {
             .editable(editing, seed: abs(widget.id.hashValue), radius: 26) {
                 if let origin = widget.origin { onDrop(origin) }
             }
-        if let page {
-            Button { openSpace(page, SpaceOpening(id: widget.id, title: widget.title), "space-\(widget.id)") } label: { card }
+        if let (page, refresh) = space {
+            Button { openSpace(page, SpaceOpening(id: widget.id, title: widget.title, refresh: refresh), "space-\(widget.id)") } label: { card }
                 .buttonStyle(.plain)
                 .disabled(editing)
                 .artifactSource("space-\(widget.id)", radius: 26)
@@ -188,8 +192,8 @@ private struct WidgetCard: View {
         }
     }
 
-    private var page: ArtifactAddress? {
-        guard case .space(let src, _) = widget.body else { return nil }
-        return ArtifactAddress(src)
+    private var space: (ArtifactAddress, SpaceRefresh)? {
+        guard case .space(let src, _, let refresh) = widget.body, let page = ArtifactAddress(src) else { return nil }
+        return (page, refresh)
     }
 }

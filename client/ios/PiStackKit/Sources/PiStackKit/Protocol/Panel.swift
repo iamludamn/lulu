@@ -4,6 +4,10 @@ public enum Tone: String, Decodable, Sendable {
     case neutral, good, warn, bad, accent
 }
 
+public enum SpaceRefresh: String, Decodable, Sendable {
+    case manual, open, daily
+}
+
 public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
     public enum Size: String, Decodable, Sendable { case s, m, l }
 
@@ -69,11 +73,11 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
         case timeline([Event])
         case note(String)
         case media(src: String, caption: String?)
-        case space(src: String, summary: String?)
+        case space(src: String, summary: String?, refresh: SpaceRefresh)
         case actions([Button])
         case unknown
 
-        private enum Keys: String, CodingKey { case kind, value, unit, at, delta, spark, items, mark, x, series, events, markdown, src, caption, buttons, summary }
+        private enum Keys: String, CodingKey { case kind, value, unit, at, delta, spark, items, mark, x, series, events, markdown, src, caption, buttons, summary, refresh }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Keys.self)
@@ -98,7 +102,11 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
             case "note": self = .note(try c.decode(String.self, forKey: .markdown))
             case "media": self = .media(src: try c.decode(String.self, forKey: .src), caption: try c.decodeIfPresent(String.self, forKey: .caption))
             // "web" is what the first release called a space; keep reading widgets stored under it.
-            case "space", "web": self = .space(src: try c.decode(String.self, forKey: .src), summary: try c.decodeIfPresent(String.self, forKey: .summary))
+            case "space", "web": self = .space(
+                    src: try c.decode(String.self, forKey: .src),
+                    summary: try c.decodeIfPresent(String.self, forKey: .summary),
+                    refresh: (try? c.decodeIfPresent(SpaceRefresh.self, forKey: .refresh)).flatMap { $0 } ?? .manual
+                )
             case "actions": self = .actions(try c.decode([Button].self, forKey: .buttons))
             default: self = .unknown
             }

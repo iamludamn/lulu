@@ -9,7 +9,7 @@ export const spacePage = (id: string): string => `${SPACE_DIR}${id}/index.html`;
 export const PAGE_KINDS = [
   "An .html page is one of two things.",
   "An html asset is a finished deliverable: everything it shows is baked in when you write it, it never loads anything from the network, and it forgets everything when closed. Offer it with a send_to_user kind asset card, and the user keeps it in their assets.",
-  "A space is a small app the user keeps on their panel and comes back to: it fetches live data from public APIs when opened, or remembers what the user does, or both. Offer it with a send_to_user kind panel card whose body is { kind: space, src }; it lives at `spaces/<widget id>/index.html` and nowhere else.",
+  "A space is a small app the user keeps on their panel and comes back to: it fetches live data from public APIs when opened, or remembers what the user does, or both. Offer it with a send_to_user kind panel card whose body is { kind: space, src, refresh }; it lives at `spaces/<widget id>/index.html` and nowhere else.",
   "Decide with one question: will the user come back expecting the page to be newer than when you made it, or to find what they did last time? Yes means space, no means html asset.",
   "Data wanted as of now, such as today's schedule or a comparison, is an html asset with the data baked in. When unsure, build an html asset; it can become a space later.",
 ].join(" ");

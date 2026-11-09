@@ -87,7 +87,7 @@ struct MessageRow: View, Equatable {
                 .frame(maxWidth: widget.size == .s && !widget.isSpace ? 176 : 360)
                 .frosted(26)
                 .contentShape(.rect(cornerRadius: 26, style: .continuous))
-            if case .space(let src, _) = widget.body {
+            if case .space(let src, _, _) = widget.body {
                 let source = "chat-\(row.id)"
                 kept(destination: .panel, label: "添加 Space", symbol: "square.stack.3d.up") {
                     Button { ArtifactAddress(src).map { openSpace($0, SpaceOpening(id: widget.id, title: widget.title, preview: true), source) } } label: { face }

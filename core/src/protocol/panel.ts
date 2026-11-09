@@ -60,6 +60,12 @@ const Space = Type.Object({
   kind: Type.Literal("space"),
   src: Type.String({ description: "artifact://spaces/<widget id>/index.html@version of the page; the widget id is the page's saved-state key" }),
   summary: Type.Optional(Type.String({ description: "One line on what the space shows, displayed on its card" })),
+  refresh: Type.Optional(
+    enumOf(
+      ["manual", "open", "daily"] as const,
+      "When the app re-fetches the data the page loads. manual (default): the user refreshes by hand, otherwise cached data is shown. open: every time the user opens the space full screen. daily: the first time each local calendar day the user opens it",
+    ),
+  ),
 });
 
 const Actions = Type.Object({
