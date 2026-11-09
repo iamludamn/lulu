@@ -32,6 +32,36 @@
 * 有多个 T3 environment（omarchy、Mac 等）时，`.env` 要在各设备间保持一致：任一设备新增或更新密钥后，用 `scp` 同步到其他环境仓库根目录的 `.env`，并比对 sha256。新环境缺 `.env` 时，先从已有环境拉取，不要让用户手动操作。
 * Mac 上的仓库在 `~/AACS/lulu`，SSH 用 `a1234@wujiahaodemacbook-pro.tailfdc8bd.ts.net`；用短主机名会因 known_hosts 报 host key 验证失败。
 
+## Observability
+
+Self-hosted on omarchy. Honeycomb is no longer used.
+
+### Data flow
+
+* The worker exports OTLP/HTTP JSON **traces only** (`core/src/telemetry/otlp.ts`). It emits no metrics; metrics are derived from spans in the collector.
+* Worker config: `OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.ludamn.xyz` (var in `apps/cf/wrangler.jsonc`) and `OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <token>` (secret, must be in the `--secrets-file` when deploying). The token is `OTLP_TOKEN` in `~/observability/.env` on omarchy. Never commit or print it.
+* Ingress: Cloudflare Tunnel `lulu-otel` (ID `d14e48e1-9620-4f89-a69e-2fdaa06ddee5`, account `de4897a194002b8815e728d7240c4218`) routes `otel.ludamn.xyz` to `127.0.0.1:14318` on omarchy. It runs as the user systemd service `cloudflared-lulu-otel`; its token is in `~/.config/cloudflared/lulu-otel.env` (mode 600).
+* Stack: `~/observability/` on omarchy (`docker-compose.yml`, `otelcol.yaml`, `.env`, `grafana/`). `otel/opentelemetry-collector-contrib` checks the bearer token (401 otherwise), derives metrics with the `span_metrics` and `signal_to_metrics` connectors, and forwards to `grafana/otel-lgtm` (Grafana, Tempo, Prometheus, Loki). Data lives in the docker volume `observability_lgtm-data`.
+
+### Reading the data
+
+* Humans: Grafana dashboard `lulu-overview` on omarchy port 3000. Reach it at `http://100.102.15.105:3000` over Tailscale, or with `ssh -L 13000:127.0.0.1:3000 ludamn@10.10.21.157` and open `http://127.0.0.1:13000`. The admin password is `GF_SECURITY_ADMIN_PASSWORD` in `~/observability/.env`.
+* Agents: the `grafana` MCP server (`mcp-grafana`, read-only service account) is registered on omarchy; use TraceQL for traces and PromQL for metrics. `promtool` and `logcli` are in `~/.local/bin`. Prometheus listens on `127.0.0.1:9090` and Loki on `127.0.0.1:3100`, both local to omarchy.
+* Metric names: `lulu_span_calls_total`, `lulu_span_duration_milliseconds_{bucket,count,sum}`, `lulu_run_{turns,chats,tools,tool_errors,input_tokens,output_tokens,cost}_total`, `lulu_chat_{input_tokens,output_tokens,cache_read_tokens,cost}_total`.
+* Counters use **delta** temporality (Prometheus runs with `otlp-native-delta-ingestion`). Query them with `sum_over_time`, not `rate` or `increase`.
+
+### Span conventions
+
+* Every span carries `lulu.bot.id`, `lulu.agent` and `lulu.conversation.kind` (`root` or `delegate`).
+* `lulu.run` carries per-run totals: `lulu.run.{turns,chats,tools,tool_errors,delegates,retries,compactions,input_tokens,output_tokens,cache_read_tokens,cost}`. `chat` carries `gen_ai.usage.*` and `lulu.usage.cost`.
+* User messages are `bot.command prompt.submit` spans. Subagents are `lulu.run` spans with `lulu.conversation.kind=delegate`. Sandbox time is the duration of `sandbox.*` spans.
+* A new dimension used in a dashboard must also be listed in the collector connector config in `otelcol.yaml`, otherwise it is dropped from the derived metrics.
+
+### Access notes
+
+* omarchy is `10.10.21.157` on the LAN. Port 22 on its Tailscale address is taken over by Tailscale SSH, so use the LAN address with the dedicated key `~/.ssh/omarchy_lulu_ed25519`. That key is restricted to `10.10.21.0/24` and to forwarding `127.0.0.1:3000`.
+* Shadowrocket on the Mac captures traffic to `100.64.0.0/10` and breaks access over Tailscale. Add a DIRECT rule for that range.
+
 ## Git Workflow
 
 ### Commits
