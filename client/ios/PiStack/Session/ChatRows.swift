@@ -26,7 +26,7 @@ struct ChatRow: Identifiable, Equatable {
 }
 
 private let stampGap: TimeInterval = 15 * 60
-private let noticeLabel: [String: String] = ["abort": "停止请求", "model": "切换模型", "keep": "收藏", "drop": "移除", "makeWidget": "做成组件", "order": "调整排布"]
+private let noticeLabel: [String: String] = ["abort": "停止请求", "model": "切换模型", "keep": "收藏", "drop": "移除", "makeWidget": "做成组件", "order": "调整排布", "check": "勾选"]
 
 func keptOrigins(_ snapshot: BotStore.Snapshot) -> Set<String> {
     var kept = Set(snapshot.panel.widgets.values.compactMap(\.origin) + snapshot.assets.map(\.origin))
@@ -111,6 +111,7 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
         case .drop: rows.append(notice(request, "drop"))
         case .makeWidget: rows.append(notice(request, "makeWidget"))
         case .order: rows.append(notice(request, "order"))
+        case .check: rows.append(notice(request, "check"))
         }
     }
     rows = rows.filter { $0.role != .system || $0.notice != nil }

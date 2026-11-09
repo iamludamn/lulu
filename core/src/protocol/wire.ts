@@ -13,7 +13,8 @@ export type ClientMessage =
   | { type: "widget.keep"; requestId: string; origin: string }
   | { type: "widget.drop"; requestId: string; origin: string }
   | { type: "widget.make"; requestId: string; origin: string }
-  | { type: "layout.order"; requestId: string; target: "panel" | "assets"; ids: string[] }
+  | { type: "widget.check"; requestId: string; id: string; index: number; done: boolean }
+  | { type: "layout.order"; requestId: string; target: "assets"; ids: string[] }
   | { type: "voice.start"; requestId: string }
   | { type: "voice.audio"; requestId: string; audio: string }
   | { type: "voice.mute"; requestId: string; muted: boolean }

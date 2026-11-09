@@ -6,10 +6,9 @@ import { WidgetInput } from "../protocol/panel.js";
 import { PanelDoc } from "./doc.js";
 
 const PanelParams = Type.Object({
-  action: StringEnum(["update", "remove", "move", "list"], { description: "update | remove | move | list" }),
+  action: StringEnum(["update", "remove", "list"], { description: "update | remove | list" }),
   widget: Type.Optional(WidgetInput),
-  id: Type.Optional(Type.String({ description: "Widget id for remove and move" })),
-  index: Type.Optional(Type.Integer({ minimum: 0, description: "Target position for move, 0 is first" })),
+  id: Type.Optional(Type.String({ description: "Widget id for remove" })),
 });
 
 type PanelArgs = Static<typeof PanelParams>;
@@ -50,20 +49,6 @@ async function remove(api: ToolExecutionApi<PanelDetails>, args: PanelArgs, cont
   return ok(`removed ${id}`, "remove", id);
 }
 
-async function move(api: ToolExecutionApi<PanelDetails>, args: PanelArgs, context: Context): Promise<ToolExecutionResult<PanelDetails>> {
-  const id = args.id?.trim();
-  if (!id || args.index === undefined) return fail("move requires id and index");
-  const current = (await api.snapshot(PanelDoc, context))?.order ?? [];
-  if (!current.includes(id)) return fail("unknown id: " + id);
-  await api.commit(async (tx) => {
-    const draft = await tx.doc(PanelDoc);
-    const rest = draft.order.filter((entry) => entry !== id);
-    rest.splice(Math.min(args.index ?? 0, rest.length), 0, id);
-    draft.order = rest;
-  }, context);
-  return ok(`moved ${id} to ${args.index}`, "move", id);
-}
-
 async function list(api: ToolExecutionApi<PanelDetails>, context: Context): Promise<ToolExecutionResult<PanelDetails>> {
   const state = await api.snapshot(PanelDoc, context);
   const widgets = (state?.order ?? []).flatMap((id) => state?.widgets[id] ?? []);
@@ -75,9 +60,9 @@ export const PanelTool = defineTool({
   description: [
     "Maintain the widgets the user already keeps on their panel, the dashboard beside this chat.",
     "update replaces a kept widget's content by id, keeping its id; it cannot add new widgets, which only the user does by swiping a card you offer with send_to_user.",
-    "Pick the body kind by the shape of the information: stat for one number or status, gauge for progress toward a limit, chart for a trend, list for items or a checklist, timeline for dated events, note for a short summary, media for one image, actions for ready-made requests, web for a page that fetches live data or keeps the user's state (see the `space` skill of the artifact server).",
+    "Pick the body kind by the shape of the information: stat for one number or status, gauge for progress toward a limit, chart for a trend, list for items or a checklist, timeline for dated events, note for a short summary, media for one image, actions for ready-made requests, weather for a city's forecast (only the city; the client fetches and refreshes it by itself once a day, so never update it), web for a page that fetches live data or keeps the user's state (see the `space` skill of the artifact server).",
     "Offer a panel widget only for information the user will check repeatedly and that changes over time, such as a balance, a progress figure, a countdown, a schedule or a short checklist. Do not offer one for a one-off answer; that is a chat reply or a document. Offer at most one widget per conversation topic, and prefer updating a kept widget over offering a new one.",
-    "To keep a widget fresh, create a daily schedule whose prompt updates it by id.",
+    "To keep a snapshot widget fresh, create a daily schedule whose prompt updates it by id; weather and web widgets refresh themselves.",
   ].join(" "),
   parameters: PanelParams,
   replay: "safe",
@@ -88,8 +73,6 @@ export const PanelTool = defineTool({
         return update(api, args as PanelArgs, context);
       case "remove":
         return remove(api, args as PanelArgs, context);
-      case "move":
-        return move(api, args as PanelArgs, context);
       case "list":
         return list(api, context);
       default:

@@ -14,13 +14,8 @@ const arranged = <T>(current: readonly T[], ids: readonly string[], keyOf: (item
   return current.map((item, index) => ({ item, index })).sort((a, b) => (rank.get(keyOf(a.item)) ?? ids.length + a.index) - (rank.get(keyOf(b.item)) ?? ids.length + b.index)).map(({ item }) => item);
 };
 
-export async function orderCards(harness: Harness, target: "panel" | "assets", ids: readonly string[]): Promise<void> {
+export async function orderCards(harness: Harness, ids: readonly string[]): Promise<void> {
   await harness.commit(async (tx) => {
-    if (target === "panel") {
-      const panel = await tx.doc(PanelDoc);
-      panel.order = arranged(panel.order, ids, (id) => id);
-      return;
-    }
     const assets = await tx.doc(AssetsDoc);
     assets.items = arranged(assets.items, ids, (item) => item.origin);
   }, BACKGROUND_CONTEXT);

@@ -44,7 +44,7 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
         public let subtitle: String?
         public let value: String?
         public let tone: Tone?
-        public let done: Bool?
+        public var done: Bool?
     }
 
     public struct Event: Decodable, Equatable, Sendable {
@@ -70,10 +70,11 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
         case note(String)
         case media(src: String, caption: String?)
         case web(src: String)
+        case weather(city: String)
         case actions([Button])
         case unknown
 
-        private enum Keys: String, CodingKey { case kind, value, unit, at, delta, spark, items, mark, x, series, events, markdown, src, caption, buttons }
+        private enum Keys: String, CodingKey { case kind, value, unit, at, delta, spark, items, mark, x, series, events, markdown, src, caption, buttons, city }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Keys.self)
@@ -98,6 +99,7 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
             case "note": self = .note(try c.decode(String.self, forKey: .markdown))
             case "media": self = .media(src: try c.decode(String.self, forKey: .src), caption: try c.decodeIfPresent(String.self, forKey: .caption))
             case "web": self = .web(src: try c.decode(String.self, forKey: .src))
+            case "weather": self = .weather(city: try c.decode(String.self, forKey: .city))
             case "actions": self = .actions(try c.decode([Button].self, forKey: .buttons))
             default: self = .unknown
             }
@@ -109,10 +111,17 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
     public let title: String
     public let icon: String?
     public let tone: Tone?
-    public let ask: String?
     public let updatedAt: Double?
     public let origin: String?
-    public let body: Body
+    public var body: Body
+
+    func checking(_ index: Int, done: Bool) -> PanelWidget {
+        guard case .list(var items) = body, items.indices.contains(index), items[index].done != nil else { return self }
+        items[index].done = done
+        var copy = self
+        copy.body = .list(items)
+        return copy
+    }
 }
 
 public struct PanelState: Decodable, Equatable, Sendable {
@@ -141,6 +150,12 @@ public struct PanelState: Decodable, Equatable, Sendable {
     }
 
     public var list: [PanelWidget] { order.compactMap { widgets[$0] } }
+
+    public func checking(_ id: String, item index: Int, done: Bool) -> PanelState {
+        var copy = widgets
+        copy[id] = widgets[id]?.checking(index, done: done)
+        return PanelState(order: order, widgets: copy)
+    }
 }
 
 public struct ArtifactAddress: Identifiable, Hashable, Sendable {

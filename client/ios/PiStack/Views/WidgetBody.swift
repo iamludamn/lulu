@@ -8,6 +8,7 @@ struct WidgetBody: View {
     let api: Api
     let interactive: Bool
     let onPrompt: (String) -> Void
+    let onCheck: (Int, Bool) -> Void
 
     private var compact: Bool { widget.size == .s }
     private var rowLimit: Int { widget.size == .l ? 8 : compact ? 2 : 3 }
@@ -33,6 +34,8 @@ struct WidgetBody: View {
             media(src, caption: caption)
         case .web:
             web
+        case .weather(let city):
+            WeatherBody(city: city, size: widget.size)
         case .actions(let buttons):
             actions(buttons)
         case .unknown:
@@ -178,34 +181,46 @@ struct WidgetBody: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(items.prefix(rows).enumerated()), id: \.offset) { index, item in
                 if index > 0 { Divider().opacity(0.6) }
-                HStack(spacing: 10) {
-                    if let done = item.done {
-                        Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(done ? Color.accentColor : .secondary)
-                    } else if let tone = item.tone {
-                        Circle().fill(tone.color).frame(width: 8, height: 8)
-                    }
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(item.title)
-                            .font(.subheadline.weight(.medium))
-                            .strikethrough(item.done == true)
-                            .foregroundStyle(item.done == true ? .secondary : .primary)
-                            .lineLimit(1)
-                        if let subtitle = item.subtitle, !compact {
-                            Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                    }
-                    Spacer(minLength: 6)
-                    if let value = item.value {
-                        Text(value).font(.subheadline.monospacedDigit()).foregroundStyle(item.tone == .bad || item.tone == .warn ? item.tone!.color : .secondary).lineLimit(1)
-                    }
+                if let done = item.done {
+                    Button { onCheck(index, !done) } label: { listRow(item) }
+                        .buttonStyle(.plain)
+                        .disabled(!interactive)
+                } else {
+                    listRow(item)
                 }
-                .padding(.vertical, widget.size == .l ? 6 : 4)
             }
             if items.count > rows {
                 Text("还有 \(items.count - rows) 项").font(.caption).foregroundStyle(.secondary).padding(.top, widget.size == .l ? 4 : 2)
             }
         }
+        .sensoryFeedback(.selection, trigger: items.compactMap(\.done))
+    }
+
+    private func listRow(_ item: PanelWidget.Item) -> some View {
+        HStack(spacing: 10) {
+            if let done = item.done {
+                Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(done ? Color.accentColor : .secondary)
+            } else if let tone = item.tone {
+                Circle().fill(tone.color).frame(width: 8, height: 8)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.title)
+                    .font(.subheadline.weight(.medium))
+                    .strikethrough(item.done == true)
+                    .foregroundStyle(item.done == true ? .secondary : .primary)
+                    .lineLimit(1)
+                if let subtitle = item.subtitle, !compact {
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 6)
+            if let value = item.value {
+                Text(value).font(.subheadline.monospacedDigit()).foregroundStyle(item.tone == .bad || item.tone == .warn ? item.tone!.color : .secondary).lineLimit(1)
+            }
+        }
+        .padding(.vertical, widget.size == .l ? 6 : 4)
+        .contentShape(.rect)
     }
 
     private func timeline(_ events: [PanelWidget.Event]) -> some View {
