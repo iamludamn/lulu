@@ -12,3 +12,4 @@ client/ios/.build/
 client/ios/build/
 experiments/*/data/
 .secrets.json
+AGENTS.md
