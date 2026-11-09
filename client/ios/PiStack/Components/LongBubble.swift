@@ -29,8 +29,8 @@ private struct FlowingBorder: ViewModifier {
     private static let period = 3.6
     private static let streak = Gradient(stops: [
         .init(color: Color.white.opacity(0), location: 0),
-        .init(color: Color.white.opacity(0), location: 0.5),
-        .init(color: Color.white.opacity(0.4), location: 0.8),
+        .init(color: Color.white.opacity(0), location: 0.45),
+        .init(color: Color.white.opacity(0.5), location: 0.8),
         .init(color: Color.white, location: 0.96),
         .init(color: Color.white.opacity(0), location: 1),
     ])
@@ -58,7 +58,7 @@ private struct FlowingBorder: ViewModifier {
 
     private func border(_ shape: RoundedRectangle) -> some View {
         ZStack {
-            shape.strokeBorder(light ? Color.black.opacity(0.06) : Color.white.opacity(0.3), lineWidth: 0.6)
+            shape.strokeBorder(light ? Color.black.opacity(0.1) : Color.white.opacity(0.3), lineWidth: 0.6)
             if reduceMotion {
                 shape.strokeBorder(Color.white.opacity(0.55), lineWidth: 1.2)
             } else {
@@ -66,8 +66,11 @@ private struct FlowingBorder: ViewModifier {
                     let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: Self.period) / Self.period
                     let sweep = AngularGradient(gradient: Self.streak, center: .center, angle: .degrees(turn * 360))
                     ZStack {
-                        if light { shape.stroke(sweep, lineWidth: 6).blur(radius: 4) }
-                        shape.strokeBorder(sweep, lineWidth: light ? 2 : 1.2)
+                        if light {
+                            shape.stroke(sweep, lineWidth: 16).blur(radius: 12)
+                            shape.stroke(sweep, lineWidth: 7).blur(radius: 4)
+                        }
+                        shape.strokeBorder(sweep, lineWidth: light ? 2.5 : 1.2)
                     }
                 }
             }
