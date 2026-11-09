@@ -63,7 +63,7 @@ export async function createChatHarnessOptions(
       models,
       registry,
       settings: {
-        retry: { enabled: true, maxRetries: 3, baseDelayMs: 2000 },
+        retry: { enabled: true, maxRetries: 6, baseDelayMs: 2000 },
         compaction: { enabled: true, reserveTokens: 16384, keepRecentTokens: 20000 },
         steeringMode: "one-at-a-time",
         followUpMode: "one-at-a-time",

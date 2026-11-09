@@ -22,7 +22,6 @@ struct ChatView: View {
     private static let suggestions = ["今天有什么安排？", "把我关心的数据做成组件", "总结一下你记住了我什么"]
 
     private var snapshot: BotStore.Snapshot { store.snapshot }
-    private var connected: Bool { snapshot.link == .online }
     private var busy: Bool { live(of: snapshot.view).busy }
     private var reconnecting: Bool { snapshot.link == .offline && snapshot.halt == nil }
 
@@ -123,9 +122,16 @@ struct ChatView: View {
         .sensoryFeedback(.success, trigger: busy) { old, new in old && !new }
     }
 
-    private var placeholder: String {
-        connected ? "给 \(bot.name) 发消息" : "连接中…"
+    private func transition(_ row: ChatRow) -> AnyTransition {
+        if row.card != nil { return .asymmetric(insertion: .scale(scale: 0.85).combined(with: .opacity), removal: .identity) }
+        guard row.role == .user || row.typing else { return .identity }
+        return .asymmetric(
+            insertion: .scale(scale: 0.92, anchor: row.role == .user ? .bottomTrailing : .bottomLeading).combined(with: .opacity),
+            removal: .identity
+        )
     }
+
+    private var placeholder: String { "给 \(bot.name) 发消息" }
 
     private func revealEarlier(_ rows: [ChatRow], _ start: Int) {
         metrics.reveal = metrics.extent
