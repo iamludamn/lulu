@@ -84,7 +84,7 @@ struct MessageRow: View, Equatable {
         switch card {
         case .panel(let widget):
             let face = WidgetFace(widget: widget, botId: botId, api: api)
-                .frame(maxWidth: widget.size == .s ? 176 : 360)
+                .frame(maxWidth: widget.size == .s && !widget.isSpace ? 176 : 360)
                 .frosted(26)
                 .contentShape(.rect(cornerRadius: 26, style: .continuous))
             if case .space(let src, _) = widget.body {

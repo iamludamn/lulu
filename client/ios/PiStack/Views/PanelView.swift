@@ -30,7 +30,7 @@ struct PanelView: View {
                                         onOrder(widgets.map(\.id).moved(dragged, to: target))
                                     }
                             }
-                            if row.count == 1 && row[0].size == .s { Color.clear.frame(maxWidth: .infinity) }
+                            if row.count == 1 && row[0].size == .s && !row[0].isSpace { Color.clear.frame(maxWidth: .infinity) }
                         }
                     }
                 }
@@ -63,7 +63,7 @@ struct PanelView: View {
     private func rows(_ widgets: [PanelWidget]) -> [[PanelWidget]] {
         var result: [[PanelWidget]] = []
         for widget in widgets {
-            if widget.size == .s, let last = result.last, last.count == 1, last[0].size == .s {
+            if widget.size == .s, !widget.isSpace, let last = result.last, last.count == 1, last[0].size == .s, !last[0].isSpace {
                 result[result.count - 1].append(widget)
             } else {
                 result.append([widget])
@@ -103,8 +103,12 @@ struct WidgetFace: View {
     var interactive = false
     var onPrompt: (String) -> Void = { _ in }
 
+    /// Two rows of the 158pt cards and the gap between them.
+    static let spaceHeight: CGFloat = 328
+
     private var height: CGFloat? {
-        switch widget.size {
+        if widget.isSpace { return Self.spaceHeight }
+        return switch widget.size {
         case .s, .m: 158
         case .l: nil
         }
@@ -117,7 +121,7 @@ struct WidgetFace: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .padding(14)
-        .frame(maxWidth: .infinity, minHeight: widget.size == .l ? 300 : nil, maxHeight: height, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: widget.isSpace ? Self.spaceHeight : widget.size == .l ? 300 : nil, maxHeight: height, alignment: .topLeading)
         .clipShape(.rect(cornerRadius: 26, style: .continuous))
     }
 
@@ -136,7 +140,7 @@ struct WidgetFace: View {
                     .padding(.vertical, 2)
                     .background(Color.accentColor.opacity(0.14), in: .capsule)
             }
-            if widget.size != .s, let updatedAt = widget.updatedAt {
+            if widget.size != .s || widget.isSpace, let updatedAt = widget.updatedAt {
                 Text(Date(timeIntervalSince1970: updatedAt / 1000), format: .relative(presentation: .named))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)

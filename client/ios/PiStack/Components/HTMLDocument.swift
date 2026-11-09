@@ -23,9 +23,11 @@ struct HTMLDocument: View {
     }
 }
 
-private struct HTMLPage: UIViewRepresentable {
+struct HTMLPage: UIViewRepresentable {
     let html: String
     let bridge: SpaceBridge?
+    /// false renders the page as a still preview: no scrolling and no touches.
+    var interactive = true
     @Environment(\.colorScheme) private var scheme
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -43,6 +45,8 @@ private struct HTMLPage: UIViewRepresentable {
         view.backgroundColor = .clear
         view.scrollView.backgroundColor = .clear
         view.navigationDelegate = context.coordinator
+        view.scrollView.isScrollEnabled = interactive
+        view.isUserInteractionEnabled = interactive
         context.coordinator.dark = dark
         view.loadHTMLString(HTMLTheme.prepared(html, network: bridge != nil), baseURL: nil)
         return view
