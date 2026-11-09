@@ -28,6 +28,17 @@ async function artifactFile(request: Request, host: ApiHost): Promise<Response> 
   return Response.redirect(((await response.json()) as { url: string }).url, 302);
 }
 
+const SPACE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
+async function spaceState(request: Request, host: ApiHost): Promise<Response> {
+  const id = new URL(request.url).searchParams.get("id") ?? "";
+  if (!SPACE_ID.test(id)) return json({ error: "Invalid id" }, 400);
+  const query = new URLSearchParams({ name: `spaces/${id}/state.json` });
+  const artifacts = host.objects.ARTIFACTS.getByName(BOT_ID);
+  if (request.method === "PUT") return artifacts.fetch(`https://artifact/write?${query}`, { method: "PUT", body: await request.text() });
+  return artifacts.fetch(`https://artifact/read?${query}`);
+}
+
 function botSocket(request: Request, host: ApiHost): Promise<Response> {
   if (request.method !== "GET") return Promise.resolve(json({ error: "Method not allowed" }, 405, { Allow: "GET" }));
   if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
@@ -60,6 +71,10 @@ async function route(request: Request, host: ApiHost, pathname: string): Promise
   if (!pathname.startsWith(`${PREFIX}/`)) return notFound();
   const rest = pathname.slice(PREFIX.length).replace(/\/+$/, "");
   if (rest === "/ws") return botSocket(request, host);
+  if (rest === "/spaces/state") {
+    if (request.method !== "GET" && request.method !== "PUT") return json({ error: "Method not allowed" }, 405, { Allow: "GET, PUT" });
+    return spaceState(request, host);
+  }
   const read = reads[rest];
   if (read === undefined) return notFound();
   if (request.method !== "GET") return json({ error: "Method not allowed" }, 405, { Allow: "GET" });

@@ -31,6 +31,8 @@ struct WidgetBody: View {
                 .mask(LinearGradient(stops: [.init(color: .black, location: 0.75), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom))
         case .media(let src, let caption):
             media(src, caption: caption)
+        case .web:
+            web
         case .actions(let buttons):
             actions(buttons)
         case .unknown:
@@ -268,6 +270,14 @@ struct WidgetBody: View {
                         .padding(8)
                 }
             }
+    }
+
+    private var web: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "safari").font(.system(size: 34)).foregroundStyle(Color.accentColor)
+            Text("点开查看").font(.footnote).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func resolve(_ src: String) -> URL? {

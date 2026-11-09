@@ -147,9 +147,10 @@ private struct WidgetCard: View {
     let onPrompt: (String) -> Void
     let onDrop: (String) -> Void
     let onEdit: () -> Void
+    @Environment(\.openSpace) private var openSpace
 
     var body: some View {
-        WidgetFace(widget: widget, botId: botId, api: api, interactive: true, onPrompt: onPrompt)
+        let card = WidgetFace(widget: widget, botId: botId, api: api, interactive: true, onPrompt: onPrompt)
             .frosted(26)
             .contentShape(.rect(cornerRadius: 26, style: .continuous))
             .contextMenu {
@@ -165,5 +166,18 @@ private struct WidgetCard: View {
             .editable(editing, seed: abs(widget.id.hashValue), radius: 26) {
                 if let origin = widget.origin { onDrop(origin) }
             }
+        if let page {
+            Button { openSpace(page, widget.id, "space-\(widget.id)") } label: { card }
+                .buttonStyle(.plain)
+                .disabled(editing)
+                .artifactSource("space-\(widget.id)", radius: 26)
+        } else {
+            card
+        }
+    }
+
+    private var page: ArtifactAddress? {
+        guard case .web(let src) = widget.body else { return nil }
+        return ArtifactAddress(src)
     }
 }

@@ -56,6 +56,11 @@ const Media = Type.Object({
   caption: Type.Optional(Type.String()),
 });
 
+const Web = Type.Object({
+  kind: Type.Literal("web"),
+  src: Type.String({ description: "artifact://name.html@version of the page; the widget id is the page's saved-state key" }),
+});
+
 const Actions = Type.Object({
   kind: Type.Literal("actions"),
   buttons: Type.Array(Type.Object({ label: Type.String(), icon: Type.Optional(Type.String()), prompt: Type.String({ description: "Sent to you as a chat message when tapped" }) }), {
@@ -71,7 +76,7 @@ export const WidgetInput = Type.Object({
   icon: Type.Optional(Type.String({ description: "SF Symbol name, e.g. figure.run" })),
   tone: Type.Optional(Tone),
   ask: Type.Optional(Type.String({ description: "Follow-up question sent to you when the widget is tapped" })),
-  body: Type.Union([Stat, Gauge, Chart, List, Timeline, Note, Media, Actions]),
+  body: Type.Union([Stat, Gauge, Chart, List, Timeline, Note, Media, Web, Actions]),
 });
 
 export type WidgetInput = Static<typeof WidgetInput>;

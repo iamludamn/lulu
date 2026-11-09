@@ -4,16 +4,19 @@ import SwiftUI
 
 extension EnvironmentValues {
     @Entry var openArtifact: (ArtifactAddress, String) -> Void = { _, _ in }
+    @Entry var openSpace: (ArtifactAddress, String, String) -> Void = { _, _, _ in }
     @Entry var artifactZoom: Namespace.ID? = nil
 }
 
 private struct ArtifactOpening: Hashable {
     let address: ArtifactAddress
     let source: String
+    var space: String?
 }
 
 private struct ArtifactPage: View {
     let item: ArtifactAddress
+    let space: String?
     let botId: String
     let api: Api
 
@@ -21,7 +24,7 @@ private struct ArtifactPage: View {
         let title = (item.fileName as NSString).deletingPathExtension
         let load = { try await api.artifactText(botId, name: item.name, version: item.version) }
         if item.isHTML {
-            HTMLDocument(title: title, load: load)
+            HTMLDocument(title: title, load: load, bridge: space.map { SpaceBridge(botId: botId, space: $0, api: api) })
         } else {
             MarkdownDocument(title: title, load: load)
         }
@@ -53,9 +56,10 @@ private struct ArtifactViewer: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.openArtifact) { open($0, source: $1) }
+            .environment(\.openSpace) { opening = ArtifactOpening(address: $0, source: $2, space: $1) }
             .environment(\.artifactZoom, zoom)
             .navigationDestination(item: $opening) { item in
-                ArtifactPage(item: item.address, botId: botId, api: api)
+                ArtifactPage(item: item.address, space: item.space, botId: botId, api: api)
                     .navigationTransition(.zoom(sourceID: item.source, in: zoom))
             }
             .quickLookPreview($preview)

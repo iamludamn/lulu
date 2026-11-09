@@ -46,6 +46,7 @@ public struct Api: Sendable {
         method: String = "GET",
         query: [URLQueryItem] = [],
         body: Encodable? = nil,
+        data raw: Data? = nil,
         failure: String
     ) async throws -> Data {
         var components = URLComponents(url: base, resolvingAgainstBaseURL: false)!
@@ -56,6 +57,9 @@ public struct Api: Sendable {
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONEncoder().encode(AnyEncodable(body))
+        } else if let raw {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = raw
         }
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -105,6 +109,22 @@ public struct Api: Sendable {
         let file = folder.appendingPathComponent((name as NSString).lastPathComponent)
         try data.write(to: file)
         return file
+    }
+
+    public func spaceState(_ botId: String, space: String) async throws -> String? {
+        var components = URLComponents(url: base, resolvingAgainstBaseURL: false)!
+        components.path = "/api/bots/\(botId)/spaces/state"
+        components.queryItems = [URLQueryItem(name: "id", value: space)]
+        let (data, response) = try await URLSession.shared.data(from: components.url!)
+        switch (response as? HTTPURLResponse)?.statusCode ?? 0 {
+        case 200..<300: return String(decoding: data, as: UTF8.self)
+        case 404: return nil
+        case let status: throw ApiError.message("读取状态失败（\(status)）")
+        }
+    }
+
+    public func setSpaceState(_ botId: String, space: String, json: String) async throws {
+        _ = try await call("/api/bots/\(botId)/spaces/state", method: "PUT", query: [URLQueryItem(name: "id", value: space)], data: Data(json.utf8), failure: "保存状态失败")
     }
 
     public func schedules(_ id: String) async throws -> [ScheduleEntry] {

@@ -1,13 +1,15 @@
+import PiStackKit
 import SwiftUI
 import WebKit
 
 struct HTMLDocument: View {
     let title: String
     let load: () async throws -> String
+    var bridge: SpaceBridge?
 
     var body: some View {
         Loaded(load: load) { html in
-            HTMLPage(html: html)
+            HTMLPage(html: html, bridge: bridge)
                 .ignoresSafeArea(edges: .bottom)
         }
         .background {
@@ -23,6 +25,7 @@ struct HTMLDocument: View {
 
 private struct HTMLPage: UIViewRepresentable {
     let html: String
+    let bridge: SpaceBridge?
     @Environment(\.colorScheme) private var scheme
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -34,6 +37,7 @@ private struct HTMLPage: UIViewRepresentable {
         let theme = HTMLTheme.script(dark: dark)
         configuration.userContentController.addUserScript(WKUserScript(source: theme, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         configuration.userContentController.addUserScript(WKUserScript(source: theme, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        bridge?.install(in: configuration.userContentController)
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.isOpaque = false
         view.backgroundColor = .clear

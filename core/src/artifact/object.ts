@@ -87,6 +87,26 @@ export class ArtifactObject {
         (error: unknown) => Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 404 }),
       );
     }
+    if (pathname === "/read") {
+      const name = new URL(request.url).searchParams.get("name") ?? "";
+      return this.read(name, undefined).then(
+        (found) => new Response(found.text, { headers: { "content-type": found.contentType } }),
+        (error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          return Response.json({ error: message }, { status: message.endsWith(" not found") ? 404 : 502 });
+        },
+      );
+    }
+    if (pathname === "/write") {
+      const name = new URL(request.url).searchParams.get("name") ?? "";
+      return request
+        .text()
+        .then((content) => this.write(name, content, "application/json", undefined))
+        .then(
+          () => new Response(null, { status: 204 }),
+          (error: unknown) => Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 }),
+        );
+    }
     if (pathname === "/download") {
       const params = new URL(request.url).searchParams;
       const version = Number(params.get("version") ?? "");
