@@ -1,19 +1,19 @@
 import SwiftUI
 
 struct TypingDots: View {
-    var size: CGFloat = 8
+    var size: CGFloat = 9
+    var reduced = false
 
     var body: some View {
-        TimelineView(.animation) { context in
+        TimelineView(.animation(paused: reduced)) { context in
             let time = context.date.timeIntervalSinceReferenceDate
-            HStack(spacing: size * 0.55) {
+            HStack(spacing: 4.5) {
                 ForEach(0..<3, id: \.self) { index in
-                    let wave = max(0, sin(time * 5 - Double(index) * 0.9))
+                    let fade = reduced ? 0.7 : 0.5 - 0.5 * cos((time - Double(index) / 3) * 2 * .pi)
                     Circle()
                         .fill(.secondary)
                         .frame(width: size, height: size)
-                        .opacity(0.4 + 0.6 * wave)
-                        .scaleEffect(0.85 + 0.25 * wave)
+                        .opacity(0.4 + 0.6 * fade)
                 }
             }
         }

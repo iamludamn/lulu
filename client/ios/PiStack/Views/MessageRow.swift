@@ -37,9 +37,9 @@ struct MessageRow: View, Equatable {
     private func messageStack(mine: Bool) -> some View {
         VStack(alignment: mine ? .trailing : .leading, spacing: 4) {
             HStack(spacing: 0) {
-                if mine { Spacer(minLength: 48) }
+                if mine { Spacer(minLength: 56) }
                 bubble(mine: mine)
-                if !mine { Spacer(minLength: 32) }
+                if !mine { Spacer(minLength: 56) }
             }
             footer
         }
@@ -53,9 +53,10 @@ struct MessageRow: View, Equatable {
             if mine {
                 Text(linkified(AttributedString(row.text)))
             } else {
-                MarkdownText(text: row.text)
+                MarkdownText(text: row.text, airy: true)
             }
         }
+        .lineSpacing(3)
         .padding(.horizontal, 15)
         .padding(.vertical, 10)
         .opacity(row.sending ? 0.55 : 1)
@@ -131,25 +132,7 @@ struct MessageRow: View, Equatable {
     }
 
     private var live: some View {
-        HStack(spacing: 8) {
-            TypingDots()
-            if !row.text.isEmpty {
-                Text(row.text).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
-            }
-        }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .frosted(20)
-            .background(alignment: .bottomLeading) {
-                ZStack(alignment: .bottomLeading) {
-                    Circle().fill(.ultraThinMaterial).overlay { Circle().fill(Color.frost) }.frame(width: 12, height: 12).offset(x: 2, y: 2)
-                    Circle().fill(.ultraThinMaterial).overlay { Circle().fill(Color.frost) }.frame(width: 6, height: 6).offset(x: -4, y: 9)
-                }
-            }
-            .padding(.leading, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .animation(.snappy, value: row.text)
-            .accessibilityLabel("助手正在输入")
+        TypingBubble(text: row.text)
     }
 
     private var generating: some View {
