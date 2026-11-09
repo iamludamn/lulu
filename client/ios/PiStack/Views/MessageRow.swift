@@ -132,25 +132,7 @@ struct MessageRow: View, Equatable {
     }
 
     private var live: some View {
-        HStack(spacing: 8) {
-            TypingDots()
-            if !row.text.isEmpty {
-                Text(row.text).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
-            }
-        }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .frosted(20)
-            .background(alignment: .bottomLeading) {
-                ZStack(alignment: .bottomLeading) {
-                    Circle().fill(.ultraThinMaterial).overlay { Circle().fill(Color.frost) }.frame(width: 12, height: 12).offset(x: 2, y: 2)
-                    Circle().fill(.ultraThinMaterial).overlay { Circle().fill(Color.frost) }.frame(width: 6, height: 6).offset(x: -4, y: 9)
-                }
-            }
-            .padding(.leading, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .animation(.snappy, value: row.text)
-            .accessibilityLabel("助手正在输入")
+        TypingBubble(text: row.text)
     }
 
     private var generating: some View {
