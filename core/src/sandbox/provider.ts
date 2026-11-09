@@ -1,6 +1,6 @@
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { TelemetryContext } from "@earendil-works/pi-telemetry";
-import { Sandbox } from "e2b";
+import { NotFoundError, Sandbox } from "e2b";
 import type { Environment } from "../host/types.js";
 import { SANDBOX_IDLE_MS, SandboxExecutionEnv } from "./env.js";
 
@@ -15,8 +15,9 @@ export type SandboxHandle = { id: string; cwd: string };
 export interface SandboxProvider {
   create(key: string): Promise<SandboxHandle>;
   connect(handle: SandboxHandle): Promise<ExecutionEnv>;
-  kill(id: string): Promise<void>;
 }
+
+export const isSandboxGone = (error: unknown): boolean => error instanceof NotFoundError;
 
 async function sweep(apiKey: string): Promise<void> {
   const now = Date.now();
@@ -39,7 +40,7 @@ export function createSandboxProvider(env: Environment, scope: string, telemetry
   const template = env.E2B_TEMPLATE;
   return {
     create(key) {
-      return telemetry.startSpan({ name: "sandbox.create", attributes: { "lulu.bot.id": scope, "lulu.sandbox.template": template ?? "default" } }, async (span) => {
+      return telemetry.startSpan({ name: "sandbox.create", attributes: { "lulu.bot.id": scope, "lulu.sandbox.key": key, "lulu.sandbox.template": template ?? "default" } }, async (span) => {
         void sweep(apiKey).catch(() => undefined);
         const options = { apiKey, idempotencyKey: await idempotencyKeyOf(scope, key), timeoutMs: SANDBOX_IDLE_MS, metadata: METADATA, lifecycle: { onTimeout: "pause" as const } };
         const sandbox = template ? await Sandbox.create(template, options) : await Sandbox.create(options);
@@ -51,11 +52,6 @@ export function createSandboxProvider(env: Environment, scope: string, telemetry
     connect(handle) {
       return telemetry.startSpan({ name: "sandbox.connect", attributes: { "lulu.bot.id": scope, "lulu.sandbox.id": handle.id } }, async () => {
         return new SandboxExecutionEnv(await Sandbox.connect(handle.id, { apiKey, timeoutMs: SANDBOX_IDLE_MS }), handle.cwd, telemetry, scope);
-      });
-    },
-    kill(id) {
-      return telemetry.startSpan({ name: "sandbox.kill", attributes: { "lulu.bot.id": scope, "lulu.sandbox.id": id } }, async () => {
-        await Sandbox.kill(id, { apiKey });
       });
     },
   };

@@ -31,6 +31,8 @@ public final class BotStore {
     public private(set) var snapshot = Snapshot()
 
     private let socketURL: URL
+    private let cacheURL: URL
+    private var saving: Task<Void, Never>?
     private var task: URLSessionWebSocketTask?
     private var timer: Task<Void, Never>?
     private var attempts = 0
@@ -38,6 +40,7 @@ public final class BotStore {
 
     public init(botId: String, server: URL) {
         socketURL = Api.socketURL(base: server, botId: botId)
+        cacheURL = Cache.url(for: socketURL)
     }
 
     public func start() {
@@ -45,6 +48,7 @@ public final class BotStore {
         running = true
         snapshot.link = .connecting
         snapshot.halt = nil
+        restore()
         connect()
     }
 
@@ -88,6 +92,29 @@ public final class BotStore {
 
     public func dismiss(_ requestId: String) {
         snapshot.requests.removeAll { $0.id == requestId }
+    }
+
+    private func restore() {
+        guard snapshot.view == nil else { return }
+        let url = cacheURL
+        Task {
+            let cached = await Task.detached { Cache.load(url)?.offline }.value
+            guard snapshot.view == nil, let cached else { return }
+            snapshot.view = cached.view
+            snapshot.progress = cached.progress
+        }
+    }
+
+    private func persist() {
+        guard let view = snapshot.view, let progress = snapshot.progress else { return }
+        let cache = Cache(view: view, progress: progress)
+        let url = cacheURL
+        saving?.cancel()
+        saving = Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            await Task.detached { cache.write(to: url) }.value
+        }
     }
 
     private func connect() {
@@ -144,11 +171,13 @@ public final class BotStore {
         snapshot.link = .online
         switch message {
         case .state(let view, let progress, let mcp, let panel, let assets):
-            snapshot.view = view.applied(to: snapshot.view)
+            guard let applied = view.applied(to: snapshot.view) else { return }
+            snapshot.view = applied
             snapshot.progress = progress
             snapshot.mcp = mcp
             snapshot.panel = panel
             snapshot.assets = assets
+            persist()
         case .models(let config): snapshot.models = config
         case .voice: break
         case .result(let requestId, let error):

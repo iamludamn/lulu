@@ -5,7 +5,6 @@ import type { ConversationId, ToolExecutionApi, ToolExecutionResult } from "@ear
 import { Type, type Static } from "typebox";
 import { DefaultDelegateAgent, type DelegatePresets } from "./agents.js";
 import { DelegateIndex, RunFamily, formatElapsed, resolveRunId, runIdOf, shortId, updateRun, type RunDoc } from "./runs.js";
-import { SandboxDoc } from "../sandbox/doc.js";
 import type { SandboxProvider } from "../sandbox/provider.js";
 import { createRun, entryBeforeCall } from "./spawn.js";
 import { DelegateWait } from "./wait.js";
@@ -134,18 +133,13 @@ async function resume(api: ToolExecutionApi<DelegateDetails>, args: DelegateArgs
   return ok("resumed " + shortId(run.id), "resume", run.id);
 }
 
-async function close(api: ToolExecutionApi<DelegateDetails>, args: DelegateArgs, sandboxes: SandboxProvider | undefined, context: Context): Promise<ToolExecutionResult<DelegateDetails>> {
+async function close(api: ToolExecutionApi<DelegateDetails>, args: DelegateArgs, context: Context): Promise<ToolExecutionResult<DelegateDetails>> {
   if (!args.id) return fail("close requires id");
   const run = await mustRun(api, args.id, context);
   if (!run) return fail("unknown id: " + args.id);
   if (run.conversationId) {
     const child = await api.conversation(run.conversationId, context);
     if (child) await child.abort(context, { background: true });
-    const binding = await api.snapshot(SandboxDoc, run.conversationId, context);
-    if (binding?.id) {
-      if (!sandboxes) return fail("cannot release the sandbox of " + shortId(run.id) + ": E2B_API_KEY is not configured");
-      await sandboxes.kill(binding.id);
-    }
   }
   await api.commit(async (tx) => {
     await updateRun(tx, run.id, { status: "closed", endedAt: Date.now() });
@@ -167,11 +161,11 @@ export const createDelegateTool = (presets: DelegatePresets, sandboxes: SandboxP
     "Launch a background child agent to handle a complex, multi-step task autonomously, and get its result back automatically.",
     "If an ask needs more than a single tool call, call this tool with action=spawn as your first step.",
     "After spawn, continue other work or end the turn. When the child finishes you are revived automatically with its result.",
-    "Each child sees this conversation up to now and works in its own sandbox with the file and command tools that are refused for you. Closing a child destroys its sandbox.",
+    "Each child sees this conversation up to now and works in a sandbox with the file and command tools that are refused for you. Children share one persistent sandbox; closing a child leaves it untouched.",
     "Children cannot message the user: their report comes back to you, and you send any widget or asset card it carries with send_to_user.",
     "Actions: spawn (start a child with a task, returns an id immediately),",
     "list (read-only diagnostic, never a polling loop), send (message a running child),",
-    "resume (restart a stopped child), close (stop a child and destroy its sandbox; no completion callback).",
+    "resume (restart a stopped child), close (stop a child; no completion callback).",
     "Keep this machinery private: never mention children, dispatching, or internal IDs to the user.",
   ].join(" "),
   parameters: delegateParams(presets),
@@ -188,7 +182,7 @@ export const createDelegateTool = (presets: DelegatePresets, sandboxes: SandboxP
       case "resume":
         return resume(api, args as DelegateArgs, context);
       case "close":
-        return close(api, args as DelegateArgs, sandboxes, context);
+        return close(api, args as DelegateArgs, context);
       default:
         return fail("unknown action: " + String((args as DelegateArgs).action));
     }

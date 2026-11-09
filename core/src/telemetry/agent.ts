@@ -1,7 +1,10 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
 import { watchEvents, type AgentEvent, type ConversationId, type Harness } from "@earendil-works/pi-durable";
 import type { SpanAttributes, TelemetryContext, TelemetrySpan } from "@earendil-works/pi-telemetry";
+import { isSensitive } from "../memory/guard.js";
+
+const FAILURE_CHARACTERS = 300;
 
 type Held = { readonly span: TelemetrySpan; end(): void };
 
@@ -36,6 +39,22 @@ function hold(parent: TelemetryContext, name: string, attributes: SpanAttributes
 
 function failed(held: Held, message: string): void {
   held.span.setStatus({ status: "error", error: { name: "Error", message } });
+}
+
+function errorText(raw: string | undefined): string {
+  const text = (raw ?? "").replace(/\s+/g, " ").trim();
+  if (text === "") return "model request failed";
+  return isSensitive(text) ? "model request failed: [redacted]" : text.slice(0, FAILURE_CHARACTERS);
+}
+
+function failureText(result: ToolResultMessage): string {
+  const text = result.content
+    .flatMap((part) => (part.type === "text" ? [part.text] : []))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (text === "") return "tool returned an error";
+  return isSensitive(text) ? "tool returned an error: [redacted]" : text.slice(0, FAILURE_CHARACTERS);
 }
 
 class ConversationTrace {
@@ -97,7 +116,7 @@ class ConversationTrace {
         const incomplete = event.entry === undefined && event.result === undefined;
         const errored = result?.role === "toolResult" && result.isError;
         if (incomplete) failed(tool, "tool call did not complete");
-        else if (errored) failed(tool, "tool returned an error");
+        else if (errored) failed(tool, failureText(result));
         if (incomplete || errored) this.#totals.toolErrors += 1;
         tool.end();
         this.#tools.delete(event.toolCallId);
@@ -119,6 +138,11 @@ class ConversationTrace {
         this.#totals.retries += 1;
         (this.#turn ?? this.#run)?.span.addEvent("lulu.retry", { "lulu.retry.attempt": event.attempt, "lulu.retry.error": event.errorMessage });
         return;
+      case "entry_appended": {
+        const message = event.entry.model?.[0] as AssistantMessage | undefined;
+        if (message?.role === "assistant" && message.stopReason === "error") (this.#turn ?? this.#run)?.span.addEvent("lulu.model_error", { "lulu.model.error": errorText(message.errorMessage) });
+        return;
+      }
       case "task_failed":
         (this.#turn ?? this.#run)?.span.addEvent("lulu.task_failed", { "lulu.task.kind": event.kind, "lulu.task.error": event.message });
         return;

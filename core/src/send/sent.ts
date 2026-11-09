@@ -4,14 +4,27 @@ export type Sent = { id: string; entry: number; input: SendInput };
 
 type Block = { type?: unknown; id?: unknown; name?: unknown; arguments?: unknown };
 
-export function sentIn(entries: readonly { id?: unknown; kind?: unknown; model?: unknown }[]): Sent[] {
+type Result = { role?: unknown; toolCallId?: unknown; isError?: unknown };
+
+export function refusedIn(entries: readonly { model?: unknown }[]): Set<string> {
+  const refused = new Set<string>();
+  for (const entry of entries) {
+    if (!Array.isArray(entry.model)) continue;
+    for (const message of entry.model as Result[]) {
+      if (message.role === "toolResult" && message.isError === true && typeof message.toolCallId === "string") refused.add(message.toolCallId);
+    }
+  }
+  return refused;
+}
+
+export function sentIn(entries: readonly { id?: unknown; kind?: unknown; model?: unknown }[], refused: ReadonlySet<string> = refusedIn(entries)): Sent[] {
   const sent: Sent[] = [];
   for (const entry of entries) {
     if (entry.kind !== "pi.assistant" || !Array.isArray(entry.model)) continue;
     for (const message of entry.model as { content?: unknown }[]) {
       if (!Array.isArray(message.content)) continue;
       for (const block of message.content as Block[]) {
-        if (block.type !== "toolCall" || block.name !== SEND_TOOL || typeof block.id !== "string") continue;
+        if (block.type !== "toolCall" || block.name !== SEND_TOOL || typeof block.id !== "string" || refused.has(block.id)) continue;
         sent.push({ id: block.id, entry: Number(entry.id), input: block.arguments as SendInput });
       }
     }

@@ -19,13 +19,14 @@ struct HomeView: View {
     let bot: BotSummary
     let api: Api
     @State private var store: BotStore
-    @State private var page = Page.chat
+    @State private var page = Page.panel
     @State private var draft: String
     @State private var inspector = false
     @State private var landed: Page?
     @State private var targets: [Page: CGPoint] = [:]
     @State private var pull: (page: Page, progress: CGFloat)?
     @State private var barBottom: CGFloat = 0
+    @State private var veiled = false
     @FocusState private var composing: Bool
     @Environment(\.scenePhase) private var phase
 
@@ -43,6 +44,7 @@ struct HomeView: View {
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
+        .opacity(veiled ? 0 : 1)
         .environment(\.keepTargets, targets)
         .environment(\.topInset, barBottom)
         .environment(\.keepPull) { page, progress in pull = progress > 0 ? (page, progress) : nil }
@@ -51,6 +53,7 @@ struct HomeView: View {
         .safeAreaBar(edge: .top, spacing: 0) {
             topBar.onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { barBottom = $0 }
         }
+        .artifactViewer(botId: bot.id, api: api)
         .sheet(isPresented: $inspector) { InspectorView(store: store, botId: bot.id, api: api) }
         .sensoryFeedback(.selection, trigger: page)
         .task { store.start() }
@@ -68,7 +71,7 @@ struct HomeView: View {
     private func content(_ item: Page) -> some View {
         switch item {
         case .panel:
-            PanelView(widgets: store.snapshot.panel.list, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onOrder: { store.reorder(.panel, $0) })
+            PanelView(widgets: store.snapshot.panel.list, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onOrder: { store.reorder(.panel, $0) }, onCompose: fadeToChat)
         case .chat:
             ChatView(bot: bot, store: store, api: api, draft: $draft, composing: $composing, onKept: land)
         case .assets:
@@ -110,6 +113,16 @@ struct HomeView: View {
         Task {
             try? await Task.sleep(for: .milliseconds(700))
             if landed == target { landed = nil }
+        }
+    }
+
+    private func fadeToChat() {
+        Task {
+            withAnimation(.easeOut(duration: 0.15)) { veiled = true }
+            try? await Task.sleep(for: .milliseconds(150))
+            withTransaction(Transaction(animation: nil)) { page = .chat }
+            composing = true
+            withAnimation(.easeIn(duration: 0.25)) { veiled = false }
         }
     }
 

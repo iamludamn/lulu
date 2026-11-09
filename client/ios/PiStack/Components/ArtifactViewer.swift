@@ -2,54 +2,61 @@ import PiStackKit
 import QuickLook
 import SwiftUI
 
-private struct ArtifactCover: View {
+extension EnvironmentValues {
+    @Entry var openArtifact: (ArtifactAddress, String) -> Void = { _, _ in }
+    @Entry var artifactZoom: Namespace.ID? = nil
+}
+
+private struct ArtifactOpening: Hashable {
+    let address: ArtifactAddress
+    let source: String
+}
+
+private struct ArtifactPage: View {
     let item: ArtifactAddress
     let botId: String
     let api: Api
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
-            let title = (item.fileName as NSString).deletingPathExtension
-            let load = { try await api.artifactText(botId, name: item.name, version: item.version) }
-            Group {
-                if item.isHTML {
-                    HTMLDocument(title: title, load: load)
-                } else {
-                    MarkdownDocument(title: title, load: load)
-                }
-            }
+        let title = (item.fileName as NSString).deletingPathExtension
+        let load = { try await api.artifactText(botId, name: item.name, version: item.version) }
+        if item.isHTML {
+            HTMLDocument(title: title, load: load)
+        } else {
+            MarkdownDocument(title: title, load: load)
         }
-        .overlay(alignment: .leading) {
-            Color.clear
-                .frame(width: 24)
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 12).onEnded { drag in
-                        if drag.translation.width > 70, abs(drag.translation.height) < drag.translation.width { dismiss() }
-                    }
-                )
+    }
+}
+
+private struct ArtifactSource: ViewModifier {
+    let id: String
+    let radius: CGFloat
+    @Environment(\.artifactZoom) private var zoom
+
+    func body(content: Content) -> some View {
+        if let zoom {
+            content.matchedTransitionSource(id: id, in: zoom) { $0.clipShape(.rect(cornerRadius: radius, style: .continuous)) }
+        } else {
+            content
         }
     }
 }
 
 private struct ArtifactViewer: ViewModifier {
-    @Binding var address: ArtifactAddress?
     let botId: String
     let api: Api
-    @State private var reading: ArtifactAddress?
+    @Namespace private var zoom
+    @State private var opening: ArtifactOpening?
     @State private var preview: URL?
     @State private var problem: String?
 
     func body(content: Content) -> some View {
         content
-            .onChange(of: address) { _, next in
-                guard let next else { return }
-                address = nil
-                open(next)
-            }
-            .fullScreenCover(item: $reading) { item in
-                ArtifactCover(item: item, botId: botId, api: api)
+            .environment(\.openArtifact) { open($0, source: $1) }
+            .environment(\.artifactZoom, zoom)
+            .navigationDestination(item: $opening) { item in
+                ArtifactPage(item: item.address, botId: botId, api: api)
+                    .navigationTransition(.zoom(sourceID: item.source, in: zoom))
             }
             .quickLookPreview($preview)
             .alert("无法打开", isPresented: Binding(get: { problem != nil }, set: { if !$0 { problem = nil } })) {
@@ -59,9 +66,9 @@ private struct ArtifactViewer: ViewModifier {
             }
     }
 
-    private func open(_ item: ArtifactAddress) {
+    private func open(_ item: ArtifactAddress, source: String) {
         if item.isMarkdown || item.isHTML {
-            reading = item
+            opening = ArtifactOpening(address: item, source: source)
             return
         }
         Task {
@@ -75,7 +82,11 @@ private struct ArtifactViewer: ViewModifier {
 }
 
 extension View {
-    func artifactViewer(_ address: Binding<ArtifactAddress?>, botId: String, api: Api) -> some View {
-        modifier(ArtifactViewer(address: address, botId: botId, api: api))
+    func artifactViewer(botId: String, api: Api) -> some View {
+        modifier(ArtifactViewer(botId: botId, api: api))
+    }
+
+    func artifactSource(_ id: String, radius: CGFloat) -> some View {
+        modifier(ArtifactSource(id: id, radius: radius))
     }
 }

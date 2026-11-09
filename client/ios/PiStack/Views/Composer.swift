@@ -2,20 +2,18 @@ import SwiftUI
 
 struct Composer: View {
     @Binding var draft: String
-    let connected: Bool
     let busy: Bool
     let placeholder: String
     var focused: FocusState<Bool>.Binding
     let onSend: () -> Void
 
-    private var canSend: Bool { connected && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 6) {
             TextField(placeholder, text: $draft, axis: .vertical)
                 .lineLimit(1...6)
                 .focused(focused)
-                .disabled(!connected)
                 .padding(.leading, 18)
                 .padding(.vertical, 13)
             if canSend {
@@ -33,10 +31,16 @@ struct Composer: View {
             }
         }
         .padding(.trailing, canSend ? 0 : 14)
-        .frame(minHeight: 48)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 24, style: .continuous))
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
+        .composerChrome()
         .animation(.snappy(duration: 0.2), value: canSend)
+    }
+}
+
+extension View {
+    func composerChrome() -> some View {
+        frame(minHeight: 48)
+            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 24, style: .continuous))
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
     }
 }

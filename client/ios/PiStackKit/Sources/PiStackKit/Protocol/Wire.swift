@@ -1,6 +1,6 @@
 import Foundation
 
-public struct ConversationEntry: Decodable, Identifiable, Sendable {
+public struct ConversationEntry: Codable, Identifiable, Sendable {
     public let id: String
     public let kind: String
     public let model: [JSONValue]?
@@ -17,9 +17,16 @@ public struct ConversationEntry: Decodable, Identifiable, Sendable {
         kind = try container.decode(String.self, forKey: .kind)
         model = try container.decodeIfPresent([JSONValue].self, forKey: .model)
     }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: Keys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(kind, forKey: .kind)
+        try container.encodeIfPresent(model, forKey: .model)
+    }
 }
 
-public struct ConversationView: Sendable {
+public struct ConversationView: Codable, Sendable {
     public let entries: [ConversationEntry]
     public let docs: [String: JSONValue]
 }
@@ -29,10 +36,12 @@ public struct ViewFrame: Decodable, Sendable {
     let order: [String]
     let docs: [String: JSONValue]
 
-    func applied(to view: ConversationView?) -> ConversationView {
+    func applied(to view: ConversationView?) -> ConversationView? {
         var known = Dictionary(uniqueKeysWithValues: (view?.entries ?? []).map { ($0.id, $0) })
         for entry in entries { known[entry.id] = entry }
-        return ConversationView(entries: order.compactMap { known[$0] }, docs: docs)
+        let merged = order.compactMap { known[$0] }
+        guard merged.count == order.count else { return nil }
+        return ConversationView(entries: merged, docs: docs)
     }
 }
 

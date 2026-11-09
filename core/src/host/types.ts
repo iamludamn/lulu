@@ -72,4 +72,4 @@ export interface DurableHost {
   abort(reason: string): void;
 }
 
-export type McpHostServices = Pick<DurableHost, "env" | "readMcpAuth" | "writeMcpAuth">;
+export type McpHostServices = Pick<DurableHost, "env" | "readMcpAuth" | "writeMcpAuth" | "telemetry">;

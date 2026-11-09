@@ -11,13 +11,12 @@ struct ChatView: View {
     @State private var pinned = true
     @State private var sent = 0
     @Environment(\.topInset) private var topInset
-    @State private var opening: ArtifactAddress?
+    @Environment(\.openArtifact) private var openArtifact
 
     private static let bottom = "bottom"
     private static let suggestions = ["今天有什么安排？", "把我关心的数据做成组件", "总结一下你记住了我什么"]
 
     private var snapshot: BotStore.Snapshot { store.snapshot }
-    private var connected: Bool { snapshot.link == .online }
     private var busy: Bool { live(of: snapshot.view).busy }
     private var reconnecting: Bool { snapshot.link == .offline && snapshot.halt == nil }
 
@@ -27,7 +26,7 @@ struct ChatView: View {
             ScrollView {
                 LazyVStack(spacing: 4) {
                     ForEach(rows) { row in
-                        MessageRow(row: row, store: store, botId: bot.id, api: api, onOpen: { opening = $0 }, onKept: onKept)
+                        MessageRow(row: row, store: store, botId: bot.id, api: api, onOpen: openArtifact, onKept: onKept)
                             .equatable()
                             .padding(.bottom, row.tail ? 10 : 0)
                             .transition(transition(row))
@@ -85,10 +84,9 @@ struct ChatView: View {
         .animation(.snappy, value: reconnecting)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if snapshot.halt == nil {
-                Composer(draft: $draft, connected: connected, busy: busy, placeholder: placeholder, focused: composing, onSend: send)
+                Composer(draft: $draft, busy: busy, placeholder: placeholder, focused: composing, onSend: send)
             }
         }
-        .artifactViewer($opening, botId: bot.id, api: api)
         .sensoryFeedback(.impact(weight: .light), trigger: sent)
         .sensoryFeedback(.success, trigger: busy) { old, new in old && !new }
     }
@@ -102,9 +100,7 @@ struct ChatView: View {
         )
     }
 
-    private var placeholder: String {
-        connected ? "给 \(bot.name) 发消息" : "连接中…"
-    }
+    private var placeholder: String { "给 \(bot.name) 发消息" }
 
     private func signature(_ rows: [ChatRow]) -> [Int] {
         [rows.count, rows.last?.typing == true ? 1 : 0, rows.last?.text.count ?? 0]

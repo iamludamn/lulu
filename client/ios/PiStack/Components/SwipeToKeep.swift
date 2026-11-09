@@ -14,27 +14,6 @@ private func swipeOffset(_ x: CGFloat, direction: CGFloat) -> CGFloat {
     return (along > swipeThreshold ? swipeThreshold + (along - swipeThreshold) * 0.3 : along) * direction
 }
 
-struct SwipeToAct<Content: View>: View {
-    let enabled: Bool
-    let onTrigger: () -> Void
-    @ViewBuilder let content: Content
-    @State private var drag: CGFloat = 0
-
-    private var armed: Bool { abs(drag) >= swipeThreshold }
-
-    var body: some View {
-        content
-            .offset(x: drag)
-            .zIndex(drag == 0 ? 0 : 1)
-            .gesture(KeepPan(direction: -1, enabled: enabled, changed: { drag = swipeOffset($0, direction: -1) }, ended: { _ in
-                let fire = armed
-                withAnimation(.spring(duration: 0.35, bounce: 0.3)) { drag = 0 }
-                if fire { onTrigger() }
-            }))
-            .sensoryFeedback(.impact(weight: .medium), trigger: armed) { _, now in now }
-    }
-}
-
 struct SwipeToKeep<Content: View>: View {
     let destination: Page
     let onLand: () -> Void

@@ -6,7 +6,7 @@ struct MessageRow: View, Equatable {
     let store: BotStore
     let botId: String
     let api: Api
-    let onOpen: (ArtifactAddress) -> Void
+    let onOpen: (ArtifactAddress, String) -> Void
     let onKept: (Page) -> Void
 
     static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.row == rhs.row }
@@ -28,15 +28,9 @@ struct MessageRow: View, Equatable {
                 if let card = row.card {
                     cardRow(card)
                 } else {
-                    message(mine: row.role == .user)
+                    messageStack(mine: row.role == .user)
                 }
             }
-        }
-    }
-
-    private func message(mine: Bool) -> some View {
-        SwipeToAct(enabled: row.widgetSource, onTrigger: { store.makeWidget(origin: row.id) }) {
-            messageStack(mine: mine)
         }
     }
 
@@ -96,9 +90,11 @@ struct MessageRow: View, Equatable {
             }
         case .asset(let ref, let title, let summary):
             let address = ArtifactAddress(ref)
+            let source = "chat-\(row.id)"
             kept(destination: .assets, label: "收进资产", symbol: "tray.and.arrow.down") {
-                Button { address.map(onOpen) } label: { assetFace(address, title: title, summary: summary) }
+                Button { address.map { onOpen($0, source) } } label: { assetFace(address, title: title, summary: summary) }
                     .buttonStyle(.plain)
+                    .artifactSource(source, radius: 22)
             }
         }
     }
@@ -156,19 +152,35 @@ struct MessageRow: View, Equatable {
             .accessibilityLabel("助手正在输入")
     }
 
+    private var generating: some View {
+        HStack(spacing: 6) {
+            ProgressView().controlSize(.mini)
+            Text("生成中…")
+        }
+        .font(.caption2.weight(.medium))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .opacity(row.footer == .generating ? 1 : 0)
+        .animation(.snappy, value: row.footer)
+        .accessibilityHidden(row.footer != .generating)
+    }
+
     @ViewBuilder
     private var footer: some View {
+        if row.widgetSource {
+            generating
+        } else {
+            status
+        }
+    }
+
+    @ViewBuilder
+    private var status: some View {
         switch row.footer {
         case .read:
             Text("已读").font(.caption2.weight(.medium)).foregroundStyle(.secondary).padding(.horizontal, 8)
-        case .generating:
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.mini)
-                Text("生成中…")
-            }
-            .font(.caption2.weight(.medium))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 8)
+        case .generating, nil:
+            EmptyView()
         case .failed(let requestId):
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.circle.fill")
@@ -180,7 +192,6 @@ struct MessageRow: View, Equatable {
             .font(.caption)
             .foregroundStyle(.red)
             .padding(.horizontal, 8)
-        case nil: EmptyView()
         }
     }
 

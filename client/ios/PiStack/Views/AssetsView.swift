@@ -10,7 +10,7 @@ struct AssetsView: View {
     let onOrder: ([String]) -> Void
     @Environment(\.topInset) private var topInset
     @State private var editing = false
-    @State private var opening: ArtifactAddress?
+    @Environment(\.openArtifact) private var openArtifact
 
     private let columns = [GridItem(.adaptive(minimum: 156), spacing: 12)]
 
@@ -28,10 +28,11 @@ struct AssetsView: View {
                 } else {
                     LazyVGrid(columns: columns, spacing: 14) {
                         ForEach(items) { item in
-                            Button { opening = ArtifactAddress(item.ref) } label: {
+                            Button { ArtifactAddress(item.ref).map { openArtifact($0, "asset-\(item.id)") } } label: {
                                 AssetCard(item: item, botId: botId, api: api)
                             }
                             .buttonStyle(.plain)
+                            .artifactSource("asset-\(item.id)", radius: 24)
                             .contextMenu {
                                 Button("拷贝引用", systemImage: "link") { UIPasteboard.general.string = item.ref }
                                 Button("调整排布", systemImage: "square.grid.2x2") { editing = true }
@@ -55,7 +56,6 @@ struct AssetsView: View {
         .contentMargins(.top, topInset, for: .scrollContent)
         .doneBar(editing) { editing = false }
         .onChange(of: items.isEmpty) { _, empty in if empty { editing = false } }
-        .artifactViewer($opening, botId: botId, api: api)
     }
 }
 

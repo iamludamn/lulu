@@ -128,36 +128,36 @@ export async function openMcp(servers: Record<string, McpServerConfig>, host: Mc
   const statuses: McpConnection[] = [];
   const reachable: { server: string; url: string; headers: Record<string, string> | undefined; auth: AuthProvider | undefined }[] = [];
   for (const [server, config] of Object.entries(servers)) {
-    const checkedAt = Date.now();
-    let headers: Record<string, string> | undefined = undefined;
-    try {
-      headers = headersOf(server, config, host);
-      const auth = config.fetch === undefined ? authOf(server, config, headers, host) : undefined;
-      const client = new McpClient({ name: "pistack", version: "0.1.0" });
-      await client.connect(
-        new StreamableHttpTransport({
-          url: config.url,
-          ...(headers === undefined ? {} : { headers }),
-          ...(auth === undefined ? {} : { authProvider: auth }),
-          ...(config.fetch === undefined ? {} : { fetch: config.fetch, openGetStream: false }),
-        }),
-      );
-      clients.push(client);
-      const tools = await client.listTools();
-      for (const tool of tools) connected.push({ server, client, tool });
-      statuses.push({ name: server, state: "connected", tools: tools.length, checkedAt });
-      if (config.fetch === undefined) reachable.push({ server, url: config.url, headers, auth });
-    } catch (error) {
-      const message = redact(error instanceof Error ? error.message : String(error), config, headers);
-      console.error(`[pistack] MCP server "${server}" unavailable: ${message}`);
-      statuses.push({
-        name: server,
-        state: error instanceof McpAuthRequiredError ? "needs-auth" : "failed",
-        tools: 0,
-        error: truncate(message, MAX_ERROR_CHARS),
-        checkedAt,
-      });
-    }
+    await host.telemetry.startSpan({ name: "mcp.connect", attributes: { "lulu.mcp.server": server } }, async (span) => {
+      const checkedAt = Date.now();
+      let headers: Record<string, string> | undefined = undefined;
+      try {
+        headers = headersOf(server, config, host);
+        const auth = config.fetch === undefined ? authOf(server, config, headers, host) : undefined;
+        const client = new McpClient({ name: "pistack", version: "0.1.0" });
+        await client.connect(
+          new StreamableHttpTransport({
+            url: config.url,
+            ...(headers === undefined ? {} : { headers }),
+            ...(auth === undefined ? {} : { authProvider: auth }),
+            ...(config.fetch === undefined ? {} : { fetch: config.fetch, openGetStream: false }),
+          }),
+        );
+        clients.push(client);
+        const tools = await client.listTools();
+        for (const tool of tools) connected.push({ server, client, tool });
+        statuses.push({ name: server, state: "connected", tools: tools.length, checkedAt });
+        span.setAttributes({ "lulu.mcp.state": "connected", "lulu.mcp.tools": tools.length });
+        if (config.fetch === undefined) reachable.push({ server, url: config.url, headers, auth });
+      } catch (error) {
+        const message = redact(error instanceof Error ? error.message : String(error), config, headers);
+        const state = error instanceof McpAuthRequiredError ? "needs-auth" : "failed";
+        console.error(`[pistack] MCP server "${server}" unavailable: ${message}`);
+        statuses.push({ name: server, state, tools: 0, error: truncate(message, MAX_ERROR_CHARS), checkedAt });
+        span.setAttributes({ "lulu.mcp.state": state });
+        span.setStatus({ status: "error", error: { name: error instanceof Error ? error.name : "Error", message: truncate(message, MAX_ERROR_CHARS) } });
+      }
+    });
   }
   const listed = new Map<string, { description: string; count: number }>();
   for (const { server, client } of connected) {

@@ -5,8 +5,9 @@ import { GRACE_MS, WATCHDOG_MS, nextRunAfter, type ScheduledJob } from "./schedu
 
 export type FireStart = (tx: Tx, job: ScheduledJob, runId: string) => Promise<unknown>;
 
-export async function fireDue(tx: Tx, now: number, start: FireStart): Promise<void> {
+export async function fireDue(tx: Tx, now: number, start: FireStart): Promise<string[]> {
   const draft = await tx.doc(CronJobsDoc);
+  const fired: string[] = [];
   for (const job of draft.jobs) {
     if (job.state !== "active" || job.nextRunAt === null || job.nextRunAt > now) continue;
     const scheduledFor = job.nextRunAt;
@@ -17,10 +18,12 @@ export async function fireDue(tx: Tx, now: number, start: FireStart): Promise<vo
     }
     const runId = await runIdOf("cron:" + job.id + ":" + scheduledFor);
     await start(tx, job, runId);
+    fired.push(runId);
     job.lastRun = { scheduledFor, runId };
     job.nextRunAt = nextRunAfter(job.schedule, scheduledFor);
     if (job.schedule.kind === "once") job.state = "done";
   }
+  return fired;
 }
 
 export async function expireRuns(tx: Tx, now: number): Promise<ConversationId[]> {

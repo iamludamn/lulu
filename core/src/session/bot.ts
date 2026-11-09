@@ -1,13 +1,14 @@
 import type { AttachedReplicatedState } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai/models";
-import { type Conversation, type ConversationId, type ConversationView, type EntryId, Harness, type Registry, type Storage } from "@earendil-works/pi-durable";
+import { type Conversation, type ConversationView, type EntryId, Harness, type Registry, type Storage } from "@earendil-works/pi-durable";
+import type { TelemetrySpan } from "@earendil-works/pi-telemetry";
 import type { McpHost, McpServerConfig } from "../agent/mcp.js";
 import { ChatDoc, linkChatMessage, recordChatMessage, trackProgress, trackSnapshot } from "./progress.js";
 import type { EpisodeSource } from "../memory/doc.js";
 import { episodesOf } from "../memory/episodes.js";
 import type { McpStatus, ModelRef, SessionProgress } from "../protocol/contract.js";
-import { RECOVERY_ALARM_DELAY_MS, abortRuns, fireSchedules, nextAlarmAt, replaceAlarm, scheduleEntries } from "../cron/alarm.js";
+import { RECOVERY_ALARM_DELAY_MS, type AlarmOutcome, abortRuns, fireSchedules, nextAlarmAt, replaceAlarm, scheduleEntries } from "../cron/alarm.js";
 import { CRON_KIND } from "../cron/doc.js";
 import { PanelDoc } from "../panel/doc.js";
 import { EMPTY_PANEL, type PanelState } from "../protocol/panel.js";
@@ -166,6 +167,7 @@ export class BotSession {
         },
       },
       BACKGROUND_CONTEXT,
+      this.#snapshotFailed("progress"),
     );
     trackSnapshot(
       harness,
@@ -181,6 +183,7 @@ export class BotSession {
         },
       },
       BACKGROUND_CONTEXT,
+      this.#snapshotFailed("layout"),
     );
     await harness.commit(async (tx) => {
       const delivery = await tx.doc(DeliveryDoc);
@@ -188,6 +191,15 @@ export class BotSession {
       delivery.since = Math.max(0, ...(await tx.doc(ChatDoc)).messages.map((message) => message.id ?? 0));
     }, BACKGROUND_CONTEXT);
     await this.#refreshAlarm();
+  }
+
+  #snapshotFailed(snapshot: string): (error: unknown) => void {
+    return (error) => {
+      reportError("Snapshot refresh failed", error, { snapshot });
+      void this.#host.telemetry
+        .startSpan({ name: "bot.snapshot", attributes: { "lulu.bot.id": this.#host.name, "lulu.snapshot": snapshot } }, () => Promise.reject(error))
+        .catch(() => undefined);
+    };
   }
 
   fetch(request: Request): Promise<Response> {
@@ -198,7 +210,7 @@ export class BotSession {
   }
 
   alarm(): Promise<void> {
-    return this.#host.telemetry.startSpan({ name: "bot.alarm", attributes: { "lulu.bot.id": this.#host.name } }, () => this.#runAlarm());
+    return this.#host.telemetry.startSpan({ name: "bot.alarm", attributes: { "lulu.bot.id": this.#host.name } }, (span) => this.#runAlarm(span));
   }
 
   async webSocketMessage(socket: Socket, message: string | ArrayBuffer): Promise<void> {
@@ -268,8 +280,8 @@ export class BotSession {
   }
 
   async #hello(socket: Socket): Promise<boolean> {
-    this.#host.sockets.attach(socket, { role: "client", ready: true } satisfies ClientAttachment);
     const config = await this.#config();
+    this.#host.sockets.attach(socket, { role: "client", ready: true } satisfies ClientAttachment);
     this.#send(socket, { type: "models", config });
     this.#send(socket, this.#stateMessage());
     return true;
@@ -473,7 +485,7 @@ export class BotSession {
   }
 
   #broadcast(message: ServerMessage): void {
-    for (const socket of this.#host.sockets.all()) this.#send(socket, message);
+    for (const socket of this.#host.sockets.all()) if (this.#attachmentOf(socket)?.ready === true) this.#send(socket, message);
   }
 
   #send(socket: Socket, message: ServerMessage): void {
@@ -492,20 +504,21 @@ export class BotSession {
     socket.close(code, reason);
   }
 
-  async #runAlarm(): Promise<void> {
+  async #runAlarm(span: TelemetrySpan): Promise<void> {
     const now = Date.now();
     if (this.#registry === undefined) return this.#refreshAlarm();
     const parentId = this.#root.id;
     const selected = chatModelRef(this.#host.env, this.#selected);
-    let children: ConversationId[];
+    let outcome: AlarmOutcome;
     try {
-      children = await fireSchedules(this.#harness, parentId, selected, now);
+      outcome = await fireSchedules(this.#harness, parentId, selected, now);
     } catch (error) {
       reportError("Schedule run failed", error);
       await this.#serializeAlarmUpdate(() => replaceAlarm(this.#host.alarm, now + RECOVERY_ALARM_DELAY_MS));
       return;
     }
-    await abortRuns(this.#harness, children);
+    span.setAttributes({ "lulu.cron.fired": outcome.fired.length, "lulu.cron.expired": outcome.expired.length });
+    await abortRuns(this.#harness, outcome.expired);
     await this.#refreshAlarm();
   }
 
