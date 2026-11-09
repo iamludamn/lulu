@@ -20,7 +20,10 @@ function parseClientMessage(value: Record<string, unknown>): ClientMessage {
     return { type, requestId, model: { provider: model.provider, id: model.id } };
   }
   if ((type === "widget.keep" || type === "widget.drop") && isString(requestId) && isString(value.origin)) return { type, requestId, origin: value.origin };
-  if (type === "layout.order" && isString(requestId) && (value.target === "panel" || value.target === "assets") && Array.isArray(value.ids) && value.ids.every(isString)) {
+  if (type === "widget.check" && isString(requestId) && isString(value.id) && Number.isInteger(value.index) && typeof value.done === "boolean") {
+    return { type, requestId, id: value.id, index: value.index as number, done: value.done };
+  }
+  if (type === "layout.order" && isString(requestId) && value.target === "assets" && Array.isArray(value.ids) && value.ids.every(isString)) {
     return { type, requestId, target: value.target, ids: value.ids };
   }
   if (type === "widget.make" && isString(requestId) && isString(value.origin)) return { type, requestId, origin: value.origin };

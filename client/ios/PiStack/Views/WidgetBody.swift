@@ -8,6 +8,7 @@ struct WidgetBody: View {
     let api: Api
     let interactive: Bool
     let onPrompt: (String) -> Void
+    let onCheck: (Int, Bool) -> Void
 
     private var compact: Bool { widget.size == .s }
     private var rowLimit: Int { widget.size == .l ? 8 : compact ? 2 : 3 }
@@ -178,34 +179,50 @@ struct WidgetBody: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(items.prefix(rows).enumerated()), id: \.offset) { index, item in
                 if index > 0 { Divider().opacity(0.6) }
-                HStack(spacing: 10) {
+                Button {
                     if let done = item.done {
-                        Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(done ? Color.accentColor : .secondary)
-                    } else if let tone = item.tone {
-                        Circle().fill(tone.color).frame(width: 8, height: 8)
+                        onCheck(index, !done)
+                    } else {
+                        onPrompt("聊聊「\(widget.title)」里的「\(item.title)」")
                     }
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(item.title)
-                            .font(.subheadline.weight(.medium))
-                            .strikethrough(item.done == true)
-                            .foregroundStyle(item.done == true ? .secondary : .primary)
-                            .lineLimit(1)
-                        if let subtitle = item.subtitle, !compact {
-                            Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                    }
-                    Spacer(minLength: 6)
-                    if let value = item.value {
-                        Text(value).font(.subheadline.monospacedDigit()).foregroundStyle(item.tone == .bad || item.tone == .warn ? item.tone!.color : .secondary).lineLimit(1)
-                    }
+                } label: {
+                    listRow(item)
                 }
-                .padding(.vertical, widget.size == .l ? 6 : 4)
+                .buttonStyle(.plain)
+                .disabled(!interactive)
             }
             if items.count > rows {
                 Text("还有 \(items.count - rows) 项").font(.caption).foregroundStyle(.secondary).padding(.top, widget.size == .l ? 4 : 2)
             }
         }
+        .sensoryFeedback(.selection, trigger: items.compactMap(\.done))
+    }
+
+    private func listRow(_ item: PanelWidget.Item) -> some View {
+        HStack(spacing: 10) {
+            if let done = item.done {
+                Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(done ? Color.accentColor : .secondary)
+            } else if let tone = item.tone {
+                Circle().fill(tone.color).frame(width: 8, height: 8)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.title)
+                    .font(.subheadline.weight(.medium))
+                    .strikethrough(item.done == true)
+                    .foregroundStyle(item.done == true ? .secondary : .primary)
+                    .lineLimit(1)
+                if let subtitle = item.subtitle, !compact {
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 6)
+            if let value = item.value {
+                Text(value).font(.subheadline.monospacedDigit()).foregroundStyle(item.tone == .bad || item.tone == .warn ? item.tone!.color : .secondary).lineLimit(1)
+            }
+        }
+        .padding(.vertical, widget.size == .l ? 6 : 4)
+        .contentShape(.rect)
     }
 
     private func timeline(_ events: [PanelWidget.Event]) -> some View {
@@ -225,21 +242,26 @@ struct WidgetBody: View {
                     }
                 }
                 let date = Date(timeIntervalSince1970: event.at / 1000)
-                HStack(alignment: .top, spacing: 10) {
-                    Text(date, format: .dateTime.hour().minute())
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 42, alignment: .leading)
-                        .padding(.top, 1)
-                    RoundedRectangle(cornerRadius: 2).fill((event.tone ?? .accent).color).frame(width: 3)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(event.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                        Text(event.detail ?? date.formatted(.relative(presentation: .named)))
-                            .font(.caption)
+                Button { onPrompt("聊聊「\(event.title)」这个安排") } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        Text(date, format: .dateTime.hour().minute())
+                            .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                            .frame(width: 42, alignment: .leading)
+                            .padding(.top, 1)
+                        RoundedRectangle(cornerRadius: 2).fill((event.tone ?? .accent).color).frame(width: 3)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(event.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                            Text(event.detail ?? date.formatted(.relative(presentation: .named)))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                     }
+                    .contentShape(.rect)
                 }
+                .buttonStyle(.plain)
+                .disabled(!interactive)
                 .opacity((event.end ?? event.at) < now ? 0.55 : 1)
                 .fixedSize(horizontal: false, vertical: true)
             }

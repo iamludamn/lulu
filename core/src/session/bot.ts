@@ -10,6 +10,7 @@ import { episodesOf } from "../memory/episodes.js";
 import type { McpStatus, ModelRef, SessionProgress } from "../protocol/contract.js";
 import { RECOVERY_ALARM_DELAY_MS, type AlarmOutcome, abortRuns, fireSchedules, nextAlarmAt, replaceAlarm, scheduleEntries } from "../cron/alarm.js";
 import { CRON_KIND } from "../cron/doc.js";
+import { checkItem } from "../panel/check.js";
 import { PanelDoc } from "../panel/doc.js";
 import { EMPTY_PANEL, type PanelState } from "../protocol/panel.js";
 import type { AssetItem } from "../protocol/send.js";
@@ -330,7 +331,11 @@ export class BotSession {
         this.#send(socket, { type: "result", requestId: command.requestId, ok: true });
         return;
       case "layout.order":
-        await orderCards(this.#harness, command.target, command.ids);
+        await orderCards(this.#harness, command.ids);
+        this.#send(socket, { type: "result", requestId: command.requestId, ok: true });
+        return;
+      case "widget.check":
+        await checkItem(this.#harness, command.id, command.index, command.done);
         this.#send(socket, { type: "result", requestId: command.requestId, ok: true });
         return;
       case "widget.make": {

@@ -68,12 +68,14 @@ public final class BotStore {
     public func keep(_ origin: String) { dispatch(Command(.keep(origin: origin))) }
     public func drop(_ origin: String) { dispatch(Command(.drop(origin: origin))) }
 
-    public func reorder(_ layout: Layout, _ ids: [String]) {
-        switch layout {
-        case .panel: snapshot.panel = PanelState(order: ids, widgets: snapshot.panel.widgets)
-        case .assets: snapshot.assets = ids.compactMap { id in snapshot.assets.first { $0.id == id } }
-        }
-        dispatch(Command(.order(layout, ids)))
+    public func reorderAssets(_ ids: [String]) {
+        snapshot.assets = ids.compactMap { id in snapshot.assets.first { $0.id == id } }
+        dispatch(Command(.order(ids)))
+    }
+
+    public func check(_ widget: String, item index: Int, done: Bool) {
+        snapshot.panel = snapshot.panel.checking(widget, item: index, done: done)
+        dispatch(Command(.check(id: widget, index: index, done: done)))
     }
 
     public func makeWidget(origin: String) {

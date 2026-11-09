@@ -44,7 +44,7 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
         public let subtitle: String?
         public let value: String?
         public let tone: Tone?
-        public let done: Bool?
+        public var done: Bool?
     }
 
     public struct Event: Decodable, Equatable, Sendable {
@@ -112,7 +112,15 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
     public let ask: String?
     public let updatedAt: Double?
     public let origin: String?
-    public let body: Body
+    public var body: Body
+
+    func checking(_ index: Int, done: Bool) -> PanelWidget {
+        guard case .list(var items) = body, items.indices.contains(index), items[index].done != nil else { return self }
+        items[index].done = done
+        var copy = self
+        copy.body = .list(items)
+        return copy
+    }
 }
 
 public struct PanelState: Decodable, Equatable, Sendable {
@@ -141,6 +149,12 @@ public struct PanelState: Decodable, Equatable, Sendable {
     }
 
     public var list: [PanelWidget] { order.compactMap { widgets[$0] } }
+
+    public func checking(_ id: String, item index: Int, done: Bool) -> PanelState {
+        var copy = widgets
+        copy[id] = widgets[id]?.checking(index, done: done)
+        return PanelState(order: order, widgets: copy)
+    }
 }
 
 public struct ArtifactAddress: Identifiable, Hashable, Sendable {

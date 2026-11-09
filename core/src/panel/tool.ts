@@ -6,10 +6,9 @@ import { WidgetInput } from "../protocol/panel.js";
 import { PanelDoc } from "./doc.js";
 
 const PanelParams = Type.Object({
-  action: StringEnum(["update", "remove", "move", "list"], { description: "update | remove | move | list" }),
+  action: StringEnum(["update", "remove", "list"], { description: "update | remove | list" }),
   widget: Type.Optional(WidgetInput),
-  id: Type.Optional(Type.String({ description: "Widget id for remove and move" })),
-  index: Type.Optional(Type.Integer({ minimum: 0, description: "Target position for move, 0 is first" })),
+  id: Type.Optional(Type.String({ description: "Widget id for remove" })),
 });
 
 type PanelArgs = Static<typeof PanelParams>;
@@ -50,20 +49,6 @@ async function remove(api: ToolExecutionApi<PanelDetails>, args: PanelArgs, cont
   return ok(`removed ${id}`, "remove", id);
 }
 
-async function move(api: ToolExecutionApi<PanelDetails>, args: PanelArgs, context: Context): Promise<ToolExecutionResult<PanelDetails>> {
-  const id = args.id?.trim();
-  if (!id || args.index === undefined) return fail("move requires id and index");
-  const current = (await api.snapshot(PanelDoc, context))?.order ?? [];
-  if (!current.includes(id)) return fail("unknown id: " + id);
-  await api.commit(async (tx) => {
-    const draft = await tx.doc(PanelDoc);
-    const rest = draft.order.filter((entry) => entry !== id);
-    rest.splice(Math.min(args.index ?? 0, rest.length), 0, id);
-    draft.order = rest;
-  }, context);
-  return ok(`moved ${id} to ${args.index}`, "move", id);
-}
-
 async function list(api: ToolExecutionApi<PanelDetails>, context: Context): Promise<ToolExecutionResult<PanelDetails>> {
   const state = await api.snapshot(PanelDoc, context);
   const widgets = (state?.order ?? []).flatMap((id) => state?.widgets[id] ?? []);
@@ -88,8 +73,6 @@ export const PanelTool = defineTool({
         return update(api, args as PanelArgs, context);
       case "remove":
         return remove(api, args as PanelArgs, context);
-      case "move":
-        return move(api, args as PanelArgs, context);
       case "list":
         return list(api, context);
       default:
