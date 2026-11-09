@@ -23,6 +23,7 @@ private struct FlowingBorder: ViewModifier {
     let radius: CGFloat
     let paused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var scheme
     @State private var visible = true
 
     private static let period = 3.6
@@ -56,13 +57,14 @@ private struct FlowingBorder: ViewModifier {
 
     private func border(_ shape: RoundedRectangle) -> some View {
         ZStack {
-            shape.strokeBorder(Color.white.opacity(0.3), lineWidth: 0.6)
+            shape.strokeBorder(scheme == .light ? Color.black.opacity(0.06) : Color.white.opacity(0.3), lineWidth: 0.6)
             if reduceMotion {
                 shape.strokeBorder(Color.white.opacity(0.55), lineWidth: 1.2)
             } else {
                 TimelineView(.animation(minimumInterval: 1.0 / 30, paused: idle)) { context in
                     let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: Self.period) / Self.period
-                    shape.strokeBorder(AngularGradient(gradient: Self.streak, center: .center, angle: .degrees(turn * 360)), lineWidth: 1.2)
+                    shape.strokeBorder(AngularGradient(gradient: Self.streak, center: .center, angle: .degrees(turn * 360)), lineWidth: scheme == .light ? 1.6 : 1.2)
+                        .shadow(color: .black.opacity(scheme == .light ? 0.22 : 0), radius: 1.2)
                 }
             }
         }
