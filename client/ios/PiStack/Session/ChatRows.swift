@@ -118,7 +118,8 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
         rows[last].footer = .read
     }
     if awaiting(snapshot, entries: entries) {
-        let text = liveStatus(of: snapshot.view) ?? subtasks(of: snapshot.progress).first(where: \.running)?.description ?? ""
+        let running = subtasks(of: snapshot.progress).filter(\.running)
+        let text = running.count > 1 ? "\(running.count) 个任务进行中" : running.first?.description ?? ""
         var row = ChatRow(id: "live", role: .assistant, text: text)
         row.typing = true
         rows.append(row)
