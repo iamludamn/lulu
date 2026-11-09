@@ -69,6 +69,7 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
         case timeline([Event])
         case note(String)
         case media(src: String, caption: String?)
+        case web(src: String)
         case actions([Button])
         case unknown
 
@@ -96,6 +97,7 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
             case "timeline": self = .timeline(try c.decode([Event].self, forKey: .events))
             case "note": self = .note(try c.decode(String.self, forKey: .markdown))
             case "media": self = .media(src: try c.decode(String.self, forKey: .src), caption: try c.decodeIfPresent(String.self, forKey: .caption))
+            case "web": self = .web(src: try c.decode(String.self, forKey: .src))
             case "actions": self = .actions(try c.decode([Button].self, forKey: .buttons))
             default: self = .unknown
             }

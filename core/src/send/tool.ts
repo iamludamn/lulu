@@ -37,12 +37,18 @@ function misuse(input: SendInput, files: boolean): string | undefined {
   return undefined;
 }
 
+const cardRef = (card: SendCard): string | undefined => {
+  if (card.kind === "asset") return card.ref;
+  return card.panel.body.kind === "web" ? card.panel.body.src : undefined;
+};
+
 async function missingAsset(card: SendCard, exists: ArtifactCheck | undefined): Promise<string | undefined> {
-  if (card.kind !== "asset") return undefined;
-  if (exists === undefined) return "Artifacts are not available here, so asset cards cannot be sent. Nothing was sent.";
-  const match = ARTIFACT_REF.exec(card.ref);
-  if (match === null) return "asset ref must look like artifact://name@version. Nothing was sent.";
-  return (await exists(match[1], Number(match[2]))) ? undefined : `${card.ref} does not exist. Nothing was sent. Save the file with the artifact tools first and use the ref they return.`;
+  const ref = cardRef(card);
+  if (ref === undefined) return undefined;
+  if (exists === undefined) return "Artifacts are not available here, so asset and web cards cannot be sent. Nothing was sent.";
+  const match = ARTIFACT_REF.exec(ref);
+  if (match === null) return "ref must look like artifact://name@version. Nothing was sent.";
+  return (await exists(match[1], Number(match[2]))) ? undefined : `${ref} does not exist. Nothing was sent. Save the file with the artifact tools first and use the ref they return.`;
 }
 
 function fail(text: string): ToolExecutionResult<SendDetails> {
