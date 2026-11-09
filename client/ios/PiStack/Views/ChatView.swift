@@ -43,7 +43,7 @@ struct ChatView: View {
                     ForEach(rows[start...]) { row in
                         MessageRow(row: row, store: store, botId: bot.id, api: api, onOpen: openArtifact, onKept: onKept)
                             .equatable()
-                            .padding(.bottom, row.tail ? 10 : 0)
+                            .padding(.bottom, row.tail ? 12 : 0)
                             .transition(.opacity.animation(.easeOut(duration: 0.2)))
                     }
                     Color.clear.frame(height: 1).id(Self.bottom)

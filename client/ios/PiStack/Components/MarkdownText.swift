@@ -129,6 +129,7 @@ struct MarkdownText: View {
     let text: String
     var selectable = false
     var document = false
+    var airy = false
 
     var body: some View {
         if selectable {
@@ -149,10 +150,10 @@ struct MarkdownText: View {
 
     private func gap(_ previous: Block, _ next: Block) -> CGFloat {
         switch (previous, next) {
-        case (.item, .item): document ? 6 : 4
+        case (.item, .item): document ? 6 : (airy ? 5 : 4)
         case (_, .heading(let level, _)): document ? (level <= 2 ? 30 : 22) : 14
         case (.heading, _): document ? 10 : 8
-        default: document ? 16 : 8
+        default: document ? 16 : (airy ? 11 : 8)
         }
     }
 

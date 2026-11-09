@@ -37,9 +37,9 @@ struct MessageRow: View, Equatable {
     private func messageStack(mine: Bool) -> some View {
         VStack(alignment: mine ? .trailing : .leading, spacing: 4) {
             HStack(spacing: 0) {
-                if mine { Spacer(minLength: 48) }
+                if mine { Spacer(minLength: 56) }
                 bubble(mine: mine)
-                if !mine { Spacer(minLength: 32) }
+                if !mine { Spacer(minLength: 56) }
             }
             footer
         }
@@ -53,9 +53,10 @@ struct MessageRow: View, Equatable {
             if mine {
                 Text(linkified(AttributedString(row.text)))
             } else {
-                MarkdownText(text: row.text)
+                MarkdownText(text: row.text, airy: true)
             }
         }
+        .lineSpacing(3)
         .padding(.horizontal, 15)
         .padding(.vertical, 10)
         .opacity(row.sending ? 0.55 : 1)
