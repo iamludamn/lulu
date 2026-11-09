@@ -42,7 +42,7 @@
     "run_worker_first": ["/api/*"],
   },
   "vars": {
-    "OTEL_EXPORTER_OTLP_ENDPOINT": "https://api.honeycomb.io",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "https://otel.ludamn.xyz",
     "OTEL_SERVICE_NAME": "lulu",
   },
   "observability": {
