@@ -6,10 +6,13 @@ struct MessageRow: View, Equatable {
     let store: BotStore
     let botId: String
     let api: Api
+    let space: Namespace.ID
+    let expanded: Bool
+    let onRead: (String) -> Void
     let onOpen: (ArtifactAddress, String) -> Void
     let onKept: (Page) -> Void
 
-    static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.row == rhs.row }
+    static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.row == rhs.row && lhs.expanded == rhs.expanded }
 
     var body: some View {
         switch row.role {
@@ -52,6 +55,11 @@ struct MessageRow: View, Equatable {
         let content = Group {
             if mine {
                 Text(linkified(AttributedString(row.text)))
+            } else if let full = row.body {
+                VStack(alignment: .leading, spacing: 8) {
+                    MarkdownText(text: row.text, airy: true)
+                    LongHint(length: readingLength(full))
+                }
             } else {
                 MarkdownText(text: row.text, airy: true)
             }
@@ -61,17 +69,25 @@ struct MessageRow: View, Equatable {
         .padding(.vertical, 10)
         .opacity(row.sending ? 0.55 : 1)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(mine ? "我" : "助手")：\(row.text)")
+        .accessibilityLabel("\(mine ? "我" : "助手")：\(row.text)\(row.body == nil ? "" : "。含全文")")
+        .accessibilityAddTraits(row.body == nil ? [] : .isButton)
         Group {
             if mine {
                 content.background { shape.fill(.clear).glassEffect(.clear, in: shape) }
+            } else if row.body != nil {
+                content.frosted(20)
+                    .flowingBorder(radius: 20, paused: expanded)
+                    .opacity(expanded ? 0 : 1)
+                    .overlay { if !expanded { Color.clear.matchedGeometryEffect(id: row.id, in: space) } }
+                    .contentShape(shape)
+                    .onTapGesture { onRead(row.id) }
             } else {
                 content.frosted(20)
             }
         }
         .contentShape(.contextMenuPreview, shape)
         .contextMenu {
-            Button("拷贝", systemImage: "doc.on.doc") { UIPasteboard.general.string = row.text }
+            Button("拷贝", systemImage: "doc.on.doc") { UIPasteboard.general.string = row.body.map { row.text + "\n\n" + $0 } ?? row.text }
             if row.widgetSource {
                 Button("做成视图组件", systemImage: "square.grid.2x2") { store.makeWidget(origin: row.id) }
             }
