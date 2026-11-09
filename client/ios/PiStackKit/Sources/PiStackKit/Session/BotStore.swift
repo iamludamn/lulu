@@ -144,7 +144,8 @@ public final class BotStore {
         snapshot.link = .online
         switch message {
         case .state(let view, let progress, let mcp, let panel, let assets):
-            snapshot.view = view.applied(to: snapshot.view)
+            guard let applied = view.applied(to: snapshot.view) else { return }
+            snapshot.view = applied
             snapshot.progress = progress
             snapshot.mcp = mcp
             snapshot.panel = panel

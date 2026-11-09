@@ -29,10 +29,12 @@ public struct ViewFrame: Decodable, Sendable {
     let order: [String]
     let docs: [String: JSONValue]
 
-    func applied(to view: ConversationView?) -> ConversationView {
+    func applied(to view: ConversationView?) -> ConversationView? {
         var known = Dictionary(uniqueKeysWithValues: (view?.entries ?? []).map { ($0.id, $0) })
         for entry in entries { known[entry.id] = entry }
-        return ConversationView(entries: order.compactMap { known[$0] }, docs: docs)
+        let merged = order.compactMap { known[$0] }
+        guard merged.count == order.count else { return nil }
+        return ConversationView(entries: merged, docs: docs)
     }
 }
 
