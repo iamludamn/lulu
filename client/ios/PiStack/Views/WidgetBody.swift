@@ -31,8 +31,8 @@ struct WidgetBody: View {
                 .mask(LinearGradient(stops: [.init(color: .black, location: 0.75), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom))
         case .media(let src, let caption):
             media(src, caption: caption)
-        case .web:
-            web
+        case .space(_, let summary):
+            space(summary)
         case .actions(let buttons):
             actions(buttons)
         case .unknown:
@@ -272,12 +272,20 @@ struct WidgetBody: View {
             }
     }
 
-    private var web: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "safari").font(.system(size: 34)).foregroundStyle(Color.accentColor)
-            Text("点开查看").font(.footnote).foregroundStyle(.secondary)
+    private func space(_ summary: String?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let summary {
+                Text(summary)
+                    .font(compact ? .footnote : .callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(compact ? 3 : 6)
+            }
+            Spacer(minLength: 0)
+            Label("打开 Space", systemImage: "arrow.up.forward.app")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func resolve(_ src: String) -> URL? {

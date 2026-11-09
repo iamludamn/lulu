@@ -44,7 +44,7 @@ private struct HTMLPage: UIViewRepresentable {
         view.scrollView.backgroundColor = .clear
         view.navigationDelegate = context.coordinator
         context.coordinator.dark = dark
-        view.loadHTMLString(HTMLTheme.prepared(html), baseURL: nil)
+        view.loadHTMLString(HTMLTheme.prepared(html, network: bridge != nil), baseURL: nil)
         return view
     }
 

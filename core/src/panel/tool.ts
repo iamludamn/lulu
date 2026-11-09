@@ -3,6 +3,9 @@ import type { Context } from "@earendil-works/chord";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 import { WidgetInput } from "../protocol/panel.js";
+import { ARTIFACT_REF } from "../protocol/send.js";
+import { spaceRefProblem } from "../artifact/space.js";
+import type { ArtifactCheck } from "../send/tool.js";
 import { PanelDoc } from "./doc.js";
 
 const PanelParams = Type.Object({
@@ -23,12 +26,28 @@ function fail(text: string): ToolExecutionResult<PanelDetails> {
   return { output: [{ type: "text", text }], details: { action: "error", id: null }, isError: true };
 }
 
-async function update(api: ToolExecutionApi<PanelDetails>, args: PanelArgs, context: Context): Promise<ToolExecutionResult<PanelDetails>> {
+async function spaceProblem(widget: NonNullable<PanelArgs["widget"]>, id: string, exists: ArtifactCheck | undefined): Promise<string | undefined> {
+  if (widget.body.kind !== "space") return undefined;
+  const refused = spaceRefProblem(id, widget.body.src);
+  if (refused !== undefined) return refused;
+  const match = ARTIFACT_REF.exec(widget.body.src);
+  if (match === null || exists === undefined) return undefined;
+  return (await exists(match[1], Number(match[2]))) ? undefined : `${widget.body.src} does not exist. Nothing was changed. Save the page with the artifact tools first and use the ref they return.`;
+}
+
+async function update(api: ToolExecutionApi<PanelDetails>, args: PanelArgs, context: Context, exists: ArtifactCheck | undefined): Promise<ToolExecutionResult<PanelDetails>> {
   const widget = args.widget;
   if (!widget) return fail("update requires widget");
   const id = widget.id.trim();
   const current = await api.snapshot(PanelDoc, context);
-  if (current?.widgets[id] === undefined) return fail(`${id} is not on the panel. Only the user adds widgets: offer a new one with send_to_user type widget kind panel.`);
+  const previous = current?.widgets[id];
+  if (previous === undefined) return fail(`${id} is not on the panel. Only the user adds widgets: offer a new one with send_to_user type widget kind panel.`);
+  const wasSpace = (previous.body.kind as string) === "space" || (previous.body.kind as string) === "web";
+  if (wasSpace !== (widget.body.kind === "space")) {
+    return fail(`${id} ${wasSpace ? "is a space and cannot become another kind of widget" : "is not a space and cannot become one"}: its saved state would be lost. Nothing was changed. Offer a new widget with a new id instead.`);
+  }
+  const refused = await spaceProblem(widget, id, exists);
+  if (refused !== undefined) return fail(refused);
   const updatedAt = Date.now();
   await api.commit(async (tx) => {
     const draft = await tx.doc(PanelDoc);
@@ -70,30 +89,31 @@ async function list(api: ToolExecutionApi<PanelDetails>, context: Context): Prom
   return ok(widgets.length === 0 ? "Panel is empty." : JSON.stringify(widgets), "list", null);
 }
 
-export const PanelTool = defineTool({
-  name: "panel",
-  description: [
-    "Maintain the widgets the user already keeps on their panel, the dashboard beside this chat.",
-    "update replaces a kept widget's content by id, keeping its id; it cannot add new widgets, which only the user does by swiping a card you offer with send_to_user.",
-    "Pick the body kind by the shape of the information: stat for one number or status, gauge for progress toward a limit, chart for a trend, list for items or a checklist, timeline for dated events, note for a short summary, media for one image, actions for ready-made requests, web for a page that fetches live data or keeps the user's state (see the `space` skill of the artifact server).",
-    "Offer a panel widget only for information the user will check repeatedly and that changes over time, such as a balance, a progress figure, a countdown, a schedule or a short checklist. Do not offer one for a one-off answer; that is a chat reply or a document. Offer at most one widget per conversation topic, and prefer updating a kept widget over offering a new one.",
-    "To keep a widget fresh, create a daily schedule whose prompt updates it by id.",
-  ].join(" "),
-  parameters: PanelParams,
-  replay: "safe",
-  executionMode: "parallel",
-  execute: async (args, api, context) => {
-    switch ((args as PanelArgs).action) {
-      case "update":
-        return update(api, args as PanelArgs, context);
-      case "remove":
-        return remove(api, args as PanelArgs, context);
-      case "move":
-        return move(api, args as PanelArgs, context);
-      case "list":
-        return list(api, context);
-      default:
-        return fail("unknown action: " + String((args as PanelArgs).action));
-    }
-  },
-});
+export const createPanelTool = (exists: ArtifactCheck | undefined) =>
+  defineTool({
+    name: "panel",
+    description: [
+      "Maintain the widgets the user already keeps on their panel, the screen beside this chat.",
+      "update replaces a kept widget's content by id, keeping its id; it cannot add new widgets, which only the user does by swiping a card you offer with send_to_user.",
+      "Pick the body kind by the shape of the information: stat for one number or status, gauge for progress toward a limit, chart for a trend, list for items or a checklist, timeline for dated events, note for a short summary, media for one image, actions for ready-made requests, space for a small app page the user keeps, one that fetches live data or remembers what the user does (an .html artifact; read the `space` skill of the artifact server first). Never change a widget into or out of a space: its saved state would be lost.",
+      "Offer a panel widget only for information the user will check repeatedly and that changes over time, such as a balance, a progress figure, a countdown, a schedule or a short checklist. Do not offer one for a one-off answer; that is a chat reply or a document. Offer at most one widget per conversation topic, and prefer updating a kept widget over offering a new one.",
+      "To keep a widget fresh, create a daily schedule whose prompt updates it by id. A space fetches its own data when opened, so never schedule updates for a space.",
+    ].join(" "),
+    parameters: PanelParams,
+    replay: "safe",
+    executionMode: "parallel",
+    execute: async (args, api, context) => {
+      switch ((args as PanelArgs).action) {
+        case "update":
+          return update(api, args as PanelArgs, context, exists);
+        case "remove":
+          return remove(api, args as PanelArgs, context);
+        case "move":
+          return move(api, args as PanelArgs, context);
+        case "list":
+          return list(api, context);
+        default:
+          return fail("unknown action: " + String((args as PanelArgs).action));
+      }
+    },
+  });

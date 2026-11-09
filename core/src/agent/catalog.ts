@@ -4,8 +4,9 @@ import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
 import { DelegateAgents } from "../delegate/agents.js";
 import { createDelegateExtension } from "../delegate/extension.js";
 import { CronExtension } from "../cron/extension.js";
-import { PanelExtension } from "../panel/extension.js";
+import { createPanelExtension } from "../panel/extension.js";
 import { createSendExtension } from "../send/extension.js";
+import type { ArtifactCheck } from "../send/tool.js";
 import { createEnvironmentExtension } from "../sandbox/extension.js";
 import { createSandboxProvider } from "../sandbox/provider.js";
 import { createMemoryExtension } from "../memory/extension.js";
@@ -22,7 +23,7 @@ const PREAMBLE = [
   "Work with documents the way a person does. Chat is for conversation: an answer, a question, a confirmation, a few sentences.",
   "When the content is long or lasting (a report, plan, guide, comparison, research, step-by-step instructions, a long list or table, or simply more than about ten lines, or anything with headings, tables or command output), write it as a Markdown document instead of a chat message, and give the user the gist in one short message. Never split a long answer into several messages.",
   "Write documents like a good colleague: a title, the conclusion first, then headings, lists and tables where they help, in the language the user writes in.",
-  "A panel widget is only for one small fact that changes and that the user will check again and again.",
+  "A panel widget is for something the user will check again and again: one small fact that changes, or a space, a small app page with live data or saved state.",
   "Nothing you make enters the user's assets or panel on its own. You offer it as a card and the user decides whether to keep it.",
 ].join(" ");
 
@@ -36,21 +37,21 @@ const contextFallback = (error: unknown): string => {
   return "";
 };
 
+const artifactCheck = (host: DurableHost): ArtifactCheck | undefined =>
+  artifactConfigured(host.env)
+    ? async (name, version) => {
+        const query = new URLSearchParams({ name, version: String(version) });
+        return (await host.objects.ARTIFACTS.getByName(host.name).fetch(`https://artifact/stat?${query}`)).ok;
+      }
+    : undefined;
+
 export const CATALOG: Record<string, (deps: HarnessDeps) => Extension> = {
   coding: () => CodingTools,
   environment: ({ host }) => createEnvironmentExtension(createSandboxProvider(host.env, host.name, host.telemetry)),
   delegate: ({ host }) => createDelegateExtension(DelegateAgents, createSandboxProvider(host.env, host.name, host.telemetry)),
   cron: () => CronExtension,
-  panel: () => PanelExtension,
-  send: ({ host }) =>
-    createSendExtension(
-      artifactConfigured(host.env)
-        ? async (name, version) => {
-            const query = new URLSearchParams({ name, version: String(version) });
-            return (await host.objects.ARTIFACTS.getByName(host.name).fetch(`https://artifact/stat?${query}`)).ok;
-          }
-        : undefined,
-    ),
+  panel: ({ host }) => createPanelExtension(artifactCheck(host)),
+  send: ({ host }) => createSendExtension(artifactCheck(host)),
   chat: () =>
     defineExtension({
       name: "pistack.chat",

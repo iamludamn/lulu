@@ -123,11 +123,19 @@ struct WidgetFace: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            if let icon = widget.icon {
+            if let icon = widget.icon ?? (widget.isSpace ? "square.stack.3d.up" : nil) {
                 Image(systemName: icon).foregroundStyle(widget.tone?.color ?? .secondary)
             }
             Text(widget.title).lineLimit(1)
             Spacer(minLength: 4)
+            if widget.isSpace {
+                Text("Space")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Color.accentColor.opacity(0.14), in: .capsule)
+            }
             if widget.size != .s, let updatedAt = widget.updatedAt {
                 Text(Date(timeIntervalSince1970: updatedAt / 1000), format: .relative(presentation: .named))
                     .font(.caption2)
@@ -167,7 +175,7 @@ private struct WidgetCard: View {
                 if let origin = widget.origin { onDrop(origin) }
             }
         if let page {
-            Button { openSpace(page, widget.id, "space-\(widget.id)") } label: { card }
+            Button { openSpace(page, SpaceOpening(id: widget.id, title: widget.title), "space-\(widget.id)") } label: { card }
                 .buttonStyle(.plain)
                 .disabled(editing)
                 .artifactSource("space-\(widget.id)", radius: 26)
@@ -177,7 +185,7 @@ private struct WidgetCard: View {
     }
 
     private var page: ArtifactAddress? {
-        guard case .web(let src) = widget.body else { return nil }
+        guard case .space(let src, _) = widget.body else { return nil }
         return ArtifactAddress(src)
     }
 }

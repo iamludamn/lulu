@@ -10,13 +10,21 @@ final class SpaceBridge: NSObject, WKScriptMessageHandlerWithReply {
     set:function(v){return h.postMessage({op:"set",value:JSON.stringify(v)})}}};})();
     """
 
+    /// What a previewed page saved, held here instead of being written to the saved state.
+    private final class Draft: @unchecked Sendable {
+        var value: String?
+    }
+
     let botId: String
     let space: String
+    let preview: Bool
     let api: Api
+    private let draft = Draft()
 
-    init(botId: String, space: String, api: Api) {
+    init(botId: String, space: String, preview: Bool = false, api: Api) {
         self.botId = botId
         self.space = space
+        self.preview = preview
         self.api = api
     }
 
@@ -30,9 +38,14 @@ final class SpaceBridge: NSObject, WKScriptMessageHandlerWithReply {
         do {
             switch body["op"] as? String {
             case "get":
+                if preview, let value = draft.value { return (value, nil) }
                 return (try await api.spaceState(botId, space: space), nil)
             case "set":
                 guard let value = body["value"] as? String else { return (nil, "state must be JSON-serializable") }
+                if preview {
+                    draft.value = value
+                    return (nil, nil)
+                }
                 try await api.setSpaceState(botId, space: space, json: value)
                 return (nil, nil)
             default:

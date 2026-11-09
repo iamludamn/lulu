@@ -3,6 +3,9 @@ import Foundation
 enum HTMLTheme {
     private static let head = #"<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><style>html{-webkit-text-size-adjust:100%}:root{padding-bottom:env(safe-area-inset-bottom,0px)}</style>"#
 
+    /// An html asset is a finished page: every network request it makes is refused. Only a space may fetch.
+    private static let offline = #"<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; worker-src blob:; form-action 'none'; base-uri 'none'">"#
+
     static func variables(dark: Bool) -> [String: String] {
         [
             "--lulu-bg": "transparent",
@@ -25,13 +28,14 @@ enum HTMLTheme {
         return "(function(){var r=document.documentElement;if(!r)return;var v=\(data);for(var k in v)r.style.setProperty(k,v[k]);r.style.colorScheme='\(dark ? "dark" : "light")';})();"
     }
 
-    static func prepared(_ html: String) -> String {
+    static func prepared(_ html: String, network: Bool) -> String {
+        let injected = network ? head : offline + head
         for pattern in [#"<head[^>]*>"#, #"<html[^>]*>"#, #"<!doctype[^>]*>"#] {
             guard let range = html.range(of: pattern, options: [.regularExpression, .caseInsensitive]) else { continue }
             var result = html
-            result.insert(contentsOf: head, at: range.upperBound)
+            result.insert(contentsOf: injected, at: range.upperBound)
             return result
         }
-        return head + html
+        return injected + html
     }
 }

@@ -1,11 +1,15 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Harness } from "@earendil-works/pi-durable";
 import { PanelDoc } from "../panel/doc.js";
+import type { Widget } from "../protocol/panel.js";
 import { artifactName } from "../protocol/send.js";
 import { AssetsDoc } from "./doc.js";
 import { sentOf } from "./sent.js";
 
 const MAX_PANEL_WIDGETS = 24;
+
+// Cards offered before the rename carry body kind "web"; kept widgets must store "space".
+const current = (panel: Widget): Widget => ((panel.body.kind as string) === "web" ? { ...panel, body: { ...panel.body, kind: "space" } as Widget["body"] } : panel);
 
 type Entries = readonly { id?: unknown; kind?: unknown; model?: unknown }[];
 
@@ -55,6 +59,6 @@ export async function keepWidget(harness: Harness, entries: Entries, origin: str
       if (panel.order.length >= MAX_PANEL_WIDGETS) throw new Error("视图已满，先移除一个组件");
       panel.order.push(id);
     }
-    panel.widgets[id] = { ...card.panel, updatedAt: Date.now(), origin };
+    panel.widgets[id] = current({ ...card.panel, updatedAt: Date.now(), origin });
   }, BACKGROUND_CONTEXT);
 }

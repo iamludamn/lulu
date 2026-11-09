@@ -56,9 +56,10 @@ const Media = Type.Object({
   caption: Type.Optional(Type.String()),
 });
 
-const Web = Type.Object({
-  kind: Type.Literal("web"),
-  src: Type.String({ description: "artifact://name.html@version of the page; the widget id is the page's saved-state key" }),
+const Space = Type.Object({
+  kind: Type.Literal("space"),
+  src: Type.String({ description: "artifact://spaces/<widget id>/index.html@version of the page; the widget id is the page's saved-state key" }),
+  summary: Type.Optional(Type.String({ description: "One line on what the space shows, displayed on its card" })),
 });
 
 const Actions = Type.Object({
@@ -76,7 +77,7 @@ export const WidgetInput = Type.Object({
   icon: Type.Optional(Type.String({ description: "SF Symbol name, e.g. figure.run" })),
   tone: Type.Optional(Tone),
   ask: Type.Optional(Type.String({ description: "Follow-up question sent to you when the widget is tapped" })),
-  body: Type.Union([Stat, Gauge, Chart, List, Timeline, Note, Media, Web, Actions]),
+  body: Type.Union([Stat, Gauge, Chart, List, Timeline, Note, Media, Space, Actions]),
 });
 
 export type WidgetInput = Static<typeof WidgetInput>;

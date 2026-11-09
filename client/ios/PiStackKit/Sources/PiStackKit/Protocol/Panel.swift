@@ -69,11 +69,11 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
         case timeline([Event])
         case note(String)
         case media(src: String, caption: String?)
-        case web(src: String)
+        case space(src: String, summary: String?)
         case actions([Button])
         case unknown
 
-        private enum Keys: String, CodingKey { case kind, value, unit, at, delta, spark, items, mark, x, series, events, markdown, src, caption, buttons }
+        private enum Keys: String, CodingKey { case kind, value, unit, at, delta, spark, items, mark, x, series, events, markdown, src, caption, buttons, summary }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Keys.self)
@@ -97,11 +97,17 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
             case "timeline": self = .timeline(try c.decode([Event].self, forKey: .events))
             case "note": self = .note(try c.decode(String.self, forKey: .markdown))
             case "media": self = .media(src: try c.decode(String.self, forKey: .src), caption: try c.decodeIfPresent(String.self, forKey: .caption))
-            case "web": self = .web(src: try c.decode(String.self, forKey: .src))
+            // "web" is what the first release called a space; keep reading widgets stored under it.
+            case "space", "web": self = .space(src: try c.decode(String.self, forKey: .src), summary: try c.decodeIfPresent(String.self, forKey: .summary))
             case "actions": self = .actions(try c.decode([Button].self, forKey: .buttons))
             default: self = .unknown
             }
         }
+    }
+
+    public var isSpace: Bool {
+        if case .space = body { return true }
+        return false
     }
 
     public let id: String
