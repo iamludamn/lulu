@@ -238,7 +238,10 @@ export class BotSession {
     try {
       await this.#host.telemetry.startSpan(
         { name: `bot.command ${frame.type}`, attributes: { "lulu.bot.id": this.#host.name, "lulu.command": frame.type } },
-        () => this.#handle(socket, frame),
+        (span) => {
+          if (frame.type === "prompt.submit") span.setAttributes({ "lulu.prompt.chars": frame.content.length, "lulu.prompt.when_busy": frame.whenBusy });
+          return this.#handle(socket, frame);
+        },
       );
     } catch (error) {
       reportError("Bot command failed", error, { command: frame.type });

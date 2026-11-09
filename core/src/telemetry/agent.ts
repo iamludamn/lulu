@@ -5,6 +5,22 @@ import type { SpanAttributes, TelemetryContext, TelemetrySpan } from "@earendil-
 
 type Held = { readonly span: TelemetrySpan; end(): void };
 
+type Totals = {
+  turns: number;
+  chats: number;
+  tools: number;
+  toolErrors: number;
+  delegates: number;
+  retries: number;
+  compactions: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cost: number;
+};
+
+const emptyTotals = (): Totals => ({ turns: 0, chats: 0, tools: 0, toolErrors: 0, delegates: 0, retries: 0, compactions: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cost: 0 });
+
 function hold(parent: TelemetryContext, name: string, attributes: SpanAttributes): Held {
   let release!: () => void;
   const done = new Promise<void>((resolve) => {
@@ -26,6 +42,7 @@ class ConversationTrace {
   readonly #telemetry: TelemetryContext;
   readonly #attributes: SpanAttributes;
   #run: Held | undefined = undefined;
+  #totals = emptyTotals();
   #turn: Held | undefined = undefined;
   #message: Held | undefined = undefined;
   readonly #tools = new Map<string, Held>();
@@ -39,12 +56,14 @@ class ConversationTrace {
   apply(event: AgentEvent): void {
     switch (event.type) {
       case "run_start":
+        if (this.#run === undefined) this.#totals = emptyTotals();
         this.#run ??= hold(this.#telemetry, "lulu.run", { ...this.#attributes, "lulu.run.inputs": event.inputs.length });
         return;
       case "run_end":
         this.#close();
         return;
       case "turn_start":
+        if (this.#turn === undefined) this.#totals.turns += 1;
         this.#turn ??= hold(this.#parent(), "lulu.turn", {});
         return;
       case "turn_end":
@@ -58,6 +77,8 @@ class ConversationTrace {
         this.#finishMessage(event.entry.model?.[0]);
         return;
       case "tool_execution_start": {
+        this.#totals.tools += 1;
+        if (event.toolName === "delegate" && event.parentToolCallId === undefined) this.#totals.delegates += 1;
         const parent = event.parentToolCallId === undefined ? undefined : this.#tools.get(event.parentToolCallId)?.span;
         this.#tools.set(
           event.toolCallId,
@@ -73,13 +94,17 @@ class ConversationTrace {
         const tool = this.#tools.get(event.toolCallId);
         if (tool === undefined) return;
         const result = event.entry?.model?.[0];
-        if (event.entry === undefined && event.result === undefined) failed(tool, "tool call did not complete");
-        else if (result?.role === "toolResult" && result.isError) failed(tool, "tool returned an error");
+        const incomplete = event.entry === undefined && event.result === undefined;
+        const errored = result?.role === "toolResult" && result.isError;
+        if (incomplete) failed(tool, "tool call did not complete");
+        else if (errored) failed(tool, "tool returned an error");
+        if (incomplete || errored) this.#totals.toolErrors += 1;
         tool.end();
         this.#tools.delete(event.toolCallId);
         return;
       }
       case "compaction_start":
+        this.#totals.compactions += 1;
         this.#compactions.set(String(event.taskId), hold(this.#parent(), "lulu.compaction", { "lulu.compaction.reason": event.reason, "lulu.compaction.blocking": event.blocking }));
         return;
       case "compaction_end": {
@@ -91,6 +116,7 @@ class ConversationTrace {
         return;
       }
       case "auto_retry_start":
+        this.#totals.retries += 1;
         (this.#turn ?? this.#run)?.span.addEvent("lulu.retry", { "lulu.retry.attempt": event.attempt, "lulu.retry.error": event.errorMessage });
         return;
       case "task_failed":
@@ -127,8 +153,14 @@ class ConversationTrace {
         "gen_ai.usage.cache_creation.input_tokens": assistant.usage.cacheWrite,
         "lulu.usage.total_tokens": assistant.usage.totalTokens,
         "lulu.usage.prompt_tokens": prompt,
+        "lulu.usage.cost": assistant.usage.cost.total,
         "lulu.usage.cache_hit_ratio": prompt > 0 ? assistant.usage.cacheRead / prompt : undefined,
       });
+      this.#totals.chats += 1;
+      this.#totals.inputTokens += assistant.usage.input;
+      this.#totals.outputTokens += assistant.usage.output;
+      this.#totals.cacheReadTokens += assistant.usage.cacheRead;
+      this.#totals.cost += assistant.usage.cost.total;
       if (assistant.stopReason === "error") failed(held, assistant.errorMessage ?? "model request failed");
     }
     held.end();
@@ -143,6 +175,22 @@ class ConversationTrace {
     this.#message = undefined;
     this.#turn?.end();
     this.#turn = undefined;
+    if (this.#run !== undefined) {
+      const totals = this.#totals;
+      this.#run.span.setAttributes({
+        "lulu.run.turns": totals.turns,
+        "lulu.run.chats": totals.chats,
+        "lulu.run.tools": totals.tools,
+        "lulu.run.tool_errors": totals.toolErrors,
+        "lulu.run.delegates": totals.delegates,
+        "lulu.run.retries": totals.retries,
+        "lulu.run.compactions": totals.compactions,
+        "lulu.run.input_tokens": totals.inputTokens,
+        "lulu.run.output_tokens": totals.outputTokens,
+        "lulu.run.cache_read_tokens": totals.cacheReadTokens,
+        "lulu.run.cost": totals.cost,
+      });
+    }
     this.#run?.end();
     this.#run = undefined;
   }
@@ -150,10 +198,15 @@ class ConversationTrace {
 
 export function traceHarness(harness: Harness, telemetry: TelemetryContext, attributes: SpanAttributes): (id: ConversationId) => void {
   const seen = new Set<ConversationId>();
-  const watch = (id: ConversationId): void => {
+  const watch = (id: ConversationId, parent?: ConversationId): void => {
     if (seen.has(id)) return;
     seen.add(id);
-    const trace = new ConversationTrace(telemetry, { ...attributes, "lulu.conversation.id": String(id) });
+    const trace = new ConversationTrace(telemetry, {
+      ...attributes,
+      "lulu.conversation.id": String(id),
+      "lulu.conversation.kind": parent === undefined ? "root" : "delegate",
+      "lulu.conversation.parent": parent === undefined ? undefined : String(parent),
+    });
     void watchEvents(harness, id, BACKGROUND_CONTEXT)
       .then((stream) => {
         stream.start(async (events) => {
@@ -164,7 +217,7 @@ export function traceHarness(harness: Harness, telemetry: TelemetryContext, attr
       .catch((error: unknown) => console.error(JSON.stringify({ message: "Trace attach failed", error: error instanceof Error ? error.message : String(error) })));
   };
   harness.subscribeCommits((publication) => {
-    for (const change of publication.changes) if (change.type === "conversation") watch(change.value.id);
+    for (const change of publication.changes) if (change.type === "conversation") watch(change.value.id, change.value.owner?.conversationId);
   });
-  return watch;
+  return (id) => watch(id);
 }
