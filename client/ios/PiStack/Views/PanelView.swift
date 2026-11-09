@@ -148,20 +148,14 @@ private struct WidgetCard: View {
             .frosted(26)
             .contentShape(.rect(cornerRadius: 26, style: .continuous))
             .contextMenu {
-                if let ask = widget.ask {
-                    Button("询问", systemImage: "bubble.left") { onPrompt(ask) }
-                }
                 if let origin = widget.origin {
-                    Button("从视图移除", systemImage: "trash", role: .destructive) { onDrop(origin) }
+                    Button("删除小组件", systemImage: "trash", role: .destructive) { onDrop(origin) }
                 }
             }
         if let page {
             Button { openSpace(page, widget.id, "space-\(widget.id)") } label: { card }
                 .buttonStyle(.plain)
                 .artifactSource("space-\(widget.id)", radius: 26)
-        } else if let ask = widget.ask, tapsAsk {
-            Button { onPrompt(ask) } label: { card }
-                .buttonStyle(.plain)
         } else {
             card
         }
@@ -170,12 +164,5 @@ private struct WidgetCard: View {
     private var page: ArtifactAddress? {
         guard case .web(let src) = widget.body else { return nil }
         return ArtifactAddress(src)
-    }
-
-    private var tapsAsk: Bool {
-        switch widget.body {
-        case .stat, .gauge, .chart, .note, .media: true
-        case .list, .timeline, .web, .actions, .unknown: false
-        }
     }
 }

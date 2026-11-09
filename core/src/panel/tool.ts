@@ -60,9 +60,9 @@ export const PanelTool = defineTool({
   description: [
     "Maintain the widgets the user already keeps on their panel, the dashboard beside this chat.",
     "update replaces a kept widget's content by id, keeping its id; it cannot add new widgets, which only the user does by swiping a card you offer with send_to_user.",
-    "Pick the body kind by the shape of the information: stat for one number or status, gauge for progress toward a limit, chart for a trend, list for items or a checklist, timeline for dated events, note for a short summary, media for one image, actions for ready-made requests, web for a page that fetches live data or keeps the user's state (see the `space` skill of the artifact server).",
+    "Pick the body kind by the shape of the information: stat for one number or status, gauge for progress toward a limit, chart for a trend, list for items or a checklist, timeline for dated events, note for a short summary, media for one image, actions for ready-made requests, weather for a city's forecast (only the city; the client fetches and refreshes it by itself once a day, so never update it), web for a page that fetches live data or keeps the user's state (see the `space` skill of the artifact server).",
     "Offer a panel widget only for information the user will check repeatedly and that changes over time, such as a balance, a progress figure, a countdown, a schedule or a short checklist. Do not offer one for a one-off answer; that is a chat reply or a document. Offer at most one widget per conversation topic, and prefer updating a kept widget over offering a new one.",
-    "To keep a widget fresh, create a daily schedule whose prompt updates it by id.",
+    "To keep a snapshot widget fresh, create a daily schedule whose prompt updates it by id; weather and web widgets refresh themselves.",
   ].join(" "),
   parameters: PanelParams,
   replay: "safe",

@@ -70,10 +70,11 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
         case note(String)
         case media(src: String, caption: String?)
         case web(src: String)
+        case weather(city: String)
         case actions([Button])
         case unknown
 
-        private enum Keys: String, CodingKey { case kind, value, unit, at, delta, spark, items, mark, x, series, events, markdown, src, caption, buttons }
+        private enum Keys: String, CodingKey { case kind, value, unit, at, delta, spark, items, mark, x, series, events, markdown, src, caption, buttons, city }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Keys.self)
@@ -98,6 +99,7 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
             case "note": self = .note(try c.decode(String.self, forKey: .markdown))
             case "media": self = .media(src: try c.decode(String.self, forKey: .src), caption: try c.decodeIfPresent(String.self, forKey: .caption))
             case "web": self = .web(src: try c.decode(String.self, forKey: .src))
+            case "weather": self = .weather(city: try c.decode(String.self, forKey: .city))
             case "actions": self = .actions(try c.decode([Button].self, forKey: .buttons))
             default: self = .unknown
             }
@@ -109,7 +111,6 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
     public let title: String
     public let icon: String?
     public let tone: Tone?
-    public let ask: String?
     public let updatedAt: Double?
     public let origin: String?
     public var body: Body

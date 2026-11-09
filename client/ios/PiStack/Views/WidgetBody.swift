@@ -34,6 +34,8 @@ struct WidgetBody: View {
             media(src, caption: caption)
         case .web:
             web
+        case .weather(let city):
+            WeatherBody(city: city, size: widget.size)
         case .actions(let buttons):
             actions(buttons)
         case .unknown:
@@ -179,17 +181,13 @@ struct WidgetBody: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(items.prefix(rows).enumerated()), id: \.offset) { index, item in
                 if index > 0 { Divider().opacity(0.6) }
-                Button {
-                    if let done = item.done {
-                        onCheck(index, !done)
-                    } else {
-                        onPrompt("聊聊「\(widget.title)」里的「\(item.title)」")
-                    }
-                } label: {
+                if let done = item.done {
+                    Button { onCheck(index, !done) } label: { listRow(item) }
+                        .buttonStyle(.plain)
+                        .disabled(!interactive)
+                } else {
                     listRow(item)
                 }
-                .buttonStyle(.plain)
-                .disabled(!interactive)
             }
             if items.count > rows {
                 Text("还有 \(items.count - rows) 项").font(.caption).foregroundStyle(.secondary).padding(.top, widget.size == .l ? 4 : 2)
@@ -242,26 +240,21 @@ struct WidgetBody: View {
                     }
                 }
                 let date = Date(timeIntervalSince1970: event.at / 1000)
-                Button { onPrompt("聊聊「\(event.title)」这个安排") } label: {
-                    HStack(alignment: .top, spacing: 10) {
-                        Text(date, format: .dateTime.hour().minute())
-                            .font(.caption.monospacedDigit())
+                HStack(alignment: .top, spacing: 10) {
+                    Text(date, format: .dateTime.hour().minute())
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 42, alignment: .leading)
+                        .padding(.top, 1)
+                    RoundedRectangle(cornerRadius: 2).fill((event.tone ?? .accent).color).frame(width: 3)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(event.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        Text(event.detail ?? date.formatted(.relative(presentation: .named)))
+                            .font(.caption)
                             .foregroundStyle(.secondary)
-                            .frame(width: 42, alignment: .leading)
-                            .padding(.top, 1)
-                        RoundedRectangle(cornerRadius: 2).fill((event.tone ?? .accent).color).frame(width: 3)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(event.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                            Text(event.detail ?? date.formatted(.relative(presentation: .named)))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
+                            .lineLimit(1)
                     }
-                    .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
-                .disabled(!interactive)
                 .opacity((event.end ?? event.at) < now ? 0.55 : 1)
                 .fixedSize(horizontal: false, vertical: true)
             }
