@@ -61,6 +61,13 @@ struct MessageRow: View, Equatable {
         .opacity(row.sending ? 0.55 : 1)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(mine ? "我" : "助手")：\(row.text)")
+        Group {
+            if mine {
+                content.background { shape.fill(.clear).glassEffect(.clear, in: shape) }
+            } else {
+                content.frosted(20)
+            }
+        }
         .contentShape(.contextMenuPreview, shape)
         .contextMenu {
             Button("拷贝", systemImage: "doc.on.doc") { UIPasteboard.general.string = row.text }
@@ -70,11 +77,6 @@ struct MessageRow: View, Equatable {
             if case .failed(let requestId?) = row.footer {
                 Button("删除", systemImage: "trash", role: .destructive) { store.dismiss(requestId) }
             }
-        }
-        if mine {
-            content.background { shape.fill(.clear).glassEffect(.clear, in: shape) }
-        } else {
-            content.frosted(20)
         }
     }
 
