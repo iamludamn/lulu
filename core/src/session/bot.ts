@@ -277,8 +277,8 @@ export class BotSession {
   }
 
   async #hello(socket: Socket): Promise<boolean> {
-    this.#host.sockets.attach(socket, { role: "client", ready: true } satisfies ClientAttachment);
     const config = await this.#config();
+    this.#host.sockets.attach(socket, { role: "client", ready: true } satisfies ClientAttachment);
     this.#send(socket, { type: "models", config });
     this.#send(socket, this.#stateMessage());
     return true;
@@ -482,7 +482,7 @@ export class BotSession {
   }
 
   #broadcast(message: ServerMessage): void {
-    for (const socket of this.#host.sockets.all()) this.#send(socket, message);
+    for (const socket of this.#host.sockets.all()) if (this.#attachmentOf(socket)?.ready === true) this.#send(socket, message);
   }
 
   #send(socket: Socket, message: ServerMessage): void {
