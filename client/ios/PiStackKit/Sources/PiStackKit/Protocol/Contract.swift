@@ -43,6 +43,8 @@ public struct MessageProgress: Codable, Identifiable, Sendable {
     public enum State: String, Codable, Sendable { case todo, processing, done }
 
     public let id: Int
+    public let requestId: String?
+    public let at: Double?
     public let entry: String?
     public let answer: String?
     public let text: String

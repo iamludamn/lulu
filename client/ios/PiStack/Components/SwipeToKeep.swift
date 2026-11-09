@@ -25,8 +25,8 @@ struct SwipeToKeep<Content: View>: View {
     @State private var center: CGPoint = .zero
     @State private var flight: CGSize = .zero
     @State private var phase = Phase.resting
+    @State private var measured: CGFloat = 0
     @State private var height: CGFloat?
-    @State private var collapsed = false
 
     private enum Phase { case resting, flying, fading, gone }
 
@@ -49,8 +49,8 @@ struct SwipeToKeep<Content: View>: View {
             .scaleEffect(scale)
             .opacity(phase == .resting ? 1 : 0)
             .offset(x: drag + flight.width, y: flight.height)
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if !collapsed { height = $0 } }
-            .frame(height: collapsed ? 0 : height, alignment: .top)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { measured = $0 }
+            .frame(height: height, alignment: .top)
             .zIndex(phase == .resting && drag == 0 ? 0 : 1)
             .onGeometryChange(for: CGPoint.self) { proxy in
                 let frame = proxy.frame(in: .global)
@@ -96,7 +96,9 @@ struct SwipeToKeep<Content: View>: View {
     private func settle() async {
         onLand()
         try? await Task.sleep(for: .milliseconds(200))
-        withAnimation(.spring(duration: 0.55, bounce: 0.28)) { collapsed = true }
+        height = measured
+        try? await Task.sleep(for: .milliseconds(16))
+        withAnimation(.spring(duration: 0.55, bounce: 0.28)) { height = 0 }
         try? await Task.sleep(for: .milliseconds(520))
         onKeep()
     }

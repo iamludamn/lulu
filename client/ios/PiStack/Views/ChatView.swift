@@ -9,11 +9,16 @@ struct ChatView: View {
     var composing: FocusState<Bool>.Binding
     let onKept: (Page) -> Void
     @State private var pinned = true
+    @State private var dragging = false
     @State private var sent = 0
+    @State private var floor: String?
+    @State private var position = ScrollPosition()
+    @State private var metrics = Metrics()
     @Environment(\.topInset) private var topInset
     @Environment(\.openArtifact) private var openArtifact
 
     private static let bottom = "bottom"
+    private static let page = 40
     private static let suggestions = ["今天有什么安排？", "把我关心的数据做成组件", "总结一下你记住了我什么"]
 
     private var snapshot: BotStore.Snapshot { store.snapshot }
@@ -22,14 +27,24 @@ struct ChatView: View {
 
     var body: some View {
         let rows = chatRows(snapshot)
+        let start = floor.flatMap { id in rows.firstIndex { $0.id == id } } ?? max(0, rows.count - Self.page)
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 4) {
-                    ForEach(rows) { row in
+                VStack(spacing: 4) {
+                    if start > 0 {
+                        Button("更早的消息") { revealEarlier(rows, start) }
+                            .buttonStyle(.plain)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .id("earlier")
+                    }
+                    ForEach(rows[start...]) { row in
                         MessageRow(row: row, store: store, botId: bot.id, api: api, onOpen: openArtifact, onKept: onKept)
                             .equatable()
                             .padding(.bottom, row.tail ? 10 : 0)
-                            .transition(transition(row))
+                            .transition(.opacity.animation(.easeOut(duration: 0.2)))
                     }
                     Color.clear.frame(height: 1).id(Self.bottom)
                 }
@@ -37,18 +52,34 @@ struct ChatView: View {
                 .padding(.top, 8)
                 .frame(maxWidth: 720)
                 .frame(maxWidth: .infinity)
-                .animation(.spring(duration: 0.45, bounce: 0), value: rows.map(\.id))
             }
             .defaultScrollAnchor(.bottom)
-            .defaultScrollAnchor(.bottom, for: .sizeChanges)
+            .defaultScrollAnchor(pinned ? .bottom : nil, for: .sizeChanges)
+            .scrollPosition($position)
             .scrollClipDisabled()
             .contentMargins(.top, topInset, for: .scrollContent)
             .scrollDismissesKeyboard(.interactively)
-            .onScrollGeometryChange(for: Bool.self) { $0.visibleRect.maxY > $0.contentSize.height - 24 } action: { _, near in
-                pinned = near
+            .onScrollPhaseChange { _, phase in
+                dragging = phase == .interacting || phase == .decelerating
             }
-            .onChange(of: signature(rows)) {
-                if pinned { proxy.scrollTo(Self.bottom) }
+            .onScrollGeometryChange(for: Bool.self) { $0.visibleRect.maxY > $0.contentSize.height - 24 } action: { _, near in
+                if dragging || near { pinned = near }
+            }
+            .onScrollGeometryChange(for: Extent.self) { Extent(offset: $0.contentOffset.y + $0.contentInsets.top, height: $0.contentSize.height) } action: { _, extent in
+                if let reveal = metrics.reveal, extent.height != reveal.height {
+                    metrics.reveal = nil
+                    position.scrollTo(y: reveal.offset + extent.height - reveal.height)
+                }
+                metrics.extent = extent
+            }
+            .onChange(of: rows.count > Self.page, initial: true) { _, long in
+                if long, floor == nil { floor = rows[rows.count - Self.page].id }
+            }
+            .onChange(of: sent) {
+                Task {
+                    try? await Task.sleep(for: .milliseconds(60))
+                    proxy.scrollTo(Self.bottom)
+                }
             }
             .overlay(alignment: .bottomTrailing) {
                 if !pinned {
@@ -77,7 +108,7 @@ struct ChatView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .glassEffect(.regular, in: .capsule)
-                .padding(.top, 4)
+                .padding(.top, topInset + 4)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
@@ -102,8 +133,9 @@ struct ChatView: View {
 
     private var placeholder: String { "给 \(bot.name) 发消息" }
 
-    private func signature(_ rows: [ChatRow]) -> [Int] {
-        [rows.count, rows.last?.typing == true ? 1 : 0, rows.last?.text.count ?? 0]
+    private func revealEarlier(_ rows: [ChatRow], _ start: Int) {
+        metrics.reveal = metrics.extent
+        floor = rows[max(0, start - Self.page)].id
     }
 
     private func send() {
@@ -151,4 +183,14 @@ struct ChatView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 24)
     }
+}
+
+private struct Extent: Equatable {
+    var offset: CGFloat = 0
+    var height: CGFloat = 0
+}
+
+private final class Metrics {
+    var extent = Extent()
+    var reveal: Extent?
 }
