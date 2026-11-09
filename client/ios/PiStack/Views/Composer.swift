@@ -2,20 +2,18 @@ import SwiftUI
 
 struct Composer: View {
     @Binding var draft: String
-    let connected: Bool
     let busy: Bool
     let placeholder: String
     var focused: FocusState<Bool>.Binding
     let onSend: () -> Void
 
-    private var canSend: Bool { connected && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 6) {
             TextField(placeholder, text: $draft, axis: .vertical)
                 .lineLimit(1...6)
                 .focused(focused)
-                .disabled(!connected)
                 .padding(.leading, 18)
                 .padding(.vertical, 13)
             if canSend {

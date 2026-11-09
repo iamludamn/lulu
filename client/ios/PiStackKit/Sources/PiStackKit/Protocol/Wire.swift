@@ -1,6 +1,6 @@
 import Foundation
 
-public struct ConversationEntry: Decodable, Identifiable, Sendable {
+public struct ConversationEntry: Codable, Identifiable, Sendable {
     public let id: String
     public let kind: String
     public let model: [JSONValue]?
@@ -17,9 +17,16 @@ public struct ConversationEntry: Decodable, Identifiable, Sendable {
         kind = try container.decode(String.self, forKey: .kind)
         model = try container.decodeIfPresent([JSONValue].self, forKey: .model)
     }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: Keys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(kind, forKey: .kind)
+        try container.encodeIfPresent(model, forKey: .model)
+    }
 }
 
-public struct ConversationView: Sendable {
+public struct ConversationView: Codable, Sendable {
     public let entries: [ConversationEntry]
     public let docs: [String: JSONValue]
 }
