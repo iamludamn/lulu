@@ -25,6 +25,12 @@ function failed(held: Held, message: string): void {
   held.span.setStatus({ status: "error", error: { name: "Error", message } });
 }
 
+function errorText(raw: string | undefined): string {
+  const text = (raw ?? "").replace(/\s+/g, " ").trim();
+  if (text === "") return "model request failed";
+  return isSensitive(text) ? "model request failed: [redacted]" : text.slice(0, FAILURE_CHARACTERS);
+}
+
 function failureText(result: ToolResultMessage): string {
   const text = result.content
     .flatMap((part) => (part.type === "text" ? [part.text] : []))
@@ -106,6 +112,11 @@ class ConversationTrace {
       case "auto_retry_start":
         (this.#turn ?? this.#run)?.span.addEvent("lulu.retry", { "lulu.retry.attempt": event.attempt, "lulu.retry.error": event.errorMessage });
         return;
+      case "entry_appended": {
+        const message = event.entry.model?.[0] as AssistantMessage | undefined;
+        if (message?.role === "assistant" && message.stopReason === "error") (this.#turn ?? this.#run)?.span.addEvent("lulu.model_error", { "lulu.model.error": errorText(message.errorMessage) });
+        return;
+      }
       case "task_failed":
         (this.#turn ?? this.#run)?.span.addEvent("lulu.task_failed", { "lulu.task.kind": event.kind, "lulu.task.error": event.message });
         return;

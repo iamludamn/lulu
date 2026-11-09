@@ -64,6 +64,11 @@ function sumUsage(list: (Usage | undefined)[]): { input: number; output: number;
   return { input, output, cost };
 }
 
+function failureText(reason: string, detail: unknown): string {
+  const base = reason || "child run left unanswered";
+  return typeof detail === "string" && detail !== "" ? base + ": " + detail : base;
+}
+
 function noticeText(short: string, status: string, task: string, body: string, token: string | null): string {
   const head = token ? "token: " + token + "\n" : "";
   return head + "### " + short + " (" + status + ")\nTask: " + oneLine(task) + "\n\n" + body;
@@ -118,7 +123,7 @@ export const DelegateWait = defineTask<WaitInput, WaitCheckpoint, WaitResult, ob
         return;
       }
       if (settled.status === "unanswered") {
-        await settle(task.input, runtime, context, "failed", settled.reason || "child run left unanswered", null);
+        await settle(task.input, runtime, context, "failed", failureText(settled.reason, settled.detail), null);
         return;
       }
       const answer = await readAnswer(runtime, input.childId, settled.answer, context);
