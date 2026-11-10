@@ -24,6 +24,7 @@ set:function(v){return call("set",JSON.stringify(v)).then(function(){})}
 type artifact struct {
 	mu     sync.Mutex
 	state  []byte
+	reads  int
 	writes int
 	win    *mygo.Window
 	web    *mygo.WebView
@@ -63,7 +64,9 @@ func (a *artifact) serve(w http.ResponseWriter, r *http.Request) {
 	case "/__state/get":
 		a.mu.Lock()
 		state := a.state
+		a.reads++
 		a.mu.Unlock()
+		a.win.Update(func() {})
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(state)
 	case "/__state/set":
@@ -85,7 +88,7 @@ func (a *artifact) serve(w http.ResponseWriter, r *http.Request) {
 func (a *artifact) view(c *ui.Context) {
 	t := c.Theme()
 	a.mu.Lock()
-	state, writes := string(a.state), a.writes
+	state, reads, writes := string(a.state), a.reads, a.writes
 	a.mu.Unlock()
 	if state == "" {
 		state = "null"
@@ -93,9 +96,9 @@ func (a *artifact) view(c *ui.Context) {
 	ui.Row(c).Gap(12).Padding(10, 16).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
 		ui.Text(c, "Go side state").TextColor(t.TextMuted)
 		ui.Text(c, state).Selectable().Grow(1)
-		ui.Textf(c, "%d writes", writes).TextColor(t.TextMuted)
+		ui.Textf(c, "%d reads, %d writes", reads, writes).TextColor(t.TextMuted)
 		if ui.Button(c, "Click via Eval").Clicked() && a.web != nil {
-			go a.web.Page().Eval(`document.getElementById("inc").click()`)
+			go a.web.Page().Eval(`document.getElementById("inc").click(); return true`)
 		}
 	})
 	if a.web != nil {
