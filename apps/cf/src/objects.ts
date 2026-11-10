@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
-import { BotSession } from "@lulu/core/session/bot.js";
+import { BotSession } from "@lulu/core/conversation/bot.js";
 import { MemoryObject } from "@lulu/core/memory/object.js";
 import { ArtifactObject } from "@lulu/core/artifact/object.js";
 import { durableHost } from "./host.js";

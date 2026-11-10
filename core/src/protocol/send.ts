@@ -22,6 +22,7 @@ const AssetCard = Type.Object({
 export const SendInput = Type.Object({
   type: Type.Union([Type.Literal("text"), Type.Literal("widget")]),
   content: Type.Optional(Type.String({ description: "Message for type text only; never on type widget. Markdown renders; use real line breaks between paragraphs" })),
+  body: Type.Optional(Type.String({ description: "Full Markdown for type text when the reply is long: the user sees content as a short bubble and taps it to read body" })),
   widget: Type.Optional(Type.Union([PanelCard, AssetCard], { description: "Card for type widget" })),
   end_turn: Type.Optional(Type.Boolean({ description: "true on your final send when the reply is complete; omit for acknowledgements and progress updates" })),
 });

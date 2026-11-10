@@ -13,6 +13,7 @@ struct ChatRow: Identifiable, Equatable {
     let id: String
     let role: Role
     var text: String
+    var body: String?
     var card: SentCard?
     var footer: Footer?
     var sending = false
@@ -81,6 +82,7 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
             if entry.card != nil && kept.contains(entry.id) { continue }
             stamp(entry.time, before: entry.id)
             var row = ChatRow(id: entry.id, role: entry.role == .user ? .user : .assistant, text: entry.text)
+            row.body = entry.body
             row.card = entry.card
             row.read = entry.role == .user
             if making.contains(entry.id) { row.footer = .generating }

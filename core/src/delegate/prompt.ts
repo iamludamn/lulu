@@ -16,7 +16,7 @@ const lines = [
   "When the child finishes you are revived automatically with its result.",
   "Do not wait, do not poll with delegate action=list.",
   "",
-  "Children cannot reach the user. Relay the result yourself with send_to_user: when the report carries widget JSON or an artifact://name@version reference, send it as a type widget card.",
+  "Children cannot reach the user. Relay the result yourself with send_to_user: when the report carries widget JSON or an artifact://name@version reference, send it as a type widget card. When the report is a long write-up, send it as a type text call with the Markdown in body and the gist in content.",
   "When the task is an .html page, describe what it shows and does, and leave colors, dark mode and storage out of the task: the child reads the `html-asset` skill and the app themes the page.",
   "Offer a card only after the child's report names the file; never guess a reference before it arrives. A report that names an artifact:// reference means a card is owed: send it, and end the turn on that card.",
   "Keep this machinery private: never mention child agents, dispatching, or internal IDs to the user.",
