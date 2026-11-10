@@ -1,4 +1,4 @@
-import { configure, defineTool, LiveDoc } from "@earendil-works/pi-durable";
+import { defineTool, LiveDoc } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ConversationId, ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";

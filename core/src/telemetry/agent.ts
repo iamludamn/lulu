@@ -8,21 +8,11 @@ const FAILURE_CHARACTERS = 300;
 
 type Held = { readonly span: TelemetrySpan; end(): void };
 
-type Totals = {
-  turns: number;
-  chats: number;
-  tools: number;
-  toolErrors: number;
-  delegates: number;
-  retries: number;
-  compactions: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cost: number;
-};
+const TOTALS = ["turns", "chats", "tools", "tool_errors", "delegates", "retries", "compactions", "input_tokens", "output_tokens", "cache_read_tokens", "cost"] as const;
 
-const emptyTotals = (): Totals => ({ turns: 0, chats: 0, tools: 0, toolErrors: 0, delegates: 0, retries: 0, compactions: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cost: 0 });
+type Totals = Record<(typeof TOTALS)[number], number>;
+
+const emptyTotals = (): Totals => Object.fromEntries(TOTALS.map((key) => [key, 0])) as Totals;
 
 function hold(parent: TelemetryContext, name: string, attributes: SpanAttributes): Held {
   let release!: () => void;
@@ -41,21 +31,16 @@ function failed(held: Held, message: string): void {
   held.span.setStatus({ status: "error", error: { name: "Error", message } });
 }
 
-function errorText(raw: string | undefined): string {
-  const text = (raw ?? "").replace(/\s+/g, " ").trim();
-  if (text === "") return "model request failed";
-  return isSensitive(text) ? "model request failed: [redacted]" : text.slice(0, FAILURE_CHARACTERS);
+function failureSummary(raw: string, fallback: string): string {
+  const text = raw.replace(/\s+/g, " ").trim();
+  if (text === "") return fallback;
+  return isSensitive(text) ? `${fallback}: [redacted]` : text.slice(0, FAILURE_CHARACTERS);
 }
 
-function failureText(result: ToolResultMessage): string {
-  const text = result.content
-    .flatMap((part) => (part.type === "text" ? [part.text] : []))
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (text === "") return "tool returned an error";
-  return isSensitive(text) ? "tool returned an error: [redacted]" : text.slice(0, FAILURE_CHARACTERS);
-}
+const errorText = (raw: string | undefined): string => failureSummary(raw ?? "", "model request failed");
+
+const failureText = (result: ToolResultMessage): string =>
+  failureSummary(result.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join(" "), "tool returned an error");
 
 class ConversationTrace {
   readonly #telemetry: TelemetryContext;
@@ -119,7 +104,7 @@ class ConversationTrace {
         const errored = result?.role === "toolResult" && result.isError;
         if (incomplete) failed(tool, "tool call did not complete");
         else if (errored) failed(tool, failureText(result));
-        if (incomplete || errored) this.#totals.toolErrors += 1;
+        if (incomplete || errored) this.#totals.tool_errors += 1;
         tool.end();
         this.#tools.delete(event.toolCallId);
         return;
@@ -187,9 +172,9 @@ class ConversationTrace {
         "lulu.usage.cache_hit_ratio": prompt > 0 ? assistant.usage.cacheRead / prompt : undefined,
       });
       this.#totals.chats += 1;
-      this.#totals.inputTokens += assistant.usage.input;
-      this.#totals.outputTokens += assistant.usage.output;
-      this.#totals.cacheReadTokens += assistant.usage.cacheRead;
+      this.#totals.input_tokens += assistant.usage.input;
+      this.#totals.output_tokens += assistant.usage.output;
+      this.#totals.cache_read_tokens += assistant.usage.cacheRead;
       this.#totals.cost += assistant.usage.cost.total;
       if (assistant.stopReason === "error") failed(held, assistant.errorMessage ?? "model request failed");
     }
@@ -207,19 +192,7 @@ class ConversationTrace {
     this.#turn = undefined;
     if (this.#run !== undefined) {
       const totals = this.#totals;
-      this.#run.span.setAttributes({
-        "lulu.run.turns": totals.turns,
-        "lulu.run.chats": totals.chats,
-        "lulu.run.tools": totals.tools,
-        "lulu.run.tool_errors": totals.toolErrors,
-        "lulu.run.delegates": totals.delegates,
-        "lulu.run.retries": totals.retries,
-        "lulu.run.compactions": totals.compactions,
-        "lulu.run.input_tokens": totals.inputTokens,
-        "lulu.run.output_tokens": totals.outputTokens,
-        "lulu.run.cache_read_tokens": totals.cacheReadTokens,
-        "lulu.run.cost": totals.cost,
-      });
+      this.#run.span.setAttributes(Object.fromEntries(TOTALS.map((key) => [`lulu.run.${key}`, totals[key]])));
     }
     this.#run?.end();
     this.#run = undefined;
