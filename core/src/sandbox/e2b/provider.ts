@@ -1,7 +1,7 @@
 import type { TelemetryContext } from "@earendil-works/pi-telemetry";
 import { NotFoundError, Sandbox } from "e2b";
 import type { Environment } from "../../host/types.js";
-import { SandboxGone, type SandboxHandle, type SandboxProvider } from "../provider.js";
+import { SandboxGone, type SandboxProvider } from "../provider.js";
 import { E2bExecutionEnv, SANDBOX_IDLE_MS } from "./env.js";
 
 const RETENTION_MS = 7 * 86_400_000;
