@@ -6,6 +6,9 @@ enum HTMLTheme {
     /// An html asset is a finished page: every network request it makes is refused. Only a space may fetch.
     private static let offline = #"<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; worker-src blob:; form-action 'none'; base-uri 'none'">"#
 
+    /// A space reaches the network only through the app, which answers fetch from its cache or the network.
+    private static let relayed = #"<meta http-equiv="Content-Security-Policy" content="connect-src data: blob:">"#
+
     static func variables(dark: Bool) -> [String: String] {
         [
             "--lulu-bg": "transparent",
@@ -29,7 +32,7 @@ enum HTMLTheme {
     }
 
     static func prepared(_ html: String, network: Bool) -> String {
-        let injected = network ? head : offline + head
+        let injected = (network ? relayed : offline) + head
         for pattern in [#"<head[^>]*>"#, #"<html[^>]*>"#, #"<!doctype[^>]*>"#] {
             guard let range = html.range(of: pattern, options: [.regularExpression, .caseInsensitive]) else { continue }
             var result = html

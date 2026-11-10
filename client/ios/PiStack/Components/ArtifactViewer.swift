@@ -14,6 +14,7 @@ struct SpaceOpening: Hashable {
     let id: String
     let title: String
     var preview = false
+    var refresh: SpaceRefresh = .manual
 }
 
 private struct ArtifactOpening: Hashable {
@@ -27,12 +28,21 @@ private struct ArtifactPage: View {
     let space: SpaceOpening?
     let botId: String
     let api: Api
+    @State private var bridge: SpaceBridge?
+
+    init(item: ArtifactAddress, space: SpaceOpening?, botId: String, api: Api) {
+        self.item = item
+        self.space = space
+        self.botId = botId
+        self.api = api
+        _bridge = State(initialValue: space.map { SpaceBridge(botId: botId, space: $0.id, refresh: $0.refresh, preview: $0.preview, api: api) })
+    }
 
     var body: some View {
         let title = space?.title ?? (item.fileName as NSString).deletingPathExtension
         let load = { try await api.artifactText(botId, name: item.name, version: item.version) }
         if item.isHTML {
-            HTMLDocument(title: title, load: load, bridge: space.map { SpaceBridge(botId: botId, space: $0.id, preview: $0.preview, api: api) })
+            HTMLDocument(title: title, load: load, bridge: bridge)
         } else {
             MarkdownDocument(title: title, load: load)
         }

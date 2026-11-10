@@ -8,14 +8,20 @@ struct SpacePreview: View {
     let summary: String?
     let botId: String
     let api: Api
-    @State private var html: String?
+    @State private var page: Page?
+    @State private var refreshes = 0
     @State private var failed = false
+
+    private struct Page {
+        let html: String
+        let bridge: SpaceBridge
+    }
 
     var body: some View {
         ZStack {
-            if let html {
-                HTMLPage(html: html, bridge: bridge, interactive: false)
-                    .id(src)
+            if let page {
+                HTMLPage(html: page.html, bridge: page.bridge, interactive: false)
+                    .id(ObjectIdentifier(page.bridge))
                     .mask(LinearGradient(stops: [.init(color: .black, location: 0.78), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom))
             } else if failed {
                 Label("页面无法加载", systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.secondary)
@@ -36,10 +42,9 @@ struct SpacePreview: View {
                 .glassEffect(.regular, in: .capsule)
                 .padding(8)
         }
-        .task(id: src) { await load() }
+        .task(id: "\(src)#\(refreshes)") { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: .spaceRefresh)) { if $0.object as? String == id { refreshes += 1 } }
     }
-
-    private var bridge: SpaceBridge { SpaceBridge(botId: botId, space: id, preview: true, api: api) }
 
     private func load() async {
         guard let address = ArtifactAddress(src) else {
@@ -47,7 +52,8 @@ struct SpacePreview: View {
             return
         }
         do {
-            html = try await api.artifactText(botId, name: address.name, version: address.version)
+            let html = try await api.artifactText(botId, name: address.name, version: address.version)
+            page = Page(html: html, bridge: SpaceBridge(botId: botId, space: id, refresh: refreshes > 0 ? .open : nil, preview: true, api: api))
             failed = false
         } catch {
             failed = true
