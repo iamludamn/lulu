@@ -44,7 +44,7 @@ async function spawn(api: ToolExecutionApi<DelegateDetails>, args: DelegateArgs,
   const agentName = args.agent ?? DefaultDelegateAgent;
   const token = args.token?.trim() ? args.token.trim() : null;
   const runId = await runIdOf(String(api.taskId));
-  if (!sandboxes) return fail("spawn needs a sandbox, but E2B_API_KEY is not configured");
+  if (!sandboxes) return fail("spawn needs a sandbox, but none is configured");
   const parent = await api.agent(context);
   const created = await api.commit(async (tx) => {
     const forkAt = await entryBeforeCall(tx, api.conversationId, api.callId);
