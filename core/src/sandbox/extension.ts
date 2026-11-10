@@ -8,8 +8,17 @@ export const CODING_TOOLS = ["read", "write", "edit", "bash"];
 
 const NO_ENVIRONMENT = "no execution environment: E2B_API_KEY is not configured";
 
+async function discardKey(api: ToolExecutionApi, holder: ConversationId, context: Context): Promise<void> {
+  await api.commit(async (tx) => {
+    const binding = await tx.doc(SandboxDoc, holder);
+    if (!binding.id) binding.epoch += 1;
+  }, context);
+}
+
 async function bindSandbox(api: ToolExecutionApi, holder: ConversationId, key: string, sandboxes: SandboxProvider, context: Context): Promise<SandboxHandle> {
-  const created = (await api.memo<SandboxHandle>("pistack.sandbox", context)) ?? (await api.memo("pistack.sandbox", await sandboxes.create(key), context));
+  const created =
+    (await api.memo<SandboxHandle>("pistack.sandbox", context)) ??
+    (await api.memo("pistack.sandbox", await sandboxes.create(key).catch((error: unknown) => discardKey(api, holder, context).then(() => Promise.reject(error))), context));
   return api.commit(async (tx) => {
     const binding = await tx.doc(SandboxDoc, holder);
     if (!binding.id) {
