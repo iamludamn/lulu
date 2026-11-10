@@ -1,4 +1,5 @@
 import { defineTool, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import { SPACE_ID } from "../protocol/panel.js";
 import type { SendCard, SendInput } from "../protocol/send.js";
 import { ARTIFACT_REF, SEND_TOOL, SendInput as SendParams } from "../protocol/send.js";
 
@@ -34,6 +35,9 @@ function misuse(input: SendInput, files: boolean): string | undefined {
   }
   if (input.content !== undefined) return "content is only valid with type text and would be dropped from a widget. Nothing was sent, so the card has not been delivered. Send the text as its own type text call, then send the card again without content.";
   if (input.widget === undefined) return "type widget requires widget. Nothing was sent.";
+  const card = input.widget;
+  if (card.kind === "panel" && card.panel.body.kind === "web" && !SPACE_ID.test(card.panel.id))
+    return "A web widget id is the key of its saved state, so it must be letters, digits, - or _, start with a letter or digit, and be at most 64 characters. Nothing was sent. Send the card again with a valid id.";
   return undefined;
 }
 

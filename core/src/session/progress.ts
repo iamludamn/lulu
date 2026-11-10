@@ -6,7 +6,7 @@ import { DelegateIndex, RunFamily, type RunDoc } from "../delegate/runs.js";
 import { owedDeliveries, type Entries } from "../send/delivery.js";
 import { DeliveryDoc, MakeDoc } from "../send/doc.js";
 
-export type ChatMessage = { requestId: string; id: number | null; text: string; after: number | null; at: number };
+export type ChatMessage = { requestId: string; id: number | null; text: string; after: number | null; at?: number };
 
 export function lastEntryId(view: ConversationView | undefined): number | null {
   const last = view?.entries.at(-1);
