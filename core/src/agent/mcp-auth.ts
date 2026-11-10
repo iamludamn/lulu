@@ -37,6 +37,10 @@ async function readAll(host: McpHostServices): Promise<Record<string, StoredAuth
   }
 }
 
+export function authKey(name: string, serverUrl: string): string {
+  return `mcp__${name}|${serverUrl}`;
+}
+
 export class McpFileAuthProvider implements AuthProvider {
   constructor(
     private readonly name: string,
@@ -45,7 +49,7 @@ export class McpFileAuthProvider implements AuthProvider {
   ) {}
 
   private key(state: Record<string, StoredAuth>): string | undefined {
-    const exact = `mcp__${this.name}|${this.serverUrl}`;
+    const exact = authKey(this.name, this.serverUrl);
     if (state[exact] !== undefined) return exact;
     const legacy = `mcp__${this.name}`;
     return state[legacy] === undefined ? undefined : legacy;

@@ -4,6 +4,8 @@ import type { Models } from "@earendil-works/pi-ai/models";
 import { type Conversation, type ConversationView, type EntryId, Harness, type Registry, type Storage } from "@earendil-works/pi-durable";
 import type { TelemetrySpan } from "@earendil-works/pi-telemetry";
 import type { McpHost, McpServerConfig } from "../agent/mcp.js";
+import { handleMcpRegistry } from "../agent/mcp-registry.js";
+import { mcpStore } from "../agent/mcp-store.js";
 import { ChatDoc, linkChatMessage, recordChatMessage, trackProgress, trackSnapshot } from "./progress.js";
 import type { EpisodeSource } from "../memory/doc.js";
 import { episodesOf } from "../memory/episodes.js";
@@ -212,6 +214,9 @@ export class BotSession {
     const { pathname } = new URL(request.url);
     if (pathname === "/memory/source") return this.#memorySource(request);
     if (pathname === "/schedules") return this.#schedulesResponse();
+    if (pathname === "/mcp" || pathname.startsWith("/mcp/")) {
+      return handleMcpRegistry(request, this.#host, { statuses: () => this.#mcp, reload: () => this.#reloadMcp() });
+    }
     return Promise.resolve(this.#upgrade());
   }
 
@@ -449,6 +454,12 @@ export class BotSession {
       panel: this.#panel,
       assets: this.#assets,
     };
+  }
+
+  async #reloadMcp(): Promise<McpStatus[]> {
+    this.#botServers = await mcpStore(this.#host, this.#host.name).servers();
+    await this.#reconnectMcp();
+    return this.#mcp;
   }
 
   async #reconnectMcp(): Promise<void> {

@@ -1,0 +1,61 @@
+.mcp {
+  --bg: #fafafa;
+  --fg: #171717;
+  --muted: #6b6b6b;
+  --card: #ffffff;
+  --line: #e4e4e4;
+  --accent: #171717;
+  --accent-fg: #ffffff;
+  --ok: #15803d;
+  --warn: #b45309;
+  --bad: #b91c1c;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  .mcp {
+    --bg: #0f0f10;
+    --fg: #ededed;
+    --muted: #9a9a9a;
+    --card: #19191b;
+    --line: #2b2b2e;
+    --accent: #ededed;
+    --accent-fg: #0f0f10;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --bad: #f87171;
+  }
+}
+.mcp * { box-sizing: border-box; }
+.mcp main { max-width: 720px; margin: 0 auto; padding: 24px 16px calc(48px + env(safe-area-inset-bottom)); }
+.mcp header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.mcp h1 { font-size: 20px; margin: 0; }
+.mcp h2 { font-size: 15px; margin: 24px 0 8px; color: var(--muted); font-weight: 600; }
+.mcp .hint { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
+.mcp .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; }
+.mcp .row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.mcp .name { font-weight: 600; word-break: break-all; }
+.mcp .url { color: var(--muted); font-size: 13px; word-break: break-all; }
+.mcp .status { font-size: 13px; margin-top: 4px; }
+.mcp .status.connected { color: var(--ok); }
+.mcp .status.needs-auth { color: var(--warn); }
+.mcp .status.failed { color: var(--bad); }
+.mcp .status.unknown { color: var(--muted); }
+.mcp .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.mcp button { font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; }
+.mcp button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.mcp button.danger { color: var(--bad); }
+.mcp button:disabled { opacity: 0.5; cursor: default; }
+.mcp label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
+.mcp input { width: 100%; font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+.mcp .pair { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin-bottom: 8px; }
+.mcp .banner { border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; font-size: 14px; border: 1px solid var(--line); background: var(--card); }
+.mcp .banner.bad { color: var(--bad); border-color: var(--bad); }
+.mcp .banner.ok { color: var(--ok); border-color: var(--ok); }
+.mcp .empty { color: var(--muted); padding: 16px 0; }
+@media (max-width: 480px) {
+  .mcp .pair { grid-template-columns: 1fr 1fr; }
+  .mcp .pair button { grid-column: 1 / -1; }
+}

@@ -31,6 +31,7 @@ struct InspectorView: View {
                 Section("MCP") {
                     if snapshot.mcp.isEmpty { Text("未配置 MCP 服务器").foregroundStyle(.secondary) }
                     ForEach(snapshot.mcp) { server in mcpRow(server) }
+                    Link(destination: api.base.appending(path: "mcp")) { Label("在网页中配置", systemImage: "safari") }
                 }
                 Section("背景") { wallpaperPicker }
                 Section {

@@ -48,6 +48,13 @@ export function mcpStore(host: Pick<DurableHost, "env" | "kv">, botId: string) {
       if (secret === undefined) throw new Error("MCP_ENCRYPTION_KEY is not configured");
       await host.kv.put(authKey, await seal(secret, content));
     },
+    async put(name: string, config: Pick<McpServerConfig, "url" | "headers">): Promise<void> {
+      if (secret === undefined) throw new Error("MCP_ENCRYPTION_KEY is not configured");
+      await host.kv.put(configPrefix + name, await seal(secret, JSON.stringify(config)));
+    },
+    async remove(name: string): Promise<void> {
+      await host.kv.delete(configPrefix + name);
+    },
     async servers(): Promise<Record<string, McpServerConfig>> {
       if (secret === undefined) return {};
       const servers: Record<string, McpServerConfig> = {};

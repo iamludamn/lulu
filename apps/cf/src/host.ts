@@ -10,6 +10,7 @@ const stringsOf = (env: Env): Environment =>
 const kvOf = (kv: KVNamespace): KeyValue => ({
   get: (key) => kv.get(key),
   put: (key, value) => kv.put(key, value),
+  delete: (key) => kv.delete(key),
   list: async (prefix) => (await kv.list({ prefix })).keys.map((key) => key.name),
 });
 

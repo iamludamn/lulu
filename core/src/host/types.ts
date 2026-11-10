@@ -43,6 +43,7 @@ export interface DurableSockets {
 export interface KeyValue {
   get(key: string): Promise<string | null>;
   put(key: string, value: string): Promise<void>;
+  delete(key: string): Promise<void>;
   list(prefix: string): Promise<string[]>;
 }
 

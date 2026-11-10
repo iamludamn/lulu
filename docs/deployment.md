@@ -25,6 +25,7 @@ Run `wrangler deploy` from `apps/cf` with the secrets file passed as `--secrets-
 - `OPENCODE_API_KEY`
 - `DOUBAO_API_KEY`
 - `MCP_ENCRYPTION_KEY`
+- `MCP_ADMIN_TOKEN` (the passphrase for the MCP registry page at `/mcp`; the registry API answers 503 until it is set)
 - `OTEL_EXPORTER_OTLP_HEADERS` (see [observability](observability.md))
 
 Secrets are never committed. They live in the root `.env` file, which is gitignored and can be used directly as the secrets file.
