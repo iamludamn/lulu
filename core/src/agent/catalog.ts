@@ -7,7 +7,7 @@ import { CronExtension } from "../cron/extension.js";
 import { PanelExtension } from "../panel/extension.js";
 import { createSendExtension } from "../send/extension.js";
 import { createEnvironmentExtension } from "../sandbox/extension.js";
-import { createSandboxProvider } from "../sandbox/provider.js";
+import { createE2bProvider } from "../sandbox/e2b/provider.js";
 import { createMemoryExtension } from "../memory/extension.js";
 import { memoryContext, remoteFiles } from "../memory/client.js";
 import { createArtifactExtension } from "../artifact/extension.js";
@@ -37,10 +37,12 @@ const contextFallback = (error: unknown): string => {
   return "";
 };
 
+const sandboxProvider = ({ env, name, telemetry }: DurableHost) => createE2bProvider(env, name, telemetry);
+
 export const CATALOG: Record<string, (deps: HarnessDeps) => Extension> = {
   coding: () => CodingTools,
-  environment: ({ host }) => createEnvironmentExtension(createSandboxProvider(host.env, host.name, host.telemetry)),
-  delegate: ({ host }) => createDelegateExtension(DelegateAgents, createSandboxProvider(host.env, host.name, host.telemetry)),
+  environment: ({ host }) => createEnvironmentExtension(sandboxProvider(host)),
+  delegate: ({ host }) => createDelegateExtension(DelegateAgents, sandboxProvider(host)),
   cron: () => CronExtension,
   panel: () => PanelExtension,
   send: ({ host }) =>

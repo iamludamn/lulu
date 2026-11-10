@@ -87,7 +87,7 @@ class SandboxBinaryReader implements BinaryReader {
   async close(): Promise<void> {}
 }
 
-export class SandboxExecutionEnv implements ExecutionEnv {
+export class E2bExecutionEnv implements ExecutionEnv {
   readonly id: string;
   cwd: string;
   readonly #sandbox: Sandbox;

@@ -1,7 +1,7 @@
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Conversation, Harness, SubmissionId } from "@earendil-works/pi-durable";
-import { ChatDoc } from "../session/progress.js";
+import { ChatDoc } from "../conversation/progress.js";
 import { DeliveryDoc } from "./doc.js";
 import { sentIn } from "./sent.js";
 
