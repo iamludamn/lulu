@@ -49,9 +49,9 @@ private struct FlowingBorder: ViewModifier {
     private func glow(_ shape: RoundedRectangle) -> some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: idle)) { context in
             let breath = reduceMotion ? 0 : sin(context.date.timeIntervalSinceReferenceDate * 2 * .pi / Self.period)
-            shape.stroke(Color.white, lineWidth: light ? 4 : 3)
-                .blur(radius: light ? 10 : 8)
-                .opacity(light ? 0.62 + 0.2 * breath : 0.38 + 0.14 * breath)
+            shape.stroke(Color.white, lineWidth: light ? 4 : 5)
+                .blur(radius: light ? 10 : 9)
+                .opacity(reduceMotion ? (light ? 0.95 : 0.7) : (light ? 0.62 + 0.2 * breath : 0.58 + 0.16 * breath))
         }
         .allowsHitTesting(false)
     }
@@ -60,17 +60,18 @@ private struct FlowingBorder: ViewModifier {
         ZStack {
             shape.strokeBorder(light ? Color.black.opacity(0.1) : Color.white.opacity(0.3), lineWidth: 0.6)
             if reduceMotion {
-                shape.strokeBorder(Color.white.opacity(0.55), lineWidth: 1.2)
+                // 减弱动态效果：整圈静态高亮。浅色下气泡本身是白色磨砂，只靠白色细线看不出来，
+                // 所以同时叠一圈向外的白色光晕和一圈带色的细线。
+                shape.stroke(Color.white, lineWidth: 6).blur(radius: 4).opacity(light ? 0.9 : 0.55)
+                shape.strokeBorder(light ? Color.accentColor.opacity(0.55) : Color.white.opacity(0.85), lineWidth: 1.5)
             } else {
                 TimelineView(.animation(minimumInterval: 1.0 / 30, paused: idle)) { context in
                     let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: Self.period) / Self.period
                     let sweep = AngularGradient(gradient: Self.streak, center: .center, angle: .degrees(turn * 360))
                     ZStack {
-                        if light {
-                            shape.stroke(sweep, lineWidth: 16).blur(radius: 12)
-                            shape.stroke(sweep, lineWidth: 7).blur(radius: 4)
-                        }
-                        shape.strokeBorder(sweep, lineWidth: light ? 2.5 : 1.2)
+                        shape.stroke(sweep, lineWidth: light ? 16 : 12).blur(radius: light ? 12 : 8)
+                        shape.stroke(sweep, lineWidth: light ? 7 : 5).blur(radius: light ? 4 : 3)
+                        shape.strokeBorder(sweep, lineWidth: light ? 2.5 : 2)
                     }
                 }
             }
