@@ -14,7 +14,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: client/desktop/go.mod
+          cache-dependency-path: client/desktop/go.sum
       - run: npm ci
       - run: npm run check
       - run: npm run lint
       - run: npm run build
+      - run: npm run build:cross --prefix client/desktop

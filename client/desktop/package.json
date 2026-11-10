@@ -1,0 +1,10 @@
+{
+  "name": "@lulu/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "go build -trimpath -o bin/lulu .",
+    "build:cross": "GOOS=darwin GOARCH=arm64 go build -trimpath -o bin/lulu-darwin-arm64 . && GOOS=linux GOARCH=amd64 go build -trimpath -o bin/lulu-linux-amd64 . && GOOS=windows GOARCH=amd64 go build -trimpath -o bin/lulu-windows-amd64.exe .",
+    "dev": "go tool mygo dev"
+  }
+}
