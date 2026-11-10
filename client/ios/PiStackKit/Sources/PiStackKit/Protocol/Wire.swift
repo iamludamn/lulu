@@ -101,7 +101,7 @@ public struct Command: Sendable {
         case .keep(let origin): ["type": "widget.keep", "requestId": requestId, "origin": origin]
         case .drop(let origin): ["type": "widget.drop", "requestId": requestId, "origin": origin]
         case .makeWidget(let origin): ["type": "widget.make", "requestId": requestId, "origin": origin]
-        case .order(let ids): ["type": "layout.order", "requestId": requestId, "target": "assets", "ids": ids]
+        case .order(let ids): ["type": "layout.order", "requestId": requestId, "ids": ids]
         case .check(let id, let index, let done): ["type": "widget.check", "requestId": requestId, "id": id, "index": index, "done": done]
         }
     }

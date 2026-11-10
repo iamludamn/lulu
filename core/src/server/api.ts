@@ -1,4 +1,5 @@
 import type { DurableHost } from "../host/types.js";
+import { SPACE_ID } from "../protocol/panel.js";
 
 export const BOT_ID = "main";
 
@@ -27,8 +28,6 @@ async function artifactFile(request: Request, host: ApiHost): Promise<Response> 
   if (!response.ok) return response;
   return Response.redirect(((await response.json()) as { url: string }).url, 302);
 }
-
-const SPACE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
 async function spaceState(request: Request, host: ApiHost): Promise<Response> {
   const id = new URL(request.url).searchParams.get("id") ?? "";

@@ -312,7 +312,7 @@ export class BotSession {
       case "prompt.abort":
         await this.#root.abort(BACKGROUND_CONTEXT);
         this.#broadcastState();
-        this.#send(socket, { type: "result", requestId: command.requestId, ok: true });
+        this.#acknowledge(socket, command.requestId);
         return;
       case "model.select": {
         const selected: ModelRef = command.model;
@@ -322,21 +322,21 @@ export class BotSession {
         this.#selected = selected;
         await this.#root.configure({ model: durableModel(selected) }, BACKGROUND_CONTEXT);
         this.#broadcast({ type: "models", config });
-        this.#send(socket, { type: "result", requestId: command.requestId, ok: true });
+        this.#acknowledge(socket, command.requestId);
         return;
       }
       case "widget.keep":
       case "widget.drop":
         await keepWidget(this.#harness, this.#view.value.entries, command.origin, command.type === "widget.keep");
-        this.#send(socket, { type: "result", requestId: command.requestId, ok: true });
+        this.#acknowledge(socket, command.requestId);
         return;
       case "layout.order":
         await orderCards(this.#harness, command.ids);
-        this.#send(socket, { type: "result", requestId: command.requestId, ok: true });
+        this.#acknowledge(socket, command.requestId);
         return;
       case "widget.check":
         await checkItem(this.#harness, command.id, command.index, command.done);
-        this.#send(socket, { type: "result", requestId: command.requestId, ok: true });
+        this.#acknowledge(socket, command.requestId);
         return;
       case "widget.make": {
         const make = await this.#inPromptOrder(() => startMake(this.#harness, this.#root, this.#view.value.entries, command));
@@ -365,7 +365,7 @@ export class BotSession {
     await linkChatMessage(this.#harness, command.requestId, submission.id as number);
     void this.#refreshAlarm().catch((error: unknown) => reportError("Prompt alarm reconciliation failed", error));
     this.#broadcastState();
-    this.#send(socket, { type: "result", requestId: command.requestId, ok: true });
+    this.#acknowledge(socket, command.requestId);
   }
 
   async #recall(requestId: string, content: string): Promise<void> {
@@ -492,6 +492,10 @@ export class BotSession {
 
   #broadcast(message: ServerMessage): void {
     for (const socket of this.#host.sockets.all()) if (this.#attachmentOf(socket)?.ready === true) this.#send(socket, message);
+  }
+
+  #acknowledge(socket: Socket, requestId: string): void {
+    this.#send(socket, { type: "result", requestId, ok: true });
   }
 
   #send(socket: Socket, message: ServerMessage): void {

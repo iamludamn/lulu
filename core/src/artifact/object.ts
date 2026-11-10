@@ -43,6 +43,12 @@ export interface Reference {
   contentType: string;
 }
 
+class NotFound extends Error {}
+
+function failure(error: unknown, status: number): Response {
+  return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: error instanceof NotFound ? 404 : status });
+}
+
 const headKey = (name: string) => `head:${name}`;
 const versionKey = (name: string, version: number) => `ver:${name}:${String(version).padStart(10, "0")}`;
 const uploadKey = (uploadId: string) => `upload:${uploadId}`;
@@ -77,45 +83,34 @@ export class ArtifactObject {
   }
 
   fetch(request: Request): Promise<Response> {
-    const { pathname } = new URL(request.url);
-    if (pathname === "/mcp") return handleMcp(request, this);
-    if (pathname === "/stat") {
-      const params = new URL(request.url).searchParams;
-      const version = Number(params.get("version") ?? "");
-      return this.stat(params.get("name") ?? "", Number.isInteger(version) && version > 0 ? version : undefined).then(
-        (found) => Response.json(found),
-        (error: unknown) => Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 404 }),
-      );
-    }
-    if (pathname === "/read") {
-      const name = new URL(request.url).searchParams.get("name") ?? "";
-      return this.read(name, undefined).then(
-        (found) => new Response(found.text, { headers: { "content-type": found.contentType } }),
-        (error: unknown) => {
-          const message = error instanceof Error ? error.message : String(error);
-          return Response.json({ error: message }, { status: message.endsWith(" not found") ? 404 : 502 });
-        },
-      );
-    }
-    if (pathname === "/write") {
-      const name = new URL(request.url).searchParams.get("name") ?? "";
-      return request
-        .text()
-        .then((content) => this.write(name, content, "application/json", undefined))
-        .then(
-          () => new Response(null, { status: 204 }),
-          (error: unknown) => Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 }),
+    const url = new URL(request.url);
+    const name = url.searchParams.get("name") ?? "";
+    const version = Number(url.searchParams.get("version") ?? "");
+    const pinned = Number.isInteger(version) && version > 0 ? version : undefined;
+    switch (url.pathname) {
+      case "/mcp":
+        return handleMcp(request, this);
+      case "/stat":
+        return this.stat(name, pinned).then((found) => Response.json(found), (error: unknown) => failure(error, 404));
+      case "/read":
+        return this.read(name, undefined).then(
+          (found) => new Response(found.text, { headers: { "content-type": found.contentType } }),
+          (error: unknown) => failure(error, 502),
         );
+      case "/write":
+        return request
+          .text()
+          .then(async (content) => {
+            JSON.parse(content);
+            await this.write(name, content, "application/json", undefined);
+            return new Response(null, { status: 204 });
+          })
+          .catch((error: unknown) => failure(error, 400));
+      case "/download":
+        return this.downloadUrl(name, pinned).then((signed) => Response.json(signed), (error: unknown) => failure(error, 404));
+      default:
+        return Promise.resolve(new Response(null, { status: 404 }));
     }
-    if (pathname === "/download") {
-      const params = new URL(request.url).searchParams;
-      const version = Number(params.get("version") ?? "");
-      return this.downloadUrl(params.get("name") ?? "", Number.isInteger(version) && version > 0 ? version : undefined).then(
-        (signed) => Response.json(signed),
-        (error: unknown) => Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 404 }),
-      );
-    }
-    return Promise.resolve(new Response(null, { status: 404 }));
   }
 
   async list(prefix: string, limit: number): Promise<Reference[]> {
@@ -213,13 +208,13 @@ export class ArtifactObject {
 
   async #liveHead(name: string): Promise<Head> {
     const head = await this.#host.storage.get<Head>(headKey(name));
-    if (head === undefined || head.deletedAt !== null || head.latest === 0) throw new Error(`artifact ${name} not found`);
+    if (head === undefined || head.deletedAt !== null || head.latest === 0) throw new NotFound(`artifact ${name} not found`);
     return head;
   }
 
   async #version(name: string, version: number): Promise<Version> {
     const entry = await this.#host.storage.get<Version>(versionKey(name, version));
-    if (entry === undefined) throw new Error(`artifact ${name}@${version} not found`);
+    if (entry === undefined) throw new NotFound(`artifact ${name}@${version} not found`);
     return entry;
   }
 
