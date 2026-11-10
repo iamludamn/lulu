@@ -50,6 +50,8 @@ type app struct {
 	weatherLoading map[string]bool
 	toast          string
 	pendingSend    string
+	lastReply      string
+	repliesKnown   bool
 }
 
 func (a *app) wallpaper() wallpaperTheme { return wallpaperByID(a.prefs.Wallpaper) }
@@ -63,6 +65,7 @@ func (a *app) connect(base string) {
 	a.store = newStore(a.api, func(fn func()) { a.win.Update(fn) })
 	a.resources = map[string]*resource{}
 	a.chat = chatView{}
+	a.lastReply, a.repliesKnown = "", false
 	a.store.start()
 }
 
@@ -116,6 +119,7 @@ func (a *app) view(c *ui.Context) {
 		a.openSettings()
 	}
 	a.zoom(c)
+	a.notify(c)
 	ui.Themed(c, theme).Fill().Background(ui.Transparent).Children(func() {
 		wallpaperView(c, a.wallpaper(), a.dark)
 		ui.Column(c).Fill().AlignItems(ui.Stretch).Children(func() {
@@ -137,6 +141,46 @@ func (a *app) view(c *ui.Context) {
 		a.readerView(c, p)
 		a.settingsView(c, p)
 	})
+}
+
+func (a *app) notify(c *ui.Context) {
+	if a.store.snap.view == nil {
+		return
+	}
+	rows := a.currentRows()
+	last := ""
+	text := ""
+	for i := len(rows) - 1; i >= 0; i-- {
+		if r := rows[i]; r.role == roleAssistant && !r.typing {
+			last, text = r.id, r.text
+			if text == "" && r.card != nil {
+				text = r.card.title
+			}
+			break
+		}
+	}
+	known := a.repliesKnown
+	a.repliesKnown = true
+	if !known || last == "" || last == a.lastReply {
+		a.lastReply = last
+		return
+	}
+	a.lastReply = last
+	if c.WindowActive() {
+		return
+	}
+	body := []rune(strings.TrimSpace(text))
+	if len(body) > 140 {
+		body = append(body[:140], '…')
+	}
+	go func() {
+		n := mygo.NewNotification(mygo.NotificationOptions{ID: "reply", Title: botName, Body: string(body), Group: botName})
+		n.OnClick(func() {
+			a.win.Focus()
+			n.Close()
+		})
+		_ = n.Show()
+	}()
 }
 
 func (a *app) zoom(c *ui.Context) {
@@ -328,6 +372,7 @@ func main() {
 			StateKey:  "main",
 			Content:   ui.View(a.view),
 		})
+		mygo.App.OnDidBecomeActive(func() { mygo.ClearNotifications() })
 		a.viewer = newArtifactViewer(a)
 		a.connect(a.prefs.server())
 		a.win.Invalidate()
