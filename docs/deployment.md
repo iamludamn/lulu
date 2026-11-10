@@ -12,6 +12,10 @@ lulu runs as a single Cloudflare Worker named `lulu`, configured in `apps/cf/wra
 
 `@lulu/core` exports its compiled `dist`, and the worker serves `client/web/dist`. Wrangler does not compile either, so run `npm run build` at the repository root before `wrangler dev` or `wrangler deploy`.
 
+## Automatic deploy
+
+Every push to `main` runs `.github/workflows/deploy.yml`: install, `npm run check`, `npm run build`, then `wrangler deploy` from `apps/cf`. It needs only the repository secret `CLOUDFLARE_API_TOKEN`. The worker keeps its existing secrets, because a deploy never deletes secrets. Run the manual steps below only for a deploy from a branch or to change secrets.
+
 ## Deploy
 
 Run `wrangler deploy` from `apps/cf` with the secrets file passed as `--secrets-file`. The worker reads these secrets:
