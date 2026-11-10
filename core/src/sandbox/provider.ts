@@ -45,10 +45,8 @@ export function createSandboxProvider(env: Environment, scope: string, telemetry
         const options = { apiKey, idempotencyKey: await idempotencyKeyOf(scope, key), timeoutMs: SANDBOX_IDLE_MS, metadata: METADATA, lifecycle: { onTimeout: "pause" as const } };
         const sandbox = template ? await Sandbox.create(template, options) : await Sandbox.create(options);
         span.setAttributes({ "lulu.sandbox.id": sandbox.sandboxId });
-        const home = await sandbox.commands.run("pwd").catch(async (error: unknown) => {
-          await sandbox.kill().catch(() => undefined);
-          throw error;
-        });
+        const running = await Sandbox.connect(sandbox.sandboxId, { apiKey, timeoutMs: SANDBOX_IDLE_MS });
+        const home = await running.commands.run("pwd");
         return { id: sandbox.sandboxId, cwd: home.stdout.trim() };
       });
     },
