@@ -8,5 +8,5 @@
     "typescript/no-misused-promises": "error",
     "typescript/await-thenable": "error"
   },
-  "ignorePatterns": ["**/dist/**", "experiments/**", "client/ios/**"]
+  "ignorePatterns": ["**/dist/**", "client/ios/**"]
 }
