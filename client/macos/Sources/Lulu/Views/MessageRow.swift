@@ -129,7 +129,8 @@ struct MessageRow: View, Equatable {
             }
             .buttonStyle(Glassy(shape: Circle(), tint: .pane))
             .help(label)
-            .opacity(hovering ? 1 : 0)
+            .accessibilityLabel(label)
+            .opacity(hovering ? 1 : 0.35)
         }
         .onHover { hovering = $0 }
         .animation(.snappy(duration: 0.2), value: hovering)
