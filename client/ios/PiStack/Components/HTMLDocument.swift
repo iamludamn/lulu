@@ -20,12 +20,21 @@ struct HTMLDocument: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let bridge {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("刷新", systemImage: "arrow.clockwise") { Task { await bridge.refresh() } }
+                }
+            }
+        }
     }
 }
 
-private struct HTMLPage: UIViewRepresentable {
+struct HTMLPage: UIViewRepresentable {
     let html: String
     let bridge: SpaceBridge?
+    /// false renders the page as a still preview: no scrolling and no touches.
+    var interactive = true
     @Environment(\.colorScheme) private var scheme
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -43,8 +52,12 @@ private struct HTMLPage: UIViewRepresentable {
         view.backgroundColor = .clear
         view.scrollView.backgroundColor = .clear
         view.navigationDelegate = context.coordinator
+        view.scrollView.isScrollEnabled = interactive
+        view.isUserInteractionEnabled = interactive
         context.coordinator.dark = dark
-        view.loadHTMLString(HTMLTheme.prepared(html), baseURL: nil)
+        let prepared = HTMLTheme.prepared(html, network: bridge != nil)
+        bridge?.attach(view, html: prepared)
+        view.loadHTMLString(prepared, baseURL: nil)
         return view
     }
 

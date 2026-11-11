@@ -26,7 +26,7 @@ struct PanelView: View {
                             ForEach(row) { widget in
                                 WidgetCard(widget: widget, botId: botId, api: api, onPrompt: onPrompt, onDrop: onDrop, onCheck: { onCheck(widget.id, $0, $1) })
                             }
-                            if row.count == 1 && row[0].size == .s { Color.clear.frame(maxWidth: .infinity) }
+                            if row.count == 1 && row[0].size == .s && !row[0].isSpace { Color.clear.frame(maxWidth: .infinity) }
                         }
                     }
                 }
@@ -57,7 +57,7 @@ struct PanelView: View {
     private func rows(_ widgets: [PanelWidget]) -> [[PanelWidget]] {
         var result: [[PanelWidget]] = []
         for widget in widgets {
-            if widget.size == .s, let last = result.last, last.count == 1, last[0].size == .s {
+            if widget.size == .s, !widget.isSpace, let last = result.last, last.count == 1, last[0].size == .s, !last[0].isSpace {
                 result[result.count - 1].append(widget)
             } else {
                 result.append([widget])
@@ -98,8 +98,12 @@ struct WidgetFace: View {
     var onPrompt: (String) -> Void = { _ in }
     var onCheck: (Int, Bool) -> Void = { _, _ in }
 
+    /// Two rows of the 158pt cards and the gap between them.
+    static let spaceHeight: CGFloat = 328
+
     private var height: CGFloat? {
-        switch widget.size {
+        if widget.isSpace { return Self.spaceHeight }
+        return switch widget.size {
         case .s, .m: 158
         case .l: nil
         }
@@ -112,18 +116,26 @@ struct WidgetFace: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .padding(14)
-        .frame(maxWidth: .infinity, minHeight: widget.size == .l ? 300 : nil, maxHeight: height, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: widget.isSpace ? Self.spaceHeight : widget.size == .l ? 300 : nil, maxHeight: height, alignment: .topLeading)
         .clipShape(.rect(cornerRadius: 26, style: .continuous))
     }
 
     private var header: some View {
         HStack(spacing: 6) {
-            if let icon = widget.icon {
+            if let icon = widget.icon ?? (widget.isSpace ? "square.stack.3d.up" : nil) {
                 Image(systemName: icon).foregroundStyle(widget.tone?.color ?? .secondary)
             }
             Text(widget.title).lineLimit(1)
             Spacer(minLength: 4)
-            if widget.size != .s, let updatedAt = widget.updatedAt {
+            if widget.isSpace {
+                Text("Space")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Color.accentColor.opacity(0.14), in: .capsule)
+            }
+            if widget.size != .s || widget.isSpace, let updatedAt = widget.updatedAt {
                 Text(Date(timeIntervalSince1970: updatedAt / 1000), format: .relative(presentation: .named))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -148,12 +160,15 @@ private struct WidgetCard: View {
             .frosted(26)
             .contentShape(.rect(cornerRadius: 26, style: .continuous))
             .contextMenu {
+                if widget.isSpace {
+                    Button("刷新", systemImage: "arrow.clockwise") { NotificationCenter.default.post(name: .spaceRefresh, object: widget.id) }
+                }
                 if let origin = widget.origin {
                     Button("删除小组件", systemImage: "trash", role: .destructive) { onDrop(origin) }
                 }
             }
-        if let page {
-            Button { openSpace(page, widget.id, "space-\(widget.id)") } label: { card }
+        if let (page, refresh) = space {
+            Button { openSpace(page, SpaceOpening(id: widget.id, title: widget.title, refresh: refresh), "space-\(widget.id)") } label: { card }
                 .buttonStyle(.plain)
                 .artifactSource("space-\(widget.id)", radius: 26)
         } else {
@@ -161,8 +176,8 @@ private struct WidgetCard: View {
         }
     }
 
-    private var page: ArtifactAddress? {
-        guard case .web(let src) = widget.body else { return nil }
-        return ArtifactAddress(src)
+    private var space: (ArtifactAddress, SpaceRefresh)? {
+        guard case .space(let src, _, let refresh) = widget.body, let page = ArtifactAddress(src) else { return nil }
+        return (page, refresh)
     }
 }

@@ -11,6 +11,7 @@ struct MessageRow: View, Equatable {
     let onRead: (String) -> Void
     let onOpen: (ArtifactAddress, String) -> Void
     let onKept: (Page) -> Void
+    @Environment(\.openSpace) private var openSpace
 
     static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.row == rhs.row && lhs.expanded == rhs.expanded }
 
@@ -101,11 +102,19 @@ struct MessageRow: View, Equatable {
     private func cardRow(_ card: SentCard) -> some View {
         switch card {
         case .panel(let widget):
-            kept(destination: .panel, label: "放入视图", symbol: "square.grid.2x2") {
-                WidgetFace(widget: widget, botId: botId, api: api)
-                    .frame(maxWidth: widget.size == .s ? 176 : 360)
-                    .frosted(26)
-                    .contentShape(.rect(cornerRadius: 26, style: .continuous))
+            let face = WidgetFace(widget: widget, botId: botId, api: api)
+                .frame(maxWidth: widget.size == .s && !widget.isSpace ? 176 : 360)
+                .frosted(26)
+                .contentShape(.rect(cornerRadius: 26, style: .continuous))
+            if case .space(let src, _, _) = widget.body {
+                let source = "chat-\(row.id)"
+                kept(destination: .panel, label: "添加 Space", symbol: "square.stack.3d.up") {
+                    Button { ArtifactAddress(src).map { openSpace($0, SpaceOpening(id: widget.id, title: widget.title, preview: true), source) } } label: { face }
+                        .buttonStyle(.plain)
+                        .artifactSource(source, radius: 26)
+                }
+            } else {
+                kept(destination: .panel, label: "放入视图", symbol: "square.grid.2x2") { face }
             }
         case .asset(let ref, let title, let summary):
             let address = ArtifactAddress(ref)

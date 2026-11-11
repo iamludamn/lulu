@@ -4,27 +4,45 @@ import SwiftUI
 
 extension EnvironmentValues {
     @Entry var openArtifact: (ArtifactAddress, String) -> Void = { _, _ in }
-    @Entry var openSpace: (ArtifactAddress, String, String) -> Void = { _, _, _ in }
+    @Entry var openSpace: (ArtifactAddress, SpaceOpening, String) -> Void = { _, _, _ in }
     @Entry var artifactZoom: Namespace.ID? = nil
+}
+
+/// A page opened as a space: `id` keys its saved state, `title` is the widget title. A preview is a card
+/// still in chat: it reads the saved state but keeps what the page saves in memory only.
+struct SpaceOpening: Hashable {
+    let id: String
+    let title: String
+    var preview = false
+    var refresh: SpaceRefresh = .manual
 }
 
 private struct ArtifactOpening: Hashable {
     let address: ArtifactAddress
     let source: String
-    var space: String?
+    var space: SpaceOpening?
 }
 
 private struct ArtifactPage: View {
     let item: ArtifactAddress
-    let space: String?
+    let space: SpaceOpening?
     let botId: String
     let api: Api
+    @State private var bridge: SpaceBridge?
+
+    init(item: ArtifactAddress, space: SpaceOpening?, botId: String, api: Api) {
+        self.item = item
+        self.space = space
+        self.botId = botId
+        self.api = api
+        _bridge = State(initialValue: space.map { SpaceBridge(botId: botId, space: $0.id, refresh: $0.refresh, preview: $0.preview, api: api) })
+    }
 
     var body: some View {
-        let title = (item.fileName as NSString).deletingPathExtension
+        let title = space?.title ?? (item.fileName as NSString).deletingPathExtension
         let load = { try await api.artifactText(botId, name: item.name, version: item.version) }
         if item.isHTML {
-            HTMLDocument(title: title, load: load, bridge: space.map { SpaceBridge(botId: botId, space: $0, api: api) })
+            HTMLDocument(title: title, load: load, bridge: bridge)
         } else {
             MarkdownDocument(title: title, load: load)
         }
