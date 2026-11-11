@@ -8,10 +8,10 @@ struct HomeView: View {
     @State private var store: BotStore
     @State private var draft: String
     @State private var focus = 0
-    @State private var railHidden = false
-    @Namespace private var pill
+    @State private var lead = 0
 
     static let wideBreak: CGFloat = 1024
+    static let sideChat: CGFloat = 480
 
     init(bot: BotSummary, api: Api) {
         self.bot = bot
@@ -22,24 +22,18 @@ struct HomeView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let rail = proxy.size.width >= Self.wideBreak && !railHidden
-            let pages = rail ? [Page.chat, .assets] : Page.allCases
-            let page = rail && model.page == .panel ? Page.chat : model.page
-            let leading = rail ? PanelLayout.rail : 0
-            let main = proxy.size.width - leading
-            let column = min(512, main - 32)
+            let width = proxy.size.width
+            let wide = width >= Self.wideBreak
             ZStack(alignment: .topLeading) {
-                if rail {
-                    panel
-                        .frame(width: PanelLayout.rail)
-                        .transition(.move(edge: .leading).combined(with: .opacity))
+                if wide {
+                    wideLayout(width: width)
+                } else {
+                    content(model.page, column: min(512, width - 32), width: width)
+                        .frame(width: width)
                 }
-                content(page, column: column, width: main)
-                    .frame(width: main)
-                    .offset(x: leading)
-                topBar(pages: pages, page: page, rail: rail, center: leading + main / 2, width: proxy.size.width)
+                topBar(wide: wide, width: width)
             }
-            .animation(.snappy(duration: 0.32), value: rail)
+            .animation(.snappy(duration: 0.34), value: lead)
             .accessibilityHidden(model.settings)
         }
         .background { Backdrop() }
@@ -85,10 +79,47 @@ struct HomeView: View {
         .animation(.snappy(duration: 0.25), value: page)
     }
 
-    private func topBar(pages: [Page], page: Page, rail: Bool, center: CGFloat, width: CGFloat) -> some View {
+    private func wideLayout(width: CGFloat) -> some View {
+        let rail = PanelLayout.rail
+        let side = Self.sideChat
+        let first = lead == 0
+        let chatWidth = first ? width - rail : side
+        let assetsWidth = width - side
+        return ZStack(alignment: .topLeading) {
+            panel
+                .frame(width: rail)
+                .offset(x: first ? 0 : -rail)
+                .opacity(first ? 1 : 0)
+                .allowsHitTesting(first)
+                .accessibilityHidden(!first)
+            ChatView(bot: bot, store: store, api: api, column: min(512, chatWidth - 32), draft: $draft, focus: focus, onFocus: { focus += 1 })
+                .frame(width: chatWidth)
+                .offset(x: first ? rail : 0)
+            AssetsView(items: store.snapshot.assets, botId: bot.id, api: api, width: min(860, assetsWidth - 64), onDrop: store.drop, onOrder: store.reorderAssets)
+                .frame(width: assetsWidth)
+                .offset(x: first ? width : side)
+                .opacity(first ? 0 : 1)
+                .allowsHitTesting(!first)
+                .accessibilityHidden(first)
+            Rectangle()
+                .fill(Color.line.opacity(0.7))
+                .frame(width: 0.5)
+                .mask(LinearGradient(colors: [.clear, .black, .black, .clear], startPoint: .top, endPoint: .bottom))
+                .padding(.vertical, 72)
+                .offset(x: first ? rail : side)
+                .allowsHitTesting(false)
+        }
+        .frame(width: width, alignment: .topLeading)
+        .clipped()
+        .onChange(of: model.page, initial: true) { _, page in
+            if page == .panel { lead = 0 } else if page == .assets { lead = 1 }
+        }
+    }
+
+    private func topBar(wide: Bool, width: CGFloat) -> some View {
         ZStack(alignment: .top) {
             HStack {
-                CircleButton(symbol: leadingSymbol(rail: rail, width: width), help: leadingHelp(width: width)) { leadingAction(width: width) }
+                CircleButton(symbol: "plus", help: "添加组件") { compose("帮我在视图里加一个组件：") }
                     .padding(.leading, 80)
                     .opacity(width < 600 ? 0 : 1)
                     .disabled(width < 600)
@@ -101,51 +132,37 @@ struct HomeView: View {
                 .padding(.trailing, 16)
                 .padding(.top, 3)
             }
-            switcher(pages: pages, page: page)
-                .offset(x: center - width / 2)
+            switcher(wide: wide)
         }
         .frame(width: width, height: 48, alignment: .top)
         .padding(.top, 14)
     }
 
-    private func leadingSymbol(rail: Bool, width: CGFloat) -> String {
-        width >= Self.wideBreak ? "sidebar.left" : "plus"
-    }
-
-    private func leadingHelp(width: CGFloat) -> String {
-        width >= Self.wideBreak ? (railHidden ? "显示组件栏" : "收起组件栏") : "添加组件"
-    }
-
-    private func leadingAction(width: CGFloat) {
-        if width >= Self.wideBreak {
-            railHidden.toggle()
-            if !railHidden && model.page == .panel { model.page = .chat }
-        } else {
-            compose("帮我在视图里加一个组件：")
-        }
-    }
-
-    private func switcher(pages: [Page], page: Page) -> some View {
-        HStack(spacing: 0) {
-            ForEach(pages) { item in
-                Button { withAnimation(.snappy) { model.page = item } } label: {
-                    Text(item.title)
-                        .type(14, .semibold, line: 18)
-                        .foregroundStyle(item == page ? Color.sheetInk : Color.muted)
-                        .frame(width: 68, height: 40)
-                        .background {
-                            if item == page {
-                                Capsule()
-                                    .fill(Color.thumb)
-                                    .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
-                                    .matchedGeometryEffect(id: "pill", in: pill)
-                            }
-                        }
-                        .contentShape(.capsule)
+    private func switcher(wide: Bool) -> some View {
+        let span = wide ? 2 : 1
+        let start = wide ? lead : model.page.rawValue
+        return ZStack(alignment: .leading) {
+            Capsule()
+                .fill(Color.thumb)
+                .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+                .frame(width: 68 * CGFloat(span), height: 40)
+                .offset(x: 68 * CGFloat(start))
+            HStack(spacing: 0) {
+                ForEach(Page.allCases) { item in
+                    let active = item.rawValue >= start && item.rawValue < start + span
+                    Button { withAnimation(.snappy(duration: 0.34)) { model.page = item } } label: {
+                        Text(item.title)
+                            .type(14, .semibold, line: 18)
+                            .foregroundStyle(active ? Color.sheetInk : Color.muted)
+                            .frame(width: 68, height: 40)
+                            .contentShape(.capsule)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
+        .animation(.snappy(duration: 0.34), value: start)
+        .animation(.snappy(duration: 0.34), value: span)
         .padding(4)
         .glass(Capsule(), tint: .pane)
     }
