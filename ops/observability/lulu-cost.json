@@ -172,8 +172,23 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (__name__) (sum_over_time({__name__=~\"lulu_chat_cost_(input|output|cache_read|cache_write)_total\"}[$__interval]))",
-          "legendFormat": "{{__name__}}"
+          "expr": "sum(sum_over_time(lulu_chat_cost_input_total[$__interval]))",
+          "legendFormat": "input"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(sum_over_time(lulu_chat_cost_output_total[$__interval]))",
+          "legendFormat": "output"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(sum_over_time(lulu_chat_cost_cache_read_total[$__interval]))",
+          "legendFormat": "cache_read"
+        },
+        {
+          "refId": "D",
+          "expr": "sum(sum_over_time(lulu_chat_cost_cache_write_total[$__interval]))",
+          "legendFormat": "cache_write"
         }
       ]
     }
