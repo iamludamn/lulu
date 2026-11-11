@@ -1,9 +1,10 @@
 import type { DurableHost } from "../host/types.js";
 import { SPACE_ID } from "../protocol/panel.js";
+import { mcpCatalog } from "./mcp-catalog.js";
 
 export const BOT_ID = "main";
 
-export type ApiHost = Pick<DurableHost, "env" | "objects" | "telemetry">;
+export type ApiHost = Pick<DurableHost, "env" | "objects" | "telemetry" | "kv">;
 
 const PREFIX = `/api/bots/${BOT_ID}`;
 
@@ -55,6 +56,7 @@ async function mcpRegistry(request: Request, host: ApiHost, rest: string): Promi
     const given = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "";
     if (!(await tokensMatch(given, token))) return json({ error: "Unauthorized" }, 401, { "WWW-Authenticate": "Bearer" });
   }
+  if (rest === "/mcp/catalog") return mcpCatalog(request, host.kv);
   const url = new URL(request.url);
   url.pathname = rest;
   const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.text();

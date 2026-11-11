@@ -1,4 +1,4 @@
-import type { McpRegistryView, McpServerInput } from "@lulu/core/protocol/mcp.js";
+import type { McpCatalogPage, McpRegistryView, McpServerInput } from "@lulu/core/protocol/mcp.js";
 
 const BASE = "/api/bots/main/mcp";
 const TOKEN_KEY = "lulu.mcp.token";
@@ -22,9 +22,10 @@ export function saveToken(token: string): void {
   }
 }
 
-async function call<T>(token: string, path: string, method = "GET", body?: unknown): Promise<T> {
+async function call<T>(token: string, path: string, method = "GET", body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
     method,
+    signal,
     headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
@@ -37,6 +38,7 @@ async function call<T>(token: string, path: string, method = "GET", body?: unkno
 const server = (name: string): string => `/servers/${encodeURIComponent(name)}`;
 
 export const registry = {
+  catalog: (token: string, search: string, cursor?: string, signal?: AbortSignal) => call<McpCatalogPage>(token, `/catalog?${new URLSearchParams({ search, ...(cursor === undefined ? {} : { cursor }) })}`, "GET", undefined, signal),
   list: (token: string) => call<McpRegistryView>(token, ""),
   reload: (token: string) => call<McpRegistryView>(token, "/reload", "POST"),
   reconnect: (token: string, name: string) => call<McpRegistryView>(token, `${server(name)}/reload`, "POST"),

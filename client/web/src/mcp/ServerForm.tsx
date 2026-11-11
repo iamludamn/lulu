@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowRight, ChevronDown, KeyRound, Loader2, Plus, ShieldCheck, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronDown, KeyRound, Loader2, Plus, ShieldCheck, X } from "lucide-react";
 import { MCP_MASK, MCP_SERVER_NAME, type McpServerInput, type McpServerView } from "@lulu/core/protocol/mcp.js";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -14,11 +14,12 @@ interface Props {
   readonly error: string | undefined;
   readonly onSave: (name: string, input: McpServerInput) => void;
   readonly onCancel: () => void;
+  readonly onBack?: () => void;
 }
 
 interface Pair { id: number; name: string; value: string }
 
-export function ServerForm({ server, busy, error, onSave, onCancel }: Props) {
+export function ServerForm({ server, busy, error, onSave, onCancel, onBack }: Props) {
   const [name, setName] = useState(server?.name ?? "");
   const [url, setUrl] = useState(server?.url ?? "");
   const [pairs, setPairs] = useState<Pair[]>(Object.entries(server?.headers ?? {}).map(([header, value], id) => ({ id, name: header, value })));
@@ -30,8 +31,9 @@ export function ServerForm({ server, busy, error, onSave, onCancel }: Props) {
   return (
     <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[520px]" showCloseButton={!busy}>
       <DialogHeader className="text-left">
+        {onBack !== undefined && <Button variant="ghost" size="sm" className="-ml-2 w-fit text-xs text-muted-foreground" disabled={busy} onClick={onBack}><ArrowLeft className="size-3.5" />返回目录</Button>}
         <div className="mb-2 flex size-11 items-center justify-center rounded-xl border bg-muted/50"><Plus className="size-5" /></div>
-        <DialogTitle>{server === undefined ? "添加连接" : "编辑连接"}</DialogTitle>
+        <DialogTitle>{server === undefined ? "手动添加" : "编辑连接"}</DialogTitle>
         <DialogDescription>填入服务的 MCP 地址，lulu 会自动完成连接或引导你授权。</DialogDescription>
       </DialogHeader>
       <form onSubmit={(event) => {

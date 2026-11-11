@@ -77,6 +77,7 @@ export function workerHost(env: Env, ctx: ExecutionContext): ApiHost {
   const environment = stringsOf(env);
   return {
     env: environment,
+    kv: kvOf(env.LULU_MCP),
     telemetry: createTelemetry(environment, (task) => ctx.waitUntil(task)),
     objects: { BOTS: env.BOTS, MEMORY: env.MEMORY, ARTIFACTS: env.ARTIFACTS },
   };
