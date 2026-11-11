@@ -9,11 +9,12 @@ struct TypingDots: View {
             let time = context.date.timeIntervalSinceReferenceDate
             HStack(spacing: 4.5) {
                 ForEach(0..<3, id: \.self) { index in
-                    let fade = reduced ? 0.7 : 0.5 - 0.5 * cos((time - Double(index) / 3) * 2 * .pi)
+                    let pulse = reduced ? 0 : max(0, sin(time * 2 * .pi / 1.2 - Double(index) * .pi / 3))
                     Circle()
                         .fill(.secondary)
                         .frame(width: size, height: size)
-                        .opacity(0.4 + 0.6 * fade)
+                        .opacity(reduced ? 0.82 : 0.4 + 0.6 * pulse)
+                        .scaleEffect(reduced ? 1 : 0.85 + 0.25 * pulse)
                 }
             }
         }
