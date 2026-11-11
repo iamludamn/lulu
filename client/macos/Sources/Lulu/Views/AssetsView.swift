@@ -95,7 +95,7 @@ private struct AssetCard: View {
         }
         .foregroundStyle(Color.ink)
         .padding(10)
-        .pane(24)
+        .frosted(24)
         .scaleEffect(hovering ? 1.015 : 1)
         .onHover { hovering = $0 }
         .animation(.snappy(duration: 0.2), value: hovering)

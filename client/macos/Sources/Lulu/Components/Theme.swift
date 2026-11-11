@@ -16,9 +16,8 @@ extension Color {
     static let faint = scheme(dark: rgba(0xF5F5F7, 0.3), light: rgba(0x1D1D1F, 0.3))
     static let line = scheme(dark: rgba(0xF5F5F7, 0.14), light: rgba(0x1D1D1F, 0.14))
     static let veil = scheme(dark: rgba(0xF5F5F7, 0.06), light: rgba(0x1D1D1F, 0.05))
-    static let pane = scheme(dark: rgba(0x1D1D1F, 0.618), light: rgba(0xFFFFFF, 0.55))
-    static let reply = scheme(dark: rgba(0x1D1D1F, 0.7), light: rgba(0xFFFFFF, 0.98))
-    static let mine = scheme(dark: rgba(0x1D1D1F, 0.36), light: rgba(0xFFFFFF, 0.42))
+    static let pane = scheme(dark: rgba(0x1D1D1F, 0.3), light: rgba(0xFFFFFF, 0.16))
+    static let frost = scheme(dark: rgba(0xF5F5F7, 0.06), light: rgba(0xFFFFFF, 0.55))
     static let sheet = rgba(0xF5F5F7).swiftUI
     static let chip = scheme(dark: rgba(0xF5F5F7), light: rgba(0xFFFFFF))
     static let sheetInk = rgba(0x1D1D1F).swiftUI
@@ -48,8 +47,26 @@ extension View {
             .lineHeight(.exact(points: line ?? (size * 1.3).rounded()))
     }
 
-    func pane(_ radius: CGFloat, tint: Color = .pane) -> some View {
+    func pane(_ radius: CGFloat, tint: Color? = .pane) -> some View {
         glass(RoundedRectangle(cornerRadius: radius, style: .continuous), tint: tint)
+    }
+
+    func clearGlass(_ radius: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        return background {
+            Color.clear.glassEffect(.clear, in: shape).allowsHitTesting(false)
+        }
+    }
+
+    func frosted(_ radius: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        return background {
+            shape.fill(.ultraThinMaterial)
+                .overlay { shape.fill(Color.frost) }
+                .overlay { shape.strokeBorder(Color.white.opacity(0.45), lineWidth: 0.6) }
+                .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
+                .allowsHitTesting(false)
+        }
     }
 
     func glass(_ shape: some Shape, tint: Color? = nil) -> some View {

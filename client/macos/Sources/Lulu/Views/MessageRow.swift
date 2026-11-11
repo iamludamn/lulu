@@ -81,7 +81,8 @@ struct MessageRow: View, Equatable {
                 content.textSelection(.enabled)
             }
         }
-            .pane(22, tint: mine ? .mine : .reply)
+            .background { if mine { Color.clear.clearGlass(22) } }
+            .background { if !mine { Color.clear.frosted(22) } }
             .scaleEffect(row.body != nil && hovering ? 1.01 : 1)
             .contentShape(shape)
             .onHover { hovering = $0 }
@@ -184,7 +185,7 @@ struct MessageRow: View, Equatable {
         .foregroundStyle(Color.ink)
         .padding(.horizontal, 16)
         .frame(height: 36)
-        .pane(18)
+        .frosted(18)
         .frame(maxWidth: .infinity)
     }
 }

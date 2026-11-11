@@ -199,7 +199,7 @@ private struct DocumentPage: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 48)
                 .padding(.vertical, 44)
-                .pane(28, tint: .reply)
+                .frosted(28)
                 .frame(width: 720)
                 .padding(.bottom, 40)
                 .frame(maxWidth: .infinity)

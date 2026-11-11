@@ -35,7 +35,7 @@ struct Composer: View {
             action.padding(6)
         }
         .frame(height: height)
-        .pane(24)
+        .pane(24, tint: nil)
         .overlay { RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Color.line.opacity(0.6), lineWidth: 0.5).allowsHitTesting(false) }
         .animation(.snappy(duration: 0.22), value: height)
     }
