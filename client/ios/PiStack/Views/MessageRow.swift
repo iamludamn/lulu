@@ -6,14 +6,13 @@ struct MessageRow: View, Equatable {
     let store: BotStore
     let botId: String
     let api: Api
-    let space: Namespace.ID
     let expanded: Bool
     let onRead: (String) -> Void
     let onOpen: (ArtifactAddress, String) -> Void
     let onKept: (Page) -> Void
     @Environment(\.openSpace) private var openSpace
 
-    static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.row == rhs.row && lhs.expanded == rhs.expanded }
+    static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.row == rhs.row && lhs.expanded == rhs.expanded && lhs.botId == rhs.botId && lhs.api.base == rhs.api.base }
 
     var body: some View {
         switch row.role {
@@ -77,11 +76,10 @@ struct MessageRow: View, Equatable {
                 content.background { shape.fill(.clear).glassEffect(.clear, in: shape) }
             } else if row.body != nil {
                 content.frosted(20)
-                    .flowingBorder(radius: 20, paused: expanded)
-                    .opacity(expanded ? 0 : 1)
-                    .overlay { if !expanded { Color.clear.matchedGeometryEffect(id: row.id, in: space) } }
+                    .longReplyHighlight(radius: 20, key: "pistack.longReply.read.\(api.base.absoluteString).\(botId).\(row.id)") { onRead(row.id) }
                     .contentShape(shape)
-                    .onTapGesture { onRead(row.id) }
+                    .opacity(expanded ? 0 : 1)
+                    .anchorPreference(key: LongBubbleBounds.self, value: .bounds) { [row.id: $0] }
             } else {
                 content.frosted(20)
             }
