@@ -60,10 +60,8 @@ private struct FlowingBorder: ViewModifier {
         ZStack {
             shape.strokeBorder(light ? Color.black.opacity(0.1) : Color.white.opacity(0.3), lineWidth: 0.6)
             if reduceMotion {
-                // 减弱动态效果：整圈静态高亮。浅色下气泡本身是白色磨砂，只靠白色细线看不出来，
-                // 所以同时叠一圈向外的白色光晕和一圈带色的细线。
                 shape.stroke(Color.white, lineWidth: 6).blur(radius: 4).opacity(light ? 0.9 : 0.55)
-                shape.strokeBorder(light ? Color.accentColor.opacity(0.55) : Color.white.opacity(0.85), lineWidth: 1.5)
+                shape.strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5)
             } else {
                 TimelineView(.animation(minimumInterval: 1.0 / 30, paused: idle)) { context in
                     let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: Self.period) / Self.period
@@ -87,13 +85,10 @@ extension View {
 }
 
 struct LongReader: View {
-    let id: String
     let text: String
-    let space: Namespace.ID
     let size: CGSize
     let onClose: () -> Void
     @State private var drag: CGFloat = 0
-    @State private var settled = false
 
     private let shape = RoundedRectangle(cornerRadius: 28, style: .continuous)
 
@@ -109,13 +104,10 @@ struct LongReader: View {
                     .padding(.bottom, 28)
             }
         }
-        .opacity(settled ? 1 : 0)
         .background { surface }
         .clipShape(shape)
-        .matchedGeometryEffect(id: id, in: space)
         .frame(width: size.width, height: size.height)
         .offset(y: drag)
-        .onAppear { withAnimation(.easeIn(duration: 0.2).delay(0.15)) { settled = true } }
         .accessibilityAddTraits(.isModal)
         .accessibilityAction(.escape) { close() }
     }
@@ -135,6 +127,14 @@ struct LongReader: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 Spacer()
+                Button(action: close) {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.semibold))
+                        .frame(width: 32, height: 32)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("关闭全文")
             }
         }
         .padding(.horizontal, 16)
@@ -155,7 +155,6 @@ struct LongReader: View {
     }
 
     private func close() {
-        withAnimation(.easeOut(duration: 0.1)) { settled = false }
         onClose()
     }
 }

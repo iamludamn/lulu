@@ -15,7 +15,6 @@ struct ChatView: View {
     @State private var position = ScrollPosition()
     @State private var metrics = Metrics()
     @State private var reading: String?
-    @Namespace private var reader
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.topInset) private var topInset
     @Environment(\.openArtifact) private var openArtifact
@@ -44,7 +43,7 @@ struct ChatView: View {
                             .id("earlier")
                     }
                     ForEach(rows[start...]) { row in
-                        MessageRow(row: row, store: store, botId: bot.id, api: api, space: reader, expanded: row.id == reading, onRead: { read($0) }, onOpen: openArtifact, onKept: onKept)
+                        MessageRow(row: row, store: store, botId: bot.id, api: api, expanded: row.id == reading, onRead: { read($0) }, onOpen: openArtifact, onKept: onKept)
                             .equatable()
                             .padding(.bottom, row.tail ? 12 : 0)
                             .transition(.opacity.animation(.easeOut(duration: 0.2)))
@@ -146,17 +145,17 @@ struct ChatView: View {
                     .onTapGesture { read(nil) }
                     .transition(.opacity)
                 GeometryReader { proxy in
-                    LongReader(id: id, text: text, space: reader, size: CGSize(width: proxy.size.width - 20, height: proxy.size.height * 2 / 3)) { read(nil) }
+                    LongReader(text: text, size: CGSize(width: proxy.size.width - 20, height: proxy.size.height * 2 / 3)) { read(nil) }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .ignoresSafeArea()
-                .transition(.opacity)
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.98)))
             }
         }
     }
 
     private func read(_ id: String?) {
-        withAnimation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.45, dampingFraction: 0.86)) { reading = id }
+        withAnimation(.easeInOut(duration: reduceMotion ? 0.15 : 0.22)) { reading = id }
     }
 
     private var placeholder: String { "给 \(bot.name) 发消息" }

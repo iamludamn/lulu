@@ -6,7 +6,6 @@ struct MessageRow: View, Equatable {
     let store: BotStore
     let botId: String
     let api: Api
-    let space: Namespace.ID
     let expanded: Bool
     let onRead: (String) -> Void
     let onOpen: (ArtifactAddress, String) -> Void
@@ -78,8 +77,6 @@ struct MessageRow: View, Equatable {
             } else if row.body != nil {
                 content.frosted(20)
                     .flowingBorder(radius: 20, paused: expanded)
-                    .opacity(expanded ? 0 : 1)
-                    .overlay { if !expanded { Color.clear.matchedGeometryEffect(id: row.id, in: space) } }
                     .contentShape(shape)
                     .onTapGesture { onRead(row.id) }
             } else {
