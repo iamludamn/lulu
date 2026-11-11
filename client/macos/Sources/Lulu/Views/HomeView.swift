@@ -79,6 +79,15 @@ struct HomeView: View {
         .animation(.snappy(duration: 0.25), value: page)
     }
 
+    private var shelf: some View {
+        let shape = RoundedRectangle(cornerRadius: 32, style: .continuous)
+        return shape.fill(.ultraThinMaterial)
+            .overlay { shape.fill(Color.white.opacity(0.14)) }
+            .overlay { shape.strokeBorder(Color.white.opacity(0.4), lineWidth: 0.6) }
+            .padding(EdgeInsets(top: 68, leading: 8, bottom: 8, trailing: 8))
+            .allowsHitTesting(false)
+    }
+
     private func wideLayout(width: CGFloat) -> some View {
         let rail = PanelLayout.rail
         let side = Self.sideChat
@@ -88,6 +97,7 @@ struct HomeView: View {
         return ZStack(alignment: .topLeading) {
             panel
                 .frame(width: rail)
+                .background { shelf }
                 .offset(x: first ? 0 : -rail)
                 .opacity(first ? 1 : 0)
                 .allowsHitTesting(first)
@@ -97,17 +107,11 @@ struct HomeView: View {
                 .offset(x: first ? rail : 0)
             AssetsView(items: store.snapshot.assets, botId: bot.id, api: api, width: min(860, assetsWidth - 64), onDrop: store.drop, onOrder: store.reorderAssets)
                 .frame(width: assetsWidth)
+                .background { shelf }
                 .offset(x: first ? width : side)
                 .opacity(first ? 0 : 1)
                 .allowsHitTesting(!first)
                 .accessibilityHidden(first)
-            Rectangle()
-                .fill(Color.line.opacity(0.7))
-                .frame(width: 0.5)
-                .mask(LinearGradient(colors: [.clear, .black, .black, .clear], startPoint: .top, endPoint: .bottom))
-                .padding(.vertical, 72)
-                .offset(x: first ? rail : side)
-                .allowsHitTesting(false)
         }
         .frame(width: width, alignment: .topLeading)
         .clipped()
