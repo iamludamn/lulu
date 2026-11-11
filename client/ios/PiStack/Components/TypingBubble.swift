@@ -14,6 +14,7 @@ struct TypingBubble: View {
                 TypingDots(reduced: reduced)
                 if !text.isEmpty {
                     Text(text).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+                        .animation(.snappy, value: text)
                 }
             }
             .padding(.horizontal, 13)
@@ -31,7 +32,6 @@ struct TypingBubble: View {
         .opacity(shown ? 1 : 0)
         .padding(.leading, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(.snappy, value: text)
         .onAppear { withAnimation(.spring(duration: 0.4, bounce: 0.3)) { shown = true } }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("助手正在输入")
