@@ -42,7 +42,7 @@ struct ChatView: View {
                             .id("earlier")
                     }
                     ForEach(rows[start...]) { row in
-                        MessageRow(row: row, store: store, botId: bot.id, api: api, onRead: { id in reading = rows.first { $0.id == id } }, onOpen: openArtifact, onKept: onKept)
+                        MessageRow(row: row, store: store, botId: bot.id, api: api, expanded: row.id == reading?.id, onRead: { id in reading = rows.first { $0.id == id } }, onOpen: openArtifact, onKept: onKept)
                             .equatable()
                             .padding(.bottom, row.tail ? 12 : 0)
                             .transition(.opacity.animation(.easeOut(duration: 0.2)))
@@ -119,8 +119,14 @@ struct ChatView: View {
                 Composer(draft: $draft, busy: busy, placeholder: placeholder, focused: composing, onSend: send)
             }
         }
-        .sheet(item: $reading) { row in
-            if let text = row.body { LongReader(text: text) }
+        .overlayPreferenceValue(LongBubbleBounds.self) { bounds in
+            GeometryReader { proxy in
+                if let row = reading, let text = row.body, let anchor = bounds[row.id] {
+                    LongReader(summary: row.text, text: text, origin: proxy[anchor], canvas: proxy.size) { reading = nil }
+                        .id(row.id)
+                }
+            }
+            .ignoresSafeArea()
         }
         .sensoryFeedback(.impact(weight: .light), trigger: sent)
         .sensoryFeedback(.impact(weight: .light), trigger: reading?.id) { _, new in new != nil }

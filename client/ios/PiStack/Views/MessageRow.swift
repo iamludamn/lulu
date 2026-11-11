@@ -6,12 +6,13 @@ struct MessageRow: View, Equatable {
     let store: BotStore
     let botId: String
     let api: Api
+    let expanded: Bool
     let onRead: (String) -> Void
     let onOpen: (ArtifactAddress, String) -> Void
     let onKept: (Page) -> Void
     @Environment(\.openSpace) private var openSpace
 
-    static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.row == rhs.row && lhs.botId == rhs.botId && lhs.api.base == rhs.api.base }
+    static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.row == rhs.row && lhs.expanded == rhs.expanded && lhs.botId == rhs.botId && lhs.api.base == rhs.api.base }
 
     var body: some View {
         switch row.role {
@@ -77,6 +78,8 @@ struct MessageRow: View, Equatable {
                 content.frosted(20)
                     .longReplyHighlight(radius: 20, key: "pistack.longReply.read.\(api.base.absoluteString).\(botId).\(row.id)") { onRead(row.id) }
                     .contentShape(shape)
+                    .opacity(expanded ? 0 : 1)
+                    .anchorPreference(key: LongBubbleBounds.self, value: .bounds) { [row.id: $0] }
             } else {
                 content.frosted(20)
             }
