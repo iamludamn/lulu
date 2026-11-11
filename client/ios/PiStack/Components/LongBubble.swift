@@ -190,18 +190,10 @@ struct LongReader: View {
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Button(action: close) {
-                        Image(systemName: "xmark")
-                            .font(.caption.weight(.semibold))
-                            .frame(width: 44, height: 36)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("关闭全文")
                 }
+                .frame(height: 36)
             }
-            .padding(.leading, 20)
-            .padding(.trailing, 8)
+            .padding(.horizontal, 20)
             .padding(.top, 8)
             .contentShape(Rectangle())
             .gesture(
