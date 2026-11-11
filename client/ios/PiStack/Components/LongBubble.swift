@@ -161,13 +161,18 @@ struct LongReader: View {
                 .frame(width: target.width, height: target.height)
                 .clipShape(.rect(cornerRadius: 28, style: .continuous))
                 .position(x: target.midX, y: target.midY + drag)
+                .mask {
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .frame(width: frame.width, height: frame.height)
+                        .position(x: frame.midX, y: frame.midY + drag)
+                }
                 .opacity(revealed ? 1 : 0)
                 .allowsHitTesting(revealed && !closing)
         }
         .task {
             withAnimation(reduceMotion ? .easeOut(duration: 0.15) : motion) { expanded = true }
             do {
-                try await Task.sleep(for: .milliseconds(reduceMotion ? 0 : 180))
+                try await Task.sleep(for: .milliseconds(reduceMotion ? 0 : 280))
             } catch { return }
             guard !closing else { return }
             withAnimation(.easeOut(duration: 0.16)) { revealed = true }
