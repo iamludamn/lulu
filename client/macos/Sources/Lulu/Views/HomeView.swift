@@ -80,13 +80,15 @@ struct HomeView: View {
     }
 
     private func shelf(inner: Edge.Set) -> some View {
-        let start: UnitPoint = inner == .trailing ? .leading : .trailing
-        let end: UnitPoint = inner == .trailing ? .trailing : .leading
-        return Rectangle().fill(.ultraThinMaterial)
-            .overlay { Color.white.opacity(0.16) }
-            .mask {
-                LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.86), .init(color: .clear, location: 1)], startPoint: start, endPoint: end)
-            }
+        let r: CGFloat = 36
+        let shape = UnevenRoundedRectangle(
+            topLeadingRadius: inner == .leading ? r : 0,
+            bottomLeadingRadius: inner == .leading ? r : 0,
+            bottomTrailingRadius: inner == .trailing ? r : 0,
+            topTrailingRadius: inner == .trailing ? r : 0,
+            style: .continuous)
+        return Color.clear
+            .glassEffect(.regular, in: shape)
             .ignoresSafeArea()
             .allowsHitTesting(false)
     }
