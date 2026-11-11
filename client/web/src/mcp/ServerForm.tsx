@@ -1,61 +1,85 @@
 import { useState } from "react";
+import { ArrowRight, ChevronDown, KeyRound, Loader2, Plus, ShieldCheck, X } from "lucide-react";
 import { MCP_MASK, MCP_SERVER_NAME, type McpServerInput, type McpServerView } from "@lulu/core/protocol/mcp.js";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface Props {
   readonly server: McpServerView | undefined;
   readonly busy: boolean;
+  readonly error: string | undefined;
   readonly onSave: (name: string, input: McpServerInput) => void;
   readonly onCancel: () => void;
 }
 
-interface Pair {
-  name: string;
-  value: string;
-}
+interface Pair { id: number; name: string; value: string }
 
-export function ServerForm({ server, busy, onSave, onCancel }: Props) {
+export function ServerForm({ server, busy, error, onSave, onCancel }: Props) {
   const [name, setName] = useState(server?.name ?? "");
   const [url, setUrl] = useState(server?.url ?? "");
-  const [pairs, setPairs] = useState<Pair[]>(Object.entries(server?.headers ?? {}).map(([header, value]) => ({ name: header, value })));
+  const [pairs, setPairs] = useState<Pair[]>(Object.entries(server?.headers ?? {}).map(([header, value], id) => ({ id, name: header, value })));
+  const [nextId, setNextId] = useState(pairs.length);
+  const [advanced, setAdvanced] = useState(pairs.length > 0);
   const valid = MCP_SERVER_NAME.test(name) && /^https?:\/\//i.test(url.trim());
-
-  const change = (index: number, patch: Partial<Pair>) => setPairs(pairs.map((pair, at) => (at === index ? { ...pair, ...patch } : pair)));
-
-  const submit = () => {
-    const headers = Object.fromEntries(pairs.filter((pair) => pair.name.trim() !== "").map((pair) => [pair.name.trim(), pair.value]));
-    onSave(name, { url: url.trim(), headers });
-  };
+  const change = (id: number, patch: Partial<Pair>) => setPairs(pairs.map((pair) => pair.id === id ? { ...pair, ...patch } : pair));
 
   return (
-    <form className="card" onSubmit={(event) => { event.preventDefault(); if (valid && !busy) submit(); }}>
-      <fieldset disabled={busy}>
-        <label htmlFor="mcp-name">名称</label>
-        <input id="mcp-name" value={name} disabled={server !== undefined} placeholder="github" autoCapitalize="none" autoCorrect="off" onChange={(event) => setName(event.target.value)} />
-        <p className="hint">只能包含字母、数字、_ 和 -，工具会以 mcp__名称__工具 的形式出现。</p>
-        <label htmlFor="mcp-url">服务器地址</label>
-        <input id="mcp-url" type="url" value={url} placeholder="https://example.com/mcp" autoCapitalize="none" autoCorrect="off" onChange={(event) => setUrl(event.target.value)} />
-        <p className="hint">粘贴服务提供的 MCP 地址；需要登录时会自动前往授权。</p>
-        <details open={pairs.length > 0}>
-          <summary>请求头（可选）</summary>
-          {pairs.map((pair, index) => (
-            <div className="pair" key={index}>
-              <input value={pair.name} placeholder="Authorization" autoCapitalize="none" autoCorrect="off" onChange={(event) => change(index, { name: event.target.value })} />
-              <input type="password" value={pair.value} placeholder="Bearer …" autoComplete="off" onChange={(event) => change(index, { value: event.target.value })} />
-              <button type="button" onClick={() => setPairs(pairs.filter((_, at) => at !== index))}>移除</button>
-            </div>
-          ))}
-          <button type="button" onClick={() => setPairs([...pairs, { name: "", value: "" }])}>添加请求头</button>
-        </details>
-        {server !== undefined && <p className="hint">值为 {MCP_MASK} 的查询参数和请求头保持不变，改写即可替换。</p>}
-        <div className="actions">
-          <button type="submit" className="primary" disabled={!valid || busy}>
-            {busy ? "保存中…" : "连接"}
-          </button>
-          <button type="button" disabled={busy} onClick={onCancel}>
-            取消
-          </button>
-        </div>
-      </fieldset>
-    </form>
+    <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[520px]" showCloseButton={!busy}>
+      <DialogHeader className="text-left">
+        <div className="mb-2 flex size-11 items-center justify-center rounded-xl border bg-muted/50"><Plus className="size-5" /></div>
+        <DialogTitle>{server === undefined ? "添加连接" : "编辑连接"}</DialogTitle>
+        <DialogDescription>填入服务的 MCP 地址，lulu 会自动完成连接或引导你授权。</DialogDescription>
+      </DialogHeader>
+      <form onSubmit={(event) => {
+        event.preventDefault();
+        if (!valid || busy) return;
+        onSave(name, { url: url.trim(), headers: Object.fromEntries(pairs.filter((pair) => pair.name.trim() !== "").map((pair) => [pair.name.trim(), pair.value])) });
+      }}>
+        <fieldset disabled={busy} className="space-y-5 py-2 disabled:opacity-70">
+          <div className="space-y-2">
+            <Label htmlFor="mcp-name">连接名称</Label>
+            <Input id="mcp-name" value={name} disabled={server !== undefined} placeholder="例如 linear" autoCapitalize="none" autoCorrect="off" autoComplete="off" required pattern={"[A-Za-z0-9_\\-]+"} onChange={(event) => setName(event.target.value)} />
+            <p className="text-xs text-muted-foreground">使用字母、数字、下划线或连字符，创建后不可更改。</p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="mcp-url">MCP 服务器地址</Label>
+            <Input id="mcp-url" type="url" value={url} placeholder="https://mcp.example.com/mcp" autoCapitalize="none" autoCorrect="off" autoComplete="off" required onChange={(event) => setUrl(event.target.value)} />
+            <p className="text-xs text-muted-foreground">支持 HTTP / HTTPS。需要 OAuth 的服务会在连接后打开授权页面。</p>
+          </div>
+          <Collapsible open={advanced} onOpenChange={setAdvanced} className="rounded-lg border">
+            <CollapsibleTrigger asChild>
+              <Button type="button" variant="ghost" className="h-auto w-full justify-between rounded-lg px-3 py-3 text-sm">
+                <span className="flex items-center gap-2"><KeyRound className="size-4 text-muted-foreground" />请求头<span className="font-normal text-muted-foreground">可选{pairs.length > 0 ? ` · ${pairs.length}` : ""}</span></span>
+                <ChevronDown className={`size-4 text-muted-foreground transition-transform ${advanced ? "rotate-180" : ""}`} />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-3 border-t p-3">
+              <p className="text-xs leading-relaxed text-muted-foreground">使用 API Key 的服务可在这里添加凭证。OAuth 连接通常无需填写。</p>
+              {pairs.map((pair) => (
+                <div key={pair.id} className="flex items-start gap-2">
+                  <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2">
+                    <Input aria-label={`请求头 ${pair.id + 1} 名称`} value={pair.name} placeholder="Authorization" autoCapitalize="none" autoCorrect="off" autoComplete="off" onChange={(event) => change(pair.id, { name: event.target.value })} />
+                    <Input aria-label={`请求头 ${pair.id + 1} 值`} type="password" value={pair.value} placeholder="Bearer …" autoComplete="off" onChange={(event) => change(pair.id, { value: event.target.value })} />
+                  </div>
+                  <Button type="button" variant="ghost" size="icon" aria-label={`移除请求头 ${pair.id + 1}`} onClick={() => setPairs(pairs.filter((item) => item.id !== pair.id))}><X className="size-4" /></Button>
+                </div>
+              ))}
+              <Button type="button" variant="outline" size="sm" onClick={() => { setPairs([...pairs, { id: nextId, name: "", value: "" }]); setNextId(nextId + 1); }}><Plus />添加请求头</Button>
+            </CollapsibleContent>
+          </Collapsible>
+          {server !== undefined && <p className="text-xs text-muted-foreground">保留 {MCP_MASK} 即沿用已保存的密钥，输入新值即可替换。</p>}
+          {error !== undefined && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
+        </fieldset>
+        <div className="mt-5 flex items-center gap-2 border-t pt-4 text-xs text-muted-foreground"><ShieldCheck className="size-3.5 shrink-0" />凭证加密保存，密钥不会明文返回。</div>
+        <DialogFooter className="mt-5">
+          <Button type="button" variant="outline" disabled={busy} onClick={onCancel}>取消</Button>
+          <Button type="submit" disabled={!valid || busy}>{busy ? <Loader2 className="animate-spin" /> : <ArrowRight />}{busy ? "正在连接…" : server === undefined ? "添加并连接" : "保存并连接"}</Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
   );
 }
