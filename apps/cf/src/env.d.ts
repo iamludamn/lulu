@@ -12,6 +12,13 @@ interface Env {
   readonly DEEPSEEK_API_KEY?: string;
   readonly TYPESAFE_API_KEY?: string;
   readonly LULU_MODEL?: string;
+  readonly E2B_API_KEY?: string;
+  readonly E2B_TEMPLATE?: string;
+  readonly E2B_DOMAIN?: string;
+  readonly E2B_API_URL?: string;
+  readonly E2B_SANDBOX_URL?: string;
+  readonly SANDBOX_BACKEND?: string;
+  readonly SANDBOX_BACKENDS?: string;
   readonly TAVILY_API_KEY?: string;
   readonly EXA_API_KEY?: string;
   readonly DOUBAO_API_KEY?: string;

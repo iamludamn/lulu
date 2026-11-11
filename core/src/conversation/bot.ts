@@ -10,6 +10,9 @@ import { episodesOf } from "../memory/episodes.js";
 import type { McpStatus, ModelRef, SessionProgress } from "../protocol/contract.js";
 import { RECOVERY_ALARM_DELAY_MS, type AlarmOutcome, abortRuns, fireSchedules, nextAlarmAt, replaceAlarm, scheduleEntries } from "../cron/alarm.js";
 import { CRON_KIND } from "../cron/doc.js";
+import { SANDBOX_KIND } from "../sandbox/doc.js";
+import { SANDBOX_LIFECYCLE, recoverSandboxLifecycle } from "../sandbox/lifecycle.js";
+import { createSandboxProvider } from "../sandbox/backends.js";
 import { checkItem } from "../panel/check.js";
 import { PanelDoc } from "../panel/doc.js";
 import { EMPTY_PANEL, type PanelState } from "../protocol/panel.js";
@@ -127,7 +130,7 @@ export class BotSession {
       }, PROGRESS_WAIT_MS);
     });
     harness.subscribeCommits((publication) => {
-      if (publication.changes.some((change) => change.type === "document" && change.record.kind === CRON_KIND)) {
+      if (publication.changes.some((change) => (change.type === "document" && (change.record.kind === CRON_KIND || change.record.kind === SANDBOX_KIND)) || (change.type === "task" && change.value.kind === SANDBOX_LIFECYCLE))) {
         void this.#refreshAlarm().catch((error: unknown) => reportError("Schedule alarm reconciliation failed", error));
       }
     });
@@ -142,6 +145,7 @@ export class BotSession {
     const root = await harness.root(BACKGROUND_CONTEXT, { agent: { model, thinkingLevel: "off" } });
     await root.configure({ model, tools: null }, BACKGROUND_CONTEXT);
     this.#root = root;
+    await recoverSandboxLifecycle(harness, root.id, createSandboxProvider(this.#host.env, this.#host.name, this.#host.telemetry), BACKGROUND_CONTEXT);
     trace(root.id);
 
     this.#view = await root.viewState(BACKGROUND_CONTEXT);
