@@ -40,6 +40,7 @@ struct HomeView: View {
                 topBar(pages: pages, page: page, rail: rail, center: leading + main / 2, width: proxy.size.width)
             }
             .animation(.snappy(duration: 0.32), value: rail)
+            .accessibilityHidden(model.settings)
         }
         .background { Backdrop() }
         .ignoresSafeArea()
@@ -89,9 +90,11 @@ struct HomeView: View {
             HStack {
                 CircleButton(symbol: leadingSymbol(rail: rail, width: width), help: leadingHelp(width: width)) { leadingAction(width: width) }
                     .padding(.leading, 80)
+                    .opacity(width < 600 ? 0 : 1)
+                    .disabled(width < 600)
                 Spacer()
                 Button { withAnimation(.snappy) { model.settings = true } } label: {
-                    Avatar(name: bot.name, size: 42).contentShape(.circle)
+                    Avatar(size: 42).contentShape(.circle)
                 }
                 .buttonStyle(.plain)
                 .help("设置（⌘,）")

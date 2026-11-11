@@ -81,7 +81,7 @@ struct SettingsView: View {
     private var root: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                Avatar(name: bot.name, size: 48)
+                Avatar(size: 48)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(bot.name).type(30, .medium, line: 34).tracking(-0.4)
                     Text(api.base.host() ?? api.base.absoluteString).type(14, line: 18).foregroundStyle(Color.muted)
@@ -251,6 +251,7 @@ private struct RowView: View {
         let line = HStack(spacing: 12) {
             Image(systemName: row.symbol)
                 .font(.system(size: 16, weight: .regular))
+                .foregroundStyle(row.symbol == "checkmark.circle.fill" ? Color.info : Color.ink)
                 .symbolEffect(.rotate, isActive: row.spinning)
                 .frame(width: 22)
             Text(row.title).type(15, .semibold, line: 19).lineLimit(1)

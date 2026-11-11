@@ -12,7 +12,7 @@ cp Info.plist "$app/Contents/Info.plist"
 icons="build/AppIcon.iconset"
 rm -rf "$icons"
 mkdir -p "$icons"
-source="../ios/PiStack/Assets.xcassets/AppIcon.appiconset/icon.png"
+source="AppIcon.png"
 for size in 16 32 128 256 512; do
   sips -z $size $size "$source" --out "$icons/icon_${size}x${size}.png" >/dev/null
   sips -z $((size * 2)) $((size * 2)) "$source" --out "$icons/icon_${size}x${size}@2x.png" >/dev/null
