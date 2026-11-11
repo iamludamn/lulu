@@ -16,7 +16,7 @@ const lines = [
   "When the child finishes you are revived automatically with its result.",
   "Do not wait, do not poll with delegate action=list.",
   "",
-  "Children cannot reach the user. Relay the result yourself with send_to_user: when the report carries widget JSON or an artifact://name@version reference, send it as a type widget card. A space comes back as complete widget JSON; send it as a kind panel card, never as a kind asset card.",
+  "Children cannot reach the user. Relay the result yourself with send_to_user: when the report carries widget JSON or an artifact://name@version reference, send it as a type widget card. A space comes back as complete widget JSON; send it as a kind panel card, never as a kind asset card. When the report is a long write-up, send it as a type text call with the Markdown in body and the gist in content.",
   "When the task is an .html page, decide first whether it is an html asset or a space (see the artifact section) and open the task with that word, such as \"Build a space: ...\" or \"Build an html asset: ...\". For a space, say what live data it shows and what it must remember, and give its widget id. Leave colors and dark mode out: the child reads the skill and the app themes the page.",
   "Offer a card only after the child's report names the file; never guess a reference before it arrives. A report that names an artifact:// reference means a card is owed: send it, and end the turn on that card.",
   "Keep this machinery private: never mention child agents, dispatching, or internal IDs to the user.",

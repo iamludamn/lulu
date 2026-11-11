@@ -71,11 +71,11 @@ struct HomeView: View {
     private func content(_ item: Page) -> some View {
         switch item {
         case .panel:
-            PanelView(widgets: store.snapshot.panel.list, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onOrder: { store.reorder(.panel, $0) }, onCompose: fadeToChat)
+            PanelView(widgets: store.snapshot.panel.list, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onCheck: store.check, onCompose: fadeToChat)
         case .chat:
             ChatView(bot: bot, store: store, api: api, draft: $draft, composing: $composing, onKept: land)
         case .assets:
-            AssetsView(items: store.snapshot.assets, botId: bot.id, api: api, onDrop: store.drop, onOrder: { store.reorder(.assets, $0) })
+            AssetsView(items: store.snapshot.assets, botId: bot.id, api: api, onDrop: store.drop, onOrder: store.reorderAssets)
         }
     }
 

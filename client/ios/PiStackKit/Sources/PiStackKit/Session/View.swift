@@ -7,6 +7,7 @@ public struct ChatEntry: Identifiable, Sendable {
     public let position: Double
     public let role: Role
     public let text: String
+    public let body: String?
     public let card: SentCard?
     public let time: Date?
     public let final: Bool
@@ -17,7 +18,6 @@ public struct Live: Sendable {
 }
 
 public let sendTool = "send_to_user"
-let hiddenTools: Set<String> = [sendTool, "codemode"]
 
 public enum TimelineItem: Identifiable, Sendable {
     case entry(ChatEntry)
@@ -60,9 +60,10 @@ func sentEntries(_ model: [JSONValue]?, position: Double, time: Date?, delivered
             guard let id = block["id"]?.string, delivered.contains(id), let input = block["arguments"] else { continue }
             let final = input["end_turn"] == .bool(true)
             if input["type"]?.string == "text", let content = input["content"]?.string, !content.isEmpty {
-                entries.append(ChatEntry(id: id, position: position, role: .assistant, text: content, card: nil, time: time, final: final))
+                let body = input["body"]?.string.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+                entries.append(ChatEntry(id: id, position: position, role: .assistant, text: content, body: body, card: nil, time: time, final: final))
             } else if let card = sentCard(input["widget"]) {
-                entries.append(ChatEntry(id: id, position: position, role: .assistant, text: "", card: card, time: time, final: final))
+                entries.append(ChatEntry(id: id, position: position, role: .assistant, text: "", body: nil, card: card, time: time, final: final))
             }
         }
     }
@@ -102,7 +103,7 @@ public func chatEntries(_ view: ConversationView?, hidden: [String]) -> [ChatEnt
         if !sent.isEmpty {
             result += sent
         } else if fallback, let last = turn.last(where: { !messageText($0.model).isEmpty }) {
-            result.append(ChatEntry(id: last.id, position: Double(last.id) ?? .infinity, role: .assistant, text: messageText(last.model), card: nil, time: messageTime(last.model), final: false))
+            result.append(ChatEntry(id: last.id, position: Double(last.id) ?? .infinity, role: .assistant, text: messageText(last.model), body: nil, card: nil, time: messageTime(last.model), final: false))
         }
         turn = []
     }
@@ -111,7 +112,7 @@ public func chatEntries(_ view: ConversationView?, hidden: [String]) -> [ChatEnt
         case "pi.user":
             close(fallback: true)
             let text = messageText(entry.model)
-            if !text.isEmpty { result.append(ChatEntry(id: entry.id, position: Double(entry.id) ?? .infinity, role: .user, text: text, card: nil, time: messageTime(entry.model), final: false)) }
+            if !text.isEmpty { result.append(ChatEntry(id: entry.id, position: Double(entry.id) ?? .infinity, role: .user, text: text, body: nil, card: nil, time: messageTime(entry.model), final: false)) }
         case "pi.assistant":
             turn.append(entry)
         default:
@@ -155,22 +156,4 @@ public func subtasks(of progress: SessionProgress?) -> [SubtaskProgress] {
 
 public func live(of view: ConversationView?) -> Live {
     Live(busy: view?.docs[liveDoc]?["run"] != nil)
-}
-
-public func liveStatus(of view: ConversationView?) -> String? {
-    guard live(of: view).busy else { return nil }
-    var answered = Set<String>()
-    for entry in (view?.entries ?? []).reversed() {
-        if entry.kind == "pi.user" { return nil }
-        for message in entry.model ?? [] {
-            if message["role"]?.string == "toolResult", let id = message["toolCallId"]?.string { answered.insert(id) }
-        }
-        guard entry.kind == "pi.assistant" else { continue }
-        let running = (entry.model ?? []).flatMap { $0["content"]?.array ?? [] }.compactMap { block -> String? in
-            guard block["type"]?.string == "toolCall", let name = block["name"]?.string, !hiddenTools.contains(name), let id = block["id"]?.string, !answered.contains(id) else { return nil }
-            return name
-        }
-        return running.isEmpty ? nil : "正在使用 " + running.joined(separator: "、")
-    }
-    return nil
 }

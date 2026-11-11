@@ -68,6 +68,11 @@ const Space = Type.Object({
   ),
 });
 
+const Weather = Type.Object({
+  kind: Type.Literal("weather"),
+  city: Type.String({ description: "City name; the client looks up the forecast itself and refreshes it once a day when the app opens" }),
+});
+
 const Actions = Type.Object({
   kind: Type.Literal("actions"),
   buttons: Type.Array(Type.Object({ label: Type.String(), icon: Type.Optional(Type.String()), prompt: Type.String({ description: "Sent to you as a chat message when tapped" }) }), {
@@ -76,14 +81,15 @@ const Actions = Type.Object({
   }),
 });
 
+export const SPACE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
 export const WidgetInput = Type.Object({
-  id: Type.String({ description: "Stable kebab-case id; the user's panel keeps one widget per id" }),
+  id: Type.String({ description: "Stable kebab-case id of letters, digits, - and _, at most 64 characters; the user's panel keeps one widget per id" }),
   size: enumOf(["s", "m", "l"] as const, "s = 1x1, m = 2x1, l = 2x2"),
   title: Type.String(),
   icon: Type.Optional(Type.String({ description: "SF Symbol name, e.g. figure.run" })),
   tone: Type.Optional(Tone),
-  ask: Type.Optional(Type.String({ description: "Follow-up question sent to you when the widget is tapped" })),
-  body: Type.Union([Stat, Gauge, Chart, List, Timeline, Note, Media, Space, Actions]),
+  body: Type.Union([Stat, Gauge, Chart, List, Timeline, Note, Media, Space, Weather, Actions]),
 });
 
 export type WidgetInput = Static<typeof WidgetInput>;

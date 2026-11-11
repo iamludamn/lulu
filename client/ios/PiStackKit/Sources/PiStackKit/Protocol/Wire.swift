@@ -73,10 +73,6 @@ public enum ServerMessage: Decodable, Sendable {
     }
 }
 
-public enum Layout: String, Sendable {
-    case panel, assets
-}
-
 public struct Command: Sendable {
     public enum Kind: Sendable {
         case submit(String)
@@ -85,7 +81,8 @@ public struct Command: Sendable {
         case keep(origin: String)
         case drop(origin: String)
         case makeWidget(origin: String)
-        case order(Layout, [String])
+        case order([String])
+        case check(id: String, index: Int, done: Bool)
     }
 
     public let requestId: String
@@ -104,7 +101,8 @@ public struct Command: Sendable {
         case .keep(let origin): ["type": "widget.keep", "requestId": requestId, "origin": origin]
         case .drop(let origin): ["type": "widget.drop", "requestId": requestId, "origin": origin]
         case .makeWidget(let origin): ["type": "widget.make", "requestId": requestId, "origin": origin]
-        case .order(let layout, let ids): ["type": "layout.order", "requestId": requestId, "target": layout.rawValue, "ids": ids]
+        case .order(let ids): ["type": "layout.order", "requestId": requestId, "ids": ids]
+        case .check(let id, let index, let done): ["type": "widget.check", "requestId": requestId, "id": id, "index": index, "done": done]
         }
     }
 }

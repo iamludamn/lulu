@@ -9,8 +9,8 @@ export const MAKE_TIMEOUT_MS = 120_000;
 export const MAKE_PROMPT =
   "[System request] The user picked one of your earlier messages, quoted below, and wants it turned into a panel widget. " +
   "Call send_to_user exactly once with type widget and widget.kind panel, built from that message. " +
-  "Choose the body that fits the content best: stat, gauge, chart, list, timeline, note, media or actions. " +
-  "Give it a stable kebab-case id, a suitable size and a title, and add an ask only when tapping the widget should start a useful follow-up. " +
+  "Choose the body that fits the content best: stat, gauge, chart, list, timeline, note, media, weather or actions. " +
+  "Give it a stable kebab-case id, a suitable size and a title. " +
   "Match the size to the amount of content: s holds one short value, m holds one short note or about two list rows with subtitles, l holds up to eight list rows, a long note or a chart. " +
   "Keep titles and subtitles short, and use l instead of m whenever a list has more than three rows. " +
   "Set end_turn to true. Do not send any text message and do not ask the user anything.\n\nQuoted message:\n";

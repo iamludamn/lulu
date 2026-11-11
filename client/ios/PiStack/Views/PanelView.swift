@@ -9,10 +9,9 @@ struct PanelView: View {
     let onPrompt: (String) -> Void
     let onDraft: (String) -> Void
     let onDrop: (String) -> Void
-    let onOrder: ([String]) -> Void
+    let onCheck: (String, Int, Bool) -> Void
     let onCompose: () -> Void
     @Environment(\.topInset) private var topInset
-    @State private var editing = false
 
     private static let ideas = ["把今天的日程做成一个组件", "每天早上给我一份简报", "追踪一个我关心的数字"]
 
@@ -25,10 +24,7 @@ struct PanelView: View {
                     ForEach(rows(widgets), id: \.first!.id) { row in
                         HStack(alignment: .top, spacing: 12) {
                             ForEach(row) { widget in
-                                WidgetCard(widget: widget, botId: botId, api: api, editing: editing, onPrompt: onPrompt, onDrop: onDrop, onEdit: { editing = true })
-                                    .reorderable(widget.id, editing: editing) { dragged, target in
-                                        onOrder(widgets.map(\.id).moved(dragged, to: target))
-                                    }
+                                WidgetCard(widget: widget, botId: botId, api: api, onPrompt: onPrompt, onDrop: onDrop, onCheck: { onCheck(widget.id, $0, $1) })
                             }
                             if row.count == 1 && row[0].size == .s && !row[0].isSpace { Color.clear.frame(maxWidth: .infinity) }
                         }
@@ -44,8 +40,6 @@ struct PanelView: View {
         }
         .contentMargins(.top, topInset, for: .scrollContent)
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
-        .doneBar(editing) { editing = false }
-        .onChange(of: widgets.isEmpty) { _, empty in if empty { editing = false } }
     }
 
     private var composer: some View {
@@ -102,6 +96,7 @@ struct WidgetFace: View {
     let api: Api
     var interactive = false
     var onPrompt: (String) -> Void = { _ in }
+    var onCheck: (Int, Bool) -> Void = { _, _ in }
 
     /// Two rows of the 158pt cards and the gap between them.
     static let spaceHeight: CGFloat = 328
@@ -117,7 +112,7 @@ struct WidgetFace: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
-            WidgetBody(widget: widget, botId: botId, api: api, interactive: interactive, onPrompt: onPrompt)
+            WidgetBody(widget: widget, botId: botId, api: api, interactive: interactive, onPrompt: onPrompt, onCheck: onCheck)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .padding(14)
@@ -155,37 +150,26 @@ private struct WidgetCard: View {
     let widget: PanelWidget
     let botId: String
     let api: Api
-    let editing: Bool
     let onPrompt: (String) -> Void
     let onDrop: (String) -> Void
-    let onEdit: () -> Void
+    let onCheck: (Int, Bool) -> Void
     @Environment(\.openSpace) private var openSpace
 
     var body: some View {
-        let card = WidgetFace(widget: widget, botId: botId, api: api, interactive: true, onPrompt: onPrompt)
+        let card = WidgetFace(widget: widget, botId: botId, api: api, interactive: true, onPrompt: onPrompt, onCheck: onCheck)
             .frosted(26)
             .contentShape(.rect(cornerRadius: 26, style: .continuous))
             .contextMenu {
-                if let ask = widget.ask {
-                    Button("询问", systemImage: "bubble.left") { onPrompt(ask) }
-                }
                 if widget.isSpace {
                     Button("刷新", systemImage: "arrow.clockwise") { NotificationCenter.default.post(name: .spaceRefresh, object: widget.id) }
-                } else {
-                    Button("让 bot 刷新", systemImage: "arrow.clockwise") { onPrompt("刷新视图组件 \(widget.id)") }
                 }
-                Button("调整排布", systemImage: "square.grid.2x2", action: onEdit)
                 if let origin = widget.origin {
-                    Button("从视图移除", systemImage: "trash", role: .destructive) { onDrop(origin) }
+                    Button("删除小组件", systemImage: "trash", role: .destructive) { onDrop(origin) }
                 }
-            }
-            .editable(editing, seed: abs(widget.id.hashValue), radius: 26) {
-                if let origin = widget.origin { onDrop(origin) }
             }
         if let (page, refresh) = space {
             Button { openSpace(page, SpaceOpening(id: widget.id, title: widget.title, refresh: refresh), "space-\(widget.id)") } label: { card }
                 .buttonStyle(.plain)
-                .disabled(editing)
                 .artifactSource("space-\(widget.id)", radius: 26)
         } else {
             card

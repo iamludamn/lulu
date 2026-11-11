@@ -14,6 +14,9 @@ struct ChatView: View {
     @State private var floor: String?
     @State private var position = ScrollPosition()
     @State private var metrics = Metrics()
+    @State private var reading: String?
+    @Namespace private var reader
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.topInset) private var topInset
     @Environment(\.openArtifact) private var openArtifact
 
@@ -41,9 +44,9 @@ struct ChatView: View {
                             .id("earlier")
                     }
                     ForEach(rows[start...]) { row in
-                        MessageRow(row: row, store: store, botId: bot.id, api: api, onOpen: openArtifact, onKept: onKept)
+                        MessageRow(row: row, store: store, botId: bot.id, api: api, space: reader, expanded: row.id == reading, onRead: { read($0) }, onOpen: openArtifact, onKept: onKept)
                             .equatable()
-                            .padding(.bottom, row.tail ? 10 : 0)
+                            .padding(.bottom, row.tail ? 12 : 0)
                             .transition(.opacity.animation(.easeOut(duration: 0.2)))
                     }
                     Color.clear.frame(height: 1).id(Self.bottom)
@@ -118,7 +121,9 @@ struct ChatView: View {
                 Composer(draft: $draft, busy: busy, placeholder: placeholder, focused: composing, onSend: send)
             }
         }
+        .overlay { readerLayer(rows) }
         .sensoryFeedback(.impact(weight: .light), trigger: sent)
+        .sensoryFeedback(.impact(weight: .light), trigger: reading) { _, new in new != nil }
         .sensoryFeedback(.success, trigger: busy) { old, new in old && !new }
     }
 
@@ -129,6 +134,29 @@ struct ChatView: View {
             insertion: .scale(scale: 0.92, anchor: row.role == .user ? .bottomTrailing : .bottomLeading).combined(with: .opacity),
             removal: .identity
         )
+    }
+
+    @ViewBuilder
+    private func readerLayer(_ rows: [ChatRow]) -> some View {
+        ZStack {
+            if let id = reading, let text = rows.first(where: { $0.id == id })?.body {
+                Color.black.opacity(0.25)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { read(nil) }
+                    .transition(.opacity)
+                GeometryReader { proxy in
+                    LongReader(id: id, text: text, space: reader, size: CGSize(width: proxy.size.width - 20, height: proxy.size.height * 2 / 3)) { read(nil) }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .ignoresSafeArea()
+                .transition(.opacity)
+            }
+        }
+    }
+
+    private func read(_ id: String?) {
+        withAnimation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.45, dampingFraction: 0.86)) { reading = id }
     }
 
     private var placeholder: String { "给 \(bot.name) 发消息" }

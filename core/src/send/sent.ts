@@ -35,9 +35,11 @@ export function sentIn(entries: readonly { id?: unknown; kind?: unknown; model?:
 export const sentOf = (entries: readonly { id?: unknown; kind?: unknown; model?: unknown }[], origin: string): Sent | undefined =>
   sentIn(entries).find((sent) => sent.id === origin);
 
+const quoted = (input: SendInput): string | undefined => [input.content?.trim(), input.body?.trim()].filter((part) => part).join("\n\n") || undefined;
+
 export function assistantText(entries: readonly { id?: unknown; kind?: unknown; model?: unknown }[], origin: string): string | undefined {
   const sent = sentOf(entries, origin);
-  if (sent !== undefined) return sent.input.type === "text" && typeof sent.input.content === "string" ? sent.input.content.trim() || undefined : undefined;
+  if (sent !== undefined) return sent.input.type === "text" && typeof sent.input.content === "string" ? quoted(sent.input) : undefined;
   const entry = entries.find((item) => item.kind === "pi.assistant" && String(item.id) === origin && Array.isArray(item.model));
   if (entry === undefined) return undefined;
   const text = (entry.model as { content?: unknown }[])

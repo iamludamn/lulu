@@ -6,11 +6,14 @@ struct MessageRow: View, Equatable {
     let store: BotStore
     let botId: String
     let api: Api
+    let space: Namespace.ID
+    let expanded: Bool
+    let onRead: (String) -> Void
     let onOpen: (ArtifactAddress, String) -> Void
     let onKept: (Page) -> Void
     @Environment(\.openSpace) private var openSpace
 
-    static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.row == rhs.row }
+    static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.row == rhs.row && lhs.expanded == rhs.expanded }
 
     var body: some View {
         switch row.role {
@@ -38,9 +41,9 @@ struct MessageRow: View, Equatable {
     private func messageStack(mine: Bool) -> some View {
         VStack(alignment: mine ? .trailing : .leading, spacing: 4) {
             HStack(spacing: 0) {
-                if mine { Spacer(minLength: 48) }
+                if mine { Spacer(minLength: 56) }
                 bubble(mine: mine)
-                if !mine { Spacer(minLength: 32) }
+                if !mine { Spacer(minLength: 56) }
             }
             footer
         }
@@ -53,29 +56,45 @@ struct MessageRow: View, Equatable {
         let content = Group {
             if mine {
                 Text(linkified(AttributedString(row.text)))
+            } else if let full = row.body {
+                VStack(alignment: .leading, spacing: 8) {
+                    MarkdownText(text: row.text, airy: true)
+                    LongHint(length: readingLength(full))
+                }
             } else {
-                MarkdownText(text: row.text)
+                MarkdownText(text: row.text, airy: true)
             }
         }
+        .lineSpacing(3)
         .padding(.horizontal, 15)
         .padding(.vertical, 10)
         .opacity(row.sending ? 0.55 : 1)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(mine ? "我" : "助手")：\(row.text)")
+        .accessibilityLabel("\(mine ? "我" : "助手")：\(row.text)\(row.body == nil ? "" : "。含全文")")
+        .accessibilityAddTraits(row.body == nil ? [] : .isButton)
+        Group {
+            if mine {
+                content.background { shape.fill(.clear).glassEffect(.clear, in: shape) }
+            } else if row.body != nil {
+                content.frosted(20)
+                    .flowingBorder(radius: 20, paused: expanded)
+                    .opacity(expanded ? 0 : 1)
+                    .overlay { if !expanded { Color.clear.matchedGeometryEffect(id: row.id, in: space) } }
+                    .contentShape(shape)
+                    .onTapGesture { onRead(row.id) }
+            } else {
+                content.frosted(20)
+            }
+        }
         .contentShape(.contextMenuPreview, shape)
         .contextMenu {
-            Button("拷贝", systemImage: "doc.on.doc") { UIPasteboard.general.string = row.text }
+            Button("拷贝", systemImage: "doc.on.doc") { UIPasteboard.general.string = row.body.map { row.text + "\n\n" + $0 } ?? row.text }
             if row.widgetSource {
                 Button("做成视图组件", systemImage: "square.grid.2x2") { store.makeWidget(origin: row.id) }
             }
             if case .failed(let requestId?) = row.footer {
                 Button("删除", systemImage: "trash", role: .destructive) { store.dismiss(requestId) }
             }
-        }
-        if mine {
-            content.background { shape.fill(.clear).glassEffect(.clear, in: shape) }
-        } else {
-            content.frosted(20)
         }
     }
 
@@ -140,25 +159,7 @@ struct MessageRow: View, Equatable {
     }
 
     private var live: some View {
-        HStack(spacing: 8) {
-            TypingDots()
-            if !row.text.isEmpty {
-                Text(row.text).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
-            }
-        }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .frosted(20)
-            .background(alignment: .bottomLeading) {
-                ZStack(alignment: .bottomLeading) {
-                    Circle().fill(.ultraThinMaterial).overlay { Circle().fill(Color.frost) }.frame(width: 12, height: 12).offset(x: 2, y: 2)
-                    Circle().fill(.ultraThinMaterial).overlay { Circle().fill(Color.frost) }.frame(width: 6, height: 6).offset(x: -4, y: 9)
-                }
-            }
-            .padding(.leading, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .animation(.snappy, value: row.text)
-            .accessibilityLabel("助手正在输入")
+        TypingBubble(text: row.text)
     }
 
     private var generating: some View {

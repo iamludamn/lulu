@@ -2,11 +2,11 @@ import type { Context } from "@earendil-works/chord";
 import { defineExtension, type ConversationId, type ToolExecutionApi, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { SandboxDoc } from "./doc.js";
-import { isSandboxGone, type SandboxHandle, type SandboxProvider } from "./provider.js";
+import { SandboxGone, type SandboxHandle, type SandboxProvider } from "./provider.js";
 
 export const CODING_TOOLS = ["read", "write", "edit", "bash"];
 
-const NO_ENVIRONMENT = "no execution environment: E2B_API_KEY is not configured";
+const NO_ENVIRONMENT = "no execution environment: no sandbox is configured";
 
 async function bindSandbox(api: ToolExecutionApi, holder: ConversationId, key: string, sandboxes: SandboxProvider, context: Context): Promise<SandboxHandle> {
   const created = (await api.memo<SandboxHandle>("pistack.sandbox", context)) ?? (await api.memo("pistack.sandbox", await sandboxes.create(key), context));
@@ -33,7 +33,7 @@ async function connectSandbox(api: ToolExecutionApi, sandboxes: SandboxProvider 
     try {
       return await sandboxes.connect(handle);
     } catch (error) {
-      if (!isSandboxGone(error)) throw error;
+      if (!(error instanceof SandboxGone)) throw error;
       const reset = await api.commit(async (tx) => {
         const binding = await tx.doc(SandboxDoc, holder);
         if (binding.id === handle.id) {

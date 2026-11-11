@@ -13,6 +13,7 @@ struct ChatRow: Identifiable, Equatable {
     let id: String
     let role: Role
     var text: String
+    var body: String?
     var card: SentCard?
     var footer: Footer?
     var sending = false
@@ -26,7 +27,7 @@ struct ChatRow: Identifiable, Equatable {
 }
 
 private let stampGap: TimeInterval = 15 * 60
-private let noticeLabel: [String: String] = ["abort": "停止请求", "model": "切换模型", "keep": "收藏", "drop": "移除", "makeWidget": "做成组件", "order": "调整排布"]
+private let noticeLabel: [String: String] = ["abort": "停止请求", "model": "切换模型", "keep": "收藏", "drop": "移除", "makeWidget": "做成组件", "order": "调整排布", "check": "勾选"]
 
 func keptOrigins(_ snapshot: BotStore.Snapshot) -> Set<String> {
     var kept = Set(snapshot.panel.widgets.values.compactMap(\.origin) + snapshot.assets.map(\.origin))
@@ -81,6 +82,7 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
             if entry.card != nil && kept.contains(entry.id) { continue }
             stamp(entry.time, before: entry.id)
             var row = ChatRow(id: entry.id, role: entry.role == .user ? .user : .assistant, text: entry.text)
+            row.body = entry.body
             row.card = entry.card
             row.read = entry.role == .user
             if making.contains(entry.id) { row.footer = .generating }
@@ -111,6 +113,7 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
         case .drop: rows.append(notice(request, "drop"))
         case .makeWidget: rows.append(notice(request, "makeWidget"))
         case .order: rows.append(notice(request, "order"))
+        case .check: rows.append(notice(request, "check"))
         }
     }
     rows = rows.filter { $0.role != .system || $0.notice != nil }
@@ -118,7 +121,8 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
         rows[last].footer = .read
     }
     if awaiting(snapshot, entries: entries) {
-        let text = liveStatus(of: snapshot.view) ?? subtasks(of: snapshot.progress).first(where: \.running)?.description ?? ""
+        let running = subtasks(of: snapshot.progress).filter(\.running)
+        let text = running.count > 1 ? "\(running.count) 个任务进行中" : running.first?.description ?? ""
         var row = ChatRow(id: "live", role: .assistant, text: text)
         row.typing = true
         rows.append(row)
