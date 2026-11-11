@@ -88,7 +88,8 @@ struct HomeView: View {
             topTrailingRadius: inner == .trailing ? r : 0,
             style: .continuous)
         return Color.clear
-            .glassEffect(.regular, in: shape)
+            .glassEffect(.clear, in: shape)
+            .opacity(0.55)
             .ignoresSafeArea()
             .allowsHitTesting(false)
     }
