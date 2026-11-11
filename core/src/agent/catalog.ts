@@ -8,7 +8,7 @@ import { createPanelExtension } from "../panel/extension.js";
 import { createSendExtension } from "../send/extension.js";
 import type { ArtifactCheck } from "../send/tool.js";
 import { createEnvironmentExtension } from "../sandbox/extension.js";
-import { createE2bProvider } from "../sandbox/e2b/provider.js";
+import { createSandboxProvider } from "../sandbox/backends.js";
 import { createMemoryExtension } from "../memory/extension.js";
 import { memoryContext, remoteFiles } from "../memory/client.js";
 import { createArtifactExtension } from "../artifact/extension.js";
@@ -45,7 +45,7 @@ const artifactCheck = (host: DurableHost): ArtifactCheck | undefined =>
         return (await host.objects.ARTIFACTS.getByName(host.name).fetch(`https://artifact/stat?${query}`)).ok;
       }
     : undefined;
-const sandboxProvider = ({ env, name, telemetry }: DurableHost) => createE2bProvider(env, name, telemetry);
+const sandboxProvider = ({ env, name, telemetry }: DurableHost) => createSandboxProvider(env, name, telemetry);
 
 export const CATALOG: Record<string, (deps: HarnessDeps) => Extension> = {
   coding: () => CodingTools,

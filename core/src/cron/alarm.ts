@@ -6,6 +6,7 @@ import { createRun } from "../delegate/spawn.js";
 import type { DurableHost } from "../host/types.js";
 import type { ScheduleEntry } from "../protocol/contract.js";
 import { CronJobsDoc } from "./doc.js";
+import { SANDBOX_LIFECYCLE } from "../sandbox/lifecycle.js";
 import { expireRuns, fireDue, nextAlarm } from "./engine.js";
 
 export const RECOVERY_ALARM_DELAY_MS = 60_000;
@@ -61,11 +62,19 @@ export async function scheduleEntries(harness: Harness): Promise<ScheduleEntry[]
 
 export async function nextAlarmAt(harness: Harness): Promise<number | undefined> {
   const { tasks } = await harness.inspect(BACKGROUND_CONTEXT);
-  const advancing = tasks.some((task) => SELF_ADVANCING_KINDS.has(task.state.kind));
-  const recovery = advancing ? Date.now() + RECOVERY_ALARM_DELAY_MS : undefined;
+  const now = Date.now();
+  const deadlines: number[] = [];
+  for (const task of tasks) {
+    if (!SELF_ADVANCING_KINDS.has(task.state.kind)) continue;
+    const state = task.record.state;
+    const checkpoint = state.status === "running" || state.status === "pending" ? state.checkpoint : undefined;
+    if (task.record.kind === SANDBOX_LIFECYCLE && task.state.kind === "running" && checkpoint && typeof checkpoint === "object" && !Array.isArray(checkpoint) && checkpoint.phase === "wait" && typeof checkpoint.until === "number" && checkpoint.until > now) deadlines.push(checkpoint.until);
+    else deadlines.push(now + RECOVERY_ALARM_DELAY_MS);
+  }
   const jobs = (await harness.snapshot(CronJobsDoc, BACKGROUND_CONTEXT))?.jobs ?? [];
   const scheduled = nextAlarm(jobs);
-  return recovery === undefined ? scheduled : scheduled === undefined ? recovery : Math.min(recovery, scheduled);
+  if (scheduled !== undefined) deadlines.push(scheduled);
+  return deadlines.length === 0 ? undefined : Math.min(...deadlines);
 }
 
 export async function replaceAlarm(alarm: DurableHost["alarm"], timestamp: number | undefined): Promise<void> {

@@ -17,9 +17,6 @@ import {
 import type { TelemetryContext } from "@earendil-works/pi-telemetry";
 import { CommandExitError, FileType, NotFoundError, TimeoutError, type EntryInfo, type Sandbox } from "e2b";
 
-export const SANDBOX_IDLE_MS = 120_000;
-const UNBOUNDED_COMMAND_MS = 3_600_000;
-
 const unsupported =<T>(operation: string): Result<T, FileError> =>
   err(new FileError("not_supported", `${operation} is not supported in a sandbox`));
 
@@ -94,8 +91,8 @@ export class E2bExecutionEnv implements ExecutionEnv {
   readonly #telemetry: TelemetryContext;
   readonly #scope: string;
 
-  constructor(sandbox: Sandbox, cwd: string, telemetry: TelemetryContext, scope: string) {
-    this.id = `e2b:${sandbox.sandboxId}`;
+  constructor(sandbox: Sandbox, cwd: string, telemetry: TelemetryContext, scope: string, backend = "e2b") {
+    this.id = `${backend}:${sandbox.sandboxId}`;
     this.cwd = cwd;
     this.#sandbox = sandbox;
     this.#telemetry = telemetry;
@@ -196,7 +193,6 @@ export class E2bExecutionEnv implements ExecutionEnv {
     const emit = (stream: "stdout" | "stderr") => (text: string): void => options?.onOutput?.(text, context, { stream });
     let handle;
     try {
-      await this.#extend(options?.timeout === undefined ? UNBOUNDED_COMMAND_MS : options.timeout * 1000 + SANDBOX_IDLE_MS);
       handle = await this.#sandbox.commands.run(line, {
         background: true,
         cwd: options?.cwd === undefined ? this.cwd : resolvePath(this.cwd, options.cwd),
@@ -209,11 +205,13 @@ export class E2bExecutionEnv implements ExecutionEnv {
       return err(new ExecutionError("spawn_error", toError(error).message, toError(error)));
     }
     const running = handle;
-    const stop = (): void => void running.kill();
+    let stopping: Promise<void> | undefined;
+    const stop = (): void => { stopping ??= running.kill().then(() => undefined).catch(() => undefined); };
     signal?.addEventListener("abort", stop, { once: true });
+    if (signal?.aborted) stop();
     try {
       const result = await running.wait();
-      return ok({ exitCode: result.exitCode });
+      return signal?.aborted ? err(new ExecutionError("aborted", "aborted")) : ok({ exitCode: result.exitCode });
     } catch (error) {
       if (signal?.aborted) return err(new ExecutionError("aborted", "aborted"));
       if (error instanceof CommandExitError) return ok({ exitCode: error.exitCode });
@@ -222,17 +220,8 @@ export class E2bExecutionEnv implements ExecutionEnv {
       return err(new ExecutionError("unknown", toError(error).message, toError(error)));
     } finally {
       signal?.removeEventListener("abort", stop);
-      await this.#settle().catch(() => undefined);
+      await stopping;
     }
-  }
-
-  async #extend(ms: number): Promise<void> {
-    const { endAt } = await this.#sandbox.getInfo();
-    if (endAt.getTime() - Date.now() < ms) await this.#sandbox.setTimeout(ms);
-  }
-
-  async #settle(): Promise<void> {
-    if ((await this.#sandbox.commands.list()).length === 0) await this.#sandbox.setTimeout(SANDBOX_IDLE_MS);
   }
 
   async openTextLineReader(): Promise<Result<never, FileError>> {
