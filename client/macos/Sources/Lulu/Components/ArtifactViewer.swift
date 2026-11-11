@@ -172,6 +172,8 @@ private struct DocumentPage: View {
                         } actions: {
                             Button("用默认应用打开") { NSWorkspace.shared.open(file) }
                         }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.bottom, 76)
                     }
                 }
             } else if address.isHTML {
