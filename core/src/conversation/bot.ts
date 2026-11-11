@@ -79,6 +79,8 @@ export class BotSession {
   #settling: Promise<void> = Promise.resolve();
   readonly #makers = new Map<string, { socket: Socket; make: string }>();
   #mcp: McpStatus[] = [];
+  #mcpRequests: Promise<unknown> = Promise.resolve();
+  #mcpReconnect: Promise<void> = Promise.resolve();
 
   readonly #voice: VoiceSession;
 
@@ -215,7 +217,9 @@ export class BotSession {
     if (pathname === "/memory/source") return this.#memorySource(request);
     if (pathname === "/schedules") return this.#schedulesResponse();
     if (pathname === "/mcp" || pathname.startsWith("/mcp/")) {
-      return handleMcpRegistry(request, this.#host, { statuses: () => this.#mcp, reload: () => this.#reloadMcp() });
+      const next = this.#mcpRequests.then(() => handleMcpRegistry(request, this.#host, { statuses: () => this.#mcp, reload: (name) => this.#reloadMcp(name) }));
+      this.#mcpRequests = next.catch(() => undefined);
+      return next;
     }
     return Promise.resolve(this.#upgrade());
   }
@@ -456,17 +460,23 @@ export class BotSession {
     };
   }
 
-  async #reloadMcp(): Promise<McpStatus[]> {
+  async #reloadMcp(name?: string): Promise<McpStatus[]> {
     this.#botServers = await mcpStore(this.#host, this.#host.name).servers();
-    await this.#reconnectMcp();
+    await this.#reconnectMcp(name);
     return this.#mcp;
   }
 
-  async #reconnectMcp(): Promise<void> {
+  #reconnectMcp(name?: string): Promise<void> {
+    const next = this.#mcpReconnect.then(() => this.#openMcp(name));
+    this.#mcpReconnect = next.catch(() => undefined);
+    return next;
+  }
+
+  async #openMcp(name?: string): Promise<void> {
     const registry = this.#registry;
     const previous = this.#mcpHost;
     if (registry === undefined || previous === undefined) return;
-    const reconnected = await reconnectChatMcp(this.#host, registry, previous, this.#botServers);
+    const reconnected = await reconnectChatMcp(this.#host, registry, previous, this.#botServers, name === undefined ? undefined : [name]);
     this.#mcpHost = reconnected.host;
     this.#mcp = reconnected.statuses;
     this.#broadcastState();

@@ -59,3 +59,7 @@
   .mcp .pair { grid-template-columns: 1fr 1fr; }
   .mcp .pair button { grid-column: 1 / -1; }
 }
+
+.mcp fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.mcp details { margin-top: 16px; }
+.mcp summary { cursor: pointer; color: var(--muted); font-size: 13px; }

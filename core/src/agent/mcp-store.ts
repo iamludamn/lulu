@@ -34,19 +34,24 @@ async function open(secret: string, sealed: string): Promise<string> {
   return new TextDecoder().decode(plain);
 }
 
-export function mcpStore(host: Pick<DurableHost, "env" | "kv">, botId: string) {
+export function mcpStore(host: Pick<DurableHost, "env" | "kv" | "storage">, botId: string) {
   const secret = host.env.MCP_ENCRYPTION_KEY;
   const configPrefix = `mcp:config:${botId}:`;
   const authKey = `mcp:auth:${botId}`;
   return {
     async readAuth(): Promise<string | undefined> {
       if (secret === undefined) return undefined;
-      const sealed = await host.kv.get(authKey);
-      return sealed === null ? undefined : open(secret, sealed);
+      const stored = await host.storage.get<string>(authKey);
+      if (stored !== undefined) return open(secret, stored);
+      const legacy = await host.kv.get(authKey);
+      if (legacy === null) return undefined;
+      const content = await open(secret, legacy);
+      await host.storage.put({ [authKey]: legacy });
+      return content;
     },
     async writeAuth(content: string): Promise<void> {
       if (secret === undefined) throw new Error("MCP_ENCRYPTION_KEY is not configured");
-      await host.kv.put(authKey, await seal(secret, content));
+      await host.storage.put({ [authKey]: await seal(secret, content) });
     },
     async put(name: string, config: Pick<McpServerConfig, "url" | "headers">): Promise<void> {
       if (secret === undefined) throw new Error("MCP_ENCRYPTION_KEY is not configured");
@@ -57,7 +62,7 @@ export function mcpStore(host: Pick<DurableHost, "env" | "kv">, botId: string) {
     },
     async servers(): Promise<Record<string, McpServerConfig>> {
       if (secret === undefined) return {};
-      const servers: Record<string, McpServerConfig> = {};
+      const servers = Object.create(null) as Record<string, McpServerConfig>;
       for (const name of await host.kv.list(configPrefix)) {
         const sealed = await host.kv.get(name);
         if (sealed === null) continue;

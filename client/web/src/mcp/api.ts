@@ -39,6 +39,7 @@ const server = (name: string): string => `/servers/${encodeURIComponent(name)}`;
 export const registry = {
   list: (token: string) => call<McpRegistryView>(token, ""),
   reload: (token: string) => call<McpRegistryView>(token, "/reload", "POST"),
+  reconnect: (token: string, name: string) => call<McpRegistryView>(token, `${server(name)}/reload`, "POST"),
   save: (token: string, name: string, input: McpServerInput) => call<McpRegistryView>(token, server(name), "PUT", input),
   remove: (token: string, name: string) => call<McpRegistryView>(token, server(name), "DELETE"),
   login: (token: string, name: string) => call<Partial<McpRegistryView> & { authorizationUrl?: string }>(token, `${server(name)}/login`, "POST"),

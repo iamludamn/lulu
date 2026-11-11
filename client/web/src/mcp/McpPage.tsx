@@ -24,23 +24,23 @@ function noticeFromLocation(): Notice | undefined {
 function statusLabel(status: McpStatus | undefined): { className: string; text: string } {
   if (status === undefined) return { className: "unknown", text: "尚未连接" };
   if (status.state === "connected") return { className: "connected", text: `已连接 · ${status.tools} 个工具` };
-  if (status.state === "needs-auth") return { className: "needs-auth", text: "需要登录" };
+  if (status.state === "needs-auth") return { className: "needs-auth", text: "需要授权" };
   return { className: "failed", text: `连接失败${status.error === undefined ? "" : `：${status.error}`}` };
 }
 
 function TokenGate({ onToken, invalid }: { onToken: (token: string) => void; invalid: boolean }) {
   const [token, setToken] = useState("");
   return (
-    <div className="card">
+    <form className="card" onSubmit={(event) => { event.preventDefault(); if (token !== "") onToken(token); }}>
       <label htmlFor="mcp-token">管理口令</label>
       <input id="mcp-token" type="password" value={token} autoComplete="off" onChange={(event) => setToken(event.target.value)} />
-      <p className="hint">{invalid ? "口令不正确。" : "配置 MCP 需要管理口令（MCP_ADMIN_TOKEN），只保存在这个浏览器里。"}</p>
+      <p className="hint">{invalid ? "口令不正确。" : "输入管理口令以配置连接，只保存在这个浏览器里。"}</p>
       <div className="actions">
-        <button type="button" className="primary" disabled={token === ""} onClick={() => onToken(token)}>
+        <button type="submit" className="primary" disabled={token === ""}>
           进入
         </button>
       </div>
-    </div>
+    </form>
   );
 }
 
@@ -87,7 +87,16 @@ export function McpPage() {
   };
 
   const save = async (name: string, input: McpServerInput) => {
-    if (await run("save", () => registry.save(token, name, input))) setEditing(undefined);
+    await run("save", async () => {
+      const next = await registry.save(token, name, input);
+      setView(next);
+      setEditing(undefined);
+      if (next.statuses.some((status) => status.name === name && status.state === "needs-auth")) {
+        const result = await registry.login(token, name);
+        if (result.authorizationUrl !== undefined) location.assign(result.authorizationUrl);
+      }
+      return next;
+    });
   };
 
   const remove = (name: string) => {
@@ -98,7 +107,7 @@ export function McpPage() {
     run(`login:${name}`, async () => {
       const result = await registry.login(token, name);
       if (result.authorizationUrl !== undefined) location.assign(result.authorizationUrl);
-      return result.servers === undefined || result.statuses === undefined ? undefined : { servers: result.servers, statuses: result.statuses };
+      return result.authorizationUrl === undefined ? registry.list(token) : undefined;
     });
 
   const statuses = new Map((view?.statuses ?? []).map((status) => [status.name, status]));
@@ -115,7 +124,7 @@ export function McpPage() {
             </button>
           )}
         </header>
-        {notice !== undefined && <div className={`banner ${notice.kind}`}>{notice.text}</div>}
+        {notice !== undefined && <div role="status" className={`banner ${notice.kind}`}>{notice.text}</div>}
         {token === "" ? (
           <TokenGate onToken={enter} invalid={invalid} />
         ) : (
@@ -124,7 +133,7 @@ export function McpPage() {
               <ServerForm key={editing.server?.name ?? "new"} server={editing.server} busy={busy === "save"} onSave={(name, input) => void save(name, input)} onCancel={() => setEditing(undefined)} />
             )}
             {editing === undefined && (
-              <button type="button" className="primary" onClick={() => setEditing({ server: undefined })}>
+              <button type="button" className="primary" disabled={busy !== ""} onClick={() => setEditing({ server: undefined })}>
                 添加服务器
               </button>
             )}
@@ -141,7 +150,12 @@ export function McpPage() {
                   <div className="actions">
                     {statuses.get(server.name)?.state === "needs-auth" && (
                       <button type="button" className="primary" disabled={busy !== ""} onClick={() => void login(server.name)}>
-                        {busy === `login:${server.name}` ? "跳转中…" : "登录"}
+                        {busy === `login:${server.name}` ? "跳转中…" : "连接"}
+                      </button>
+                    )}
+                    {statuses.get(server.name)?.state === "failed" && (
+                      <button type="button" disabled={busy !== ""} onClick={() => void run(`retry:${server.name}`, () => registry.reconnect(token, server.name))}>
+                        {busy === `retry:${server.name}` ? "连接中…" : "重试连接"}
                       </button>
                     )}
                     <button type="button" disabled={busy !== ""} onClick={() => setEditing({ server })}>

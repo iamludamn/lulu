@@ -43,7 +43,14 @@ export function durableHost(ctx: DurableObjectState, env: Env): DurableHost {
   const environment = stringsOf(env);
   const telemetry = createTelemetry(environment, (task) => ctx.waitUntil(task));
   const kv = kvOf(env.LULU_MCP);
-  const mcp = mcpStore({ env: environment, kv }, name);
+  const storage: DurableHost["storage"] = {
+    get: <T = unknown>(key: string) => ctx.storage.get<T>(key),
+    put: (entries) => ctx.storage.put(entries),
+    delete: (keys) => ctx.storage.delete(typeof keys === "string" ? [keys] : keys),
+    deleteAll: () => ctx.storage.deleteAll(),
+    list: <T = unknown>(options: { prefix: string }) => ctx.storage.list<T>(options),
+  };
+  const mcp = mcpStore({ env: environment, kv, storage }, name);
   return {
     env: environment,
     telemetry,
@@ -51,13 +58,7 @@ export function durableHost(ctx: DurableObjectState, env: Env): DurableHost {
     writeMcpAuth: (content) => mcp.writeAuth(content),
     name,
     id: ctx.id.toString(),
-    storage: {
-      get: <T = unknown>(key: string) => ctx.storage.get<T>(key),
-      put: (entries) => ctx.storage.put(entries),
-      delete: (keys) => ctx.storage.delete(typeof keys === "string" ? [keys] : keys),
-      deleteAll: () => ctx.storage.deleteAll(),
-      list: <T = unknown>(options: { prefix: string }) => ctx.storage.list<T>(options),
-    },
+    storage,
     alarm: {
       get: () => ctx.storage.getAlarm(),
       set: (time) => ctx.storage.setAlarm(time),
