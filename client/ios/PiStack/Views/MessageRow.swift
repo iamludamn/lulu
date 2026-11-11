@@ -6,13 +6,12 @@ struct MessageRow: View, Equatable {
     let store: BotStore
     let botId: String
     let api: Api
-    let expanded: Bool
     let onRead: (String) -> Void
     let onOpen: (ArtifactAddress, String) -> Void
     let onKept: (Page) -> Void
     @Environment(\.openSpace) private var openSpace
 
-    static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.row == rhs.row && lhs.expanded == rhs.expanded }
+    static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.row == rhs.row && lhs.botId == rhs.botId && lhs.api.base == rhs.api.base }
 
     var body: some View {
         switch row.role {
@@ -76,9 +75,8 @@ struct MessageRow: View, Equatable {
                 content.background { shape.fill(.clear).glassEffect(.clear, in: shape) }
             } else if row.body != nil {
                 content.frosted(20)
-                    .flowingBorder(radius: 20, paused: expanded)
+                    .longReplyHighlight(radius: 20, key: "pistack.longReply.read.\(api.base.absoluteString).\(botId).\(row.id)") { onRead(row.id) }
                     .contentShape(shape)
-                    .onTapGesture { onRead(row.id) }
             } else {
                 content.frosted(20)
             }

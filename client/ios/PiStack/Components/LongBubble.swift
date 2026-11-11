@@ -19,12 +19,19 @@ struct LongHint: View {
     }
 }
 
-private struct FlowingBorder: ViewModifier {
+private struct LongReplyHighlight: ViewModifier {
     let radius: CGFloat
-    let paused: Bool
+    let onRead: () -> Void
+    @AppStorage private var read: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var scheme
     @State private var visible = true
+
+    init(radius: CGFloat, key: String, onRead: @escaping () -> Void) {
+        self.radius = radius
+        self.onRead = onRead
+        _read = AppStorage(wrappedValue: false, key)
+    }
 
     private static let period = 3.6
     private static let streak = Gradient(stops: [
@@ -35,23 +42,27 @@ private struct FlowingBorder: ViewModifier {
         .init(color: Color.white.opacity(0), location: 1),
     ])
 
-    private var idle: Bool { paused || !visible || reduceMotion }
+    private var idle: Bool { !visible || reduceMotion }
     private var light: Bool { scheme == .light }
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         content
-            .background { glow(shape) }
-            .overlay { border(shape) }
+            .background { if !read { glow(shape) } }
+            .overlay { if !read { border(shape).opacity(0.6) } }
             .onScrollVisibilityChange(threshold: 0.05) { visible = $0 }
+            .onTapGesture {
+                read = true
+                onRead()
+            }
     }
 
     private func glow(_ shape: RoundedRectangle) -> some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: idle)) { context in
             let breath = reduceMotion ? 0 : sin(context.date.timeIntervalSinceReferenceDate * 2 * .pi / Self.period)
-            shape.stroke(Color.white, lineWidth: light ? 4 : 5)
+            shape.stroke(Color.white, lineWidth: light ? 3 : 4)
                 .blur(radius: light ? 10 : 9)
-                .opacity(reduceMotion ? (light ? 0.95 : 0.7) : (light ? 0.62 + 0.2 * breath : 0.58 + 0.16 * breath))
+                .opacity(reduceMotion ? (light ? 0.45 : 0.35) : (light ? 0.3 + 0.08 * breath : 0.28 + 0.07 * breath))
         }
         .allowsHitTesting(false)
     }
@@ -79,22 +90,34 @@ private struct FlowingBorder: ViewModifier {
 }
 
 extension View {
-    func flowingBorder(radius: CGFloat, paused: Bool) -> some View {
-        modifier(FlowingBorder(radius: radius, paused: paused))
+    func longReplyHighlight(radius: CGFloat, key: String, onRead: @escaping () -> Void) -> some View {
+        modifier(LongReplyHighlight(radius: radius, key: key, onRead: onRead))
     }
 }
 
 struct LongReader: View {
     let text: String
-    let size: CGSize
-    let onClose: () -> Void
-    @State private var drag: CGFloat = 0
-
-    private let shape = RoundedRectangle(cornerRadius: 28, style: .continuous)
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            HStack {
+                Text(verbatim: "全文 · 约 \(readingLength(text)) 字")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("关闭全文")
+            }
+            .padding(.leading, 20)
+            .padding(.trailing, 8)
+            .padding(.top, 12)
             ScrollView {
                 MarkdownText(text: text, selectable: true, document: true)
                     .lineSpacing(5)
@@ -104,57 +127,10 @@ struct LongReader: View {
                     .padding(.bottom, 28)
             }
         }
-        .background { surface }
-        .clipShape(shape)
-        .frame(width: size.width, height: size.height)
-        .offset(y: drag)
-        .accessibilityAddTraits(.isModal)
-        .accessibilityAction(.escape) { close() }
-    }
-
-    private var surface: some View {
-        shape.fill(.regularMaterial)
-            .overlay { shape.fill(Color.paper.opacity(0.6)) }
-            .overlay { shape.strokeBorder(Color.white.opacity(0.45), lineWidth: 0.6) }
-            .shadow(color: .black.opacity(0.25), radius: 24, y: 8)
-    }
-
-    private var header: some View {
-        VStack(spacing: 8) {
-            Capsule().fill(Color.secondary.opacity(0.45)).frame(width: 36, height: 5)
-            HStack {
-                Text(verbatim: "全文 · 约 \(readingLength(text)) 字")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button(action: close) {
-                    Image(systemName: "xmark")
-                        .font(.caption.weight(.semibold))
-                        .frame(width: 32, height: 32)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("关闭全文")
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 10)
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(coordinateSpace: .global)
-                .onChanged { drag = max(0, $0.translation.height) }
-                .onEnded { value in
-                    if value.translation.height > 80 {
-                        close()
-                    } else {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { drag = 0 }
-                    }
-                }
-        )
-    }
-
-    private func close() {
-        onClose()
+        .background(Color.paper.opacity(0.6))
+        .presentationDetents([.fraction(2.0 / 3.0), .large])
+        .presentationDragIndicator(.visible)
+        .presentationCornerRadius(28)
+        .presentationBackground(.regularMaterial)
     }
 }
