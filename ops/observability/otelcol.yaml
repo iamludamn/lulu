@@ -1,0 +1,231 @@
+extensions:
+  bearertokenauth:
+    scheme: Bearer
+    token: ${env:OTLP_TOKEN}
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+        auth:
+          authenticator: bearertokenauth
+
+processors:
+  batch:
+
+connectors:
+  span_metrics:
+    namespace: lulu.span
+    aggregation_temporality: AGGREGATION_TEMPORALITY_DELTA
+    histogram:
+      unit: ms
+      explicit:
+        buckets: [10ms, 50ms, 100ms, 250ms, 500ms, 1s, 2500ms, 5s, 10s, 30s, 60s, 120s, 300s, 600s]
+    dimensions:
+      - name: lulu.bot.id
+      - name: lulu.conversation.kind
+      - name: lulu.agent
+      - name: gen_ai.request.model
+      - name: gen_ai.tool.name
+      - name: lulu.command
+    metrics_flush_interval: 15s
+    exemplars:
+      enabled: true
+
+  signal_to_metrics:
+    spans:
+      - name: lulu.chat.input_tokens
+        description: Input tokens summed from chat spans
+        attributes: &chat_dims
+          - key: gen_ai.provider.name
+            optional: true
+          - key: gen_ai.request.model
+            optional: true
+          - key: lulu.agent
+            optional: true
+          - key: lulu.bot.id
+            optional: true
+          - key: lulu.conversation.kind
+            optional: true
+        conditions:
+          - span.attributes["gen_ai.usage.input_tokens"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["gen_ai.usage.input_tokens"]
+      - name: lulu.chat.output_tokens
+        description: Output tokens summed from chat spans
+        attributes: *chat_dims
+        conditions:
+          - span.attributes["gen_ai.usage.output_tokens"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["gen_ai.usage.output_tokens"]
+      - name: lulu.chat.cache_read_tokens
+        description: Cache read tokens summed from chat spans
+        attributes: *chat_dims
+        conditions:
+          - span.attributes["gen_ai.usage.cache_read.input_tokens"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["gen_ai.usage.cache_read.input_tokens"]
+      - name: lulu.chat.cost
+        description: Cost summed from chat spans
+        attributes: *chat_dims
+        conditions:
+          - span.attributes["lulu.usage.cost"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.usage.cost"]
+      - name: lulu.chat.cache_write_tokens
+        attributes: *chat_dims
+        conditions:
+          - span.attributes["gen_ai.usage.cache_creation.input_tokens"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["gen_ai.usage.cache_creation.input_tokens"]
+      - name: lulu.chat.cost_input
+        attributes: *chat_dims
+        conditions:
+          - span.attributes["lulu.usage.cost.input"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.usage.cost.input"]
+      - name: lulu.chat.cost_output
+        attributes: *chat_dims
+        conditions:
+          - span.attributes["lulu.usage.cost.output"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.usage.cost.output"]
+      - name: lulu.chat.cost_cache_read
+        attributes: *chat_dims
+        conditions:
+          - span.attributes["lulu.usage.cost.cache_read"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.usage.cost.cache_read"]
+      - name: lulu.chat.cost_cache_write
+        attributes: *chat_dims
+        conditions:
+          - span.attributes["lulu.usage.cost.cache_write"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.usage.cost.cache_write"]
+      - name: lulu.run.turns
+        description: Turns summed from run spans
+        attributes: &dims
+          - key: lulu.bot.id
+            optional: true
+          - key: lulu.conversation.kind
+            optional: true
+        conditions:
+          - span.attributes["lulu.run.turns"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.run.turns"]
+      - name: lulu.run.chats
+        description: Chats summed from run spans
+        attributes: *dims
+        conditions:
+          - span.attributes["lulu.run.chats"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.run.chats"]
+      - name: lulu.run.tools
+        description: Tool calls summed from run spans
+        attributes: *dims
+        conditions:
+          - span.attributes["lulu.run.tools"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.run.tools"]
+      - name: lulu.run.tool_errors
+        description: Tool errors summed from run spans
+        attributes: *dims
+        conditions:
+          - span.attributes["lulu.run.tool_errors"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.run.tool_errors"]
+      - name: lulu.run.delegates
+        description: Delegates summed from run spans
+        attributes: *dims
+        conditions:
+          - span.attributes["lulu.run.delegates"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.run.delegates"]
+      - name: lulu.run.retries
+        description: Retries summed from run spans
+        attributes: *dims
+        conditions:
+          - span.attributes["lulu.run.retries"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.run.retries"]
+      - name: lulu.run.compactions
+        description: Compactions summed from run spans
+        attributes: *dims
+        conditions:
+          - span.attributes["lulu.run.compactions"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.run.compactions"]
+      - name: lulu.run.input_tokens
+        description: Input tokens summed from run spans
+        attributes: *dims
+        conditions:
+          - span.attributes["lulu.run.input_tokens"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.run.input_tokens"]
+      - name: lulu.run.output_tokens
+        description: Output tokens summed from run spans
+        attributes: *dims
+        conditions:
+          - span.attributes["lulu.run.output_tokens"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.run.output_tokens"]
+      - name: lulu.run.cache_read_tokens
+        description: Cache read tokens summed from run spans
+        attributes: *dims
+        conditions:
+          - span.attributes["lulu.run.cache_read_tokens"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.run.cache_read_tokens"]
+      - name: lulu.run.cost
+        description: Cost summed from run spans
+        attributes: *dims
+        conditions:
+          - span.attributes["lulu.run.cost"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.run.cost"]
+      - name: lulu.run.cache_write_tokens
+        attributes: *dims
+        conditions:
+          - span.attributes["lulu.run.cache_write_tokens"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.run.cache_write_tokens"]
+
+exporters:
+  otlp_http/lgtm:
+    endpoint: http://lgtm:4318
+    tls:
+      insecure: true
+
+service:
+  extensions: [bearertokenauth]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp_http/lgtm, span_metrics, signal_to_metrics]
+    metrics:
+      receivers: [span_metrics, signal_to_metrics]
+      processors: [batch]
+      exporters: [otlp_http/lgtm]
