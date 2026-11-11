@@ -42,8 +42,7 @@ struct PanelView: View {
                         .frame(height: 48)
                         .contentShape(.capsule)
                 }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.tint(.pane).interactive(), in: .capsule)
+                .buttonStyle(Glassy(shape: Capsule(), tint: .pane))
             }
             .frame(width: PanelLayout.width)
             .padding(.top, ChatView.topInset)
@@ -53,7 +52,11 @@ struct PanelView: View {
         }
         .scrollIndicators(.never)
         .mask {
-            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.08)], startPoint: .top, endPoint: .bottom)
+            VStack(spacing: 0) {
+                LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 76)
+                Color.black
+                LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 28)
+            }
         }
     }
 
@@ -82,8 +85,7 @@ struct PanelView: View {
                     Button { onDraft(idea) } label: {
                         Label(idea, systemImage: "plus").type(13, .medium, line: 18).padding(.horizontal, 14).frame(height: 36)
                     }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular.interactive(), in: .capsule)
+                    .buttonStyle(Glassy(shape: Capsule()))
                 }
             }
         }
@@ -160,8 +162,7 @@ private struct WidgetCard: View {
                     Button { onDrop(origin) } label: {
                         Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).frame(width: 24, height: 24)
                     }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular.interactive(), in: .circle)
+                    .buttonStyle(Glassy(shape: Circle()))
                     .padding(14)
                     .help("删除组件")
                     .transition(.opacity)

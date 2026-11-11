@@ -19,12 +19,12 @@ struct MessageRow: View, Equatable {
     var body: some View {
         switch row.role {
         case .stamp:
-            VStack(spacing: 10) {
-                Rectangle().fill(Color.veil).frame(height: 1)
-                Text(row.text).type(12, .medium, line: 16).foregroundStyle(Color.ink.opacity(0.3))
-            }
-            .padding(.top, 8)
-            .padding(.bottom, 4)
+            Text(row.text)
+                .type(11, .medium, line: 14)
+                .foregroundStyle(Color.ink.opacity(0.4))
+                .frame(maxWidth: .infinity)
+                .padding(.top, 14)
+                .padding(.bottom, 2)
         case .system:
             notice
         case .user, .assistant:
@@ -49,11 +49,11 @@ struct MessageRow: View, Equatable {
 
     @ViewBuilder
     private func bubble(mine: Bool) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
         let content = Group {
             if mine {
                 Text(linkified(AttributedString(row.text)))
-                    .type(15, line: 19)
+                    .type(15, line: 22)
                     .foregroundStyle(Color.ink)
             } else if let full = row.body {
                 VStack(alignment: .leading, spacing: 10) {
@@ -69,16 +69,23 @@ struct MessageRow: View, Equatable {
                 MarkdownText(text: row.text)
             }
         }
-        .textSelection(.enabled)
         .padding(.horizontal, 16)
-        .padding(.vertical, 14.5)
+        .padding(.vertical, 11)
         .opacity(row.sending ? 0.55 : 1)
-        content
-            .pane(24, tint: mine ? .mine : .reply)
+        Group {
+            if row.body != nil {
+                Button { onRead(row.id) } label: { content.contentShape(shape) }
+                    .buttonStyle(.plain)
+                    .pointerStyle(.link)
+            } else {
+                content.textSelection(.enabled)
+            }
+        }
+            .pane(22, tint: mine ? .mine : .reply)
+            .scaleEffect(row.body != nil && hovering ? 1.01 : 1)
             .contentShape(shape)
             .onHover { hovering = $0 }
-            .onTapGesture { if row.body != nil { onRead(row.id) } }
-            .pointerStyle(row.body != nil ? .link : nil)
+            .animation(.snappy(duration: 0.2), value: hovering)
             .contextMenu {
                 Button("拷贝", systemImage: "doc.on.doc") { copy(row.body.map { row.text + "\n\n" + $0 } ?? row.text) }
                 if row.body != nil {
@@ -120,8 +127,7 @@ struct MessageRow: View, Equatable {
             Button(action: keep) {
                 Image(systemName: symbol).font(.system(size: 13, weight: .semibold)).frame(width: 36, height: 36)
             }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
+            .buttonStyle(Glassy(shape: Circle(), tint: .pane))
             .help(label)
             .opacity(hovering ? 1 : 0)
         }

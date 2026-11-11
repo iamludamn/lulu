@@ -1,4 +1,5 @@
 import AppKit
+import PDFKit
 import PiStackKit
 import SwiftUI
 import WebKit
@@ -49,7 +50,7 @@ private struct ArtifactViewer: ViewModifier {
                     .type(12, .medium, line: 16)
                     .padding(.horizontal, 14)
                     .frame(height: 32)
-                    .glassEffect(.regular, in: .capsule)
+                    .glass(Capsule())
                     .padding(.top, 70)
                     .transition(.opacity)
                 }
@@ -68,7 +69,7 @@ private struct ArtifactViewer: ViewModifier {
     private func title(_ address: ArtifactAddress) -> String { address.fileName }
 
     private func open(_ address: ArtifactAddress) {
-        if address.isMarkdown || address.isHTML {
+        if address.isMarkdown || address.isHTML || address.isImage || address.isPDF {
             show(Opening(title: title(address), address: address))
             return
         }
@@ -141,7 +142,39 @@ private struct DocumentPage: View {
             reader(text)
         } else if let address = opening.address {
             let load = { try await api.artifactText(botId, name: address.name, version: address.version) }
-            if address.isHTML {
+            if address.isImage {
+                AsyncImage(url: api.artifactURL(botId, address)) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFit()
+                            .clipShape(.rect(cornerRadius: 20, style: .continuous))
+                            .shadow(color: .black.opacity(0.25), radius: 30, y: 10)
+                    case .failure: ContentUnavailableView("图片加载失败", systemImage: "photo")
+                    default: ProgressView().controlSize(.small)
+                    }
+                }
+                .padding(.horizontal, 48)
+                .padding(.bottom, 40)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if address.isPDF {
+                Loaded(load: { try await api.download(api.artifactURL(botId, address), as: address.fileName) }) { file in
+                    if let document = PDFDocument(url: file), document.pageCount > 0 {
+                        PDFPage(document: document)
+                            .background(Color.paper)
+                        .clipShape(.rect(cornerRadius: 28, style: .continuous))
+                        .shadow(color: .black.opacity(0.25), radius: 30, y: 10)
+                            .frame(maxWidth: 1000)
+                            .padding(.horizontal, 32)
+                            .padding(.bottom, 24)
+                    } else {
+                        ContentUnavailableView {
+                            Label("无法预览这个 PDF", systemImage: "doc.richtext")
+                        } actions: {
+                            Button("用默认应用打开") { NSWorkspace.shared.open(file) }
+                        }
+                    }
+                }
+            } else if address.isHTML {
                 Loaded(load: load) { html in
                     HTMLPage(html: html, bridge: opening.space.map { SpaceBridge(botId: botId, space: $0, api: api) })
                         .background(Color.paper)
@@ -182,8 +215,7 @@ struct CircleButton: View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 15, weight: .semibold)).foregroundStyle(Color.ink).frame(width: 48, height: 48).contentShape(.circle)
         }
-        .buttonStyle(.plain)
-        .glassEffect(.regular.tint(.pane).interactive(), in: .circle)
+        .buttonStyle(Glassy(shape: Circle(), tint: .pane))
         .help(help)
     }
 }
@@ -250,6 +282,26 @@ private struct HTMLPage: NSViewRepresentable {
             decisionHandler(.cancel)
         }
     }
+}
+
+private struct PDFPage: NSViewRepresentable {
+    let document: PDFDocument
+
+    func makeNSView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.autoScales = true
+        view.displaysPageBreaks = true
+        view.backgroundColor = .clear
+        view.document = document
+        return view
+    }
+
+    func updateNSView(_ view: PDFView, context: Context) {}
+}
+
+extension ArtifactAddress {
+    var isImage: Bool { ["png", "jpg", "jpeg", "gif", "webp", "heic", "tiff"].contains((name as NSString).pathExtension.lowercased()) }
+    var isPDF: Bool { (name as NSString).pathExtension.lowercased() == "pdf" }
 }
 
 extension View {

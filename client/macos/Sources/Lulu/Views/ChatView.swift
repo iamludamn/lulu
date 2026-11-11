@@ -10,6 +10,7 @@ struct ChatView: View {
     let focus: Int
     let onFocus: () -> Void
     @State private var pinned = true
+    @State private var scrolling = false
     @State private var floor: String?
     @State private var sent = 0
     @State private var composerHeight = Composer.minHeight
@@ -33,7 +34,7 @@ struct ChatView: View {
         ZStack(alignment: .bottom) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(spacing: 13) {
+                    VStack(spacing: 4) {
                         if start > 0 {
                             Button("更早的消息") { floor = rows[max(0, start - Self.page)].id }
                                 .buttonStyle(.plain)
@@ -46,20 +47,28 @@ struct ChatView: View {
                                 if let body = rows.first(where: { $0.id == id })?.body { openText(body) }
                             })
                             .equatable()
+                            .padding(.bottom, row.tail ? 10 : 0)
                             .transition(transition(row))
                         }
-                        Color.clear.frame(height: 1).id(Self.bottom)
+                        Color.clear.frame(height: composerHeight + Self.bottomGap + 8).id(Self.bottom)
                     }
                     .frame(width: column)
                     .padding(.top, Self.topInset)
-                    .padding(.bottom, composerHeight + Self.bottomGap + 20)
                     .frame(maxWidth: .infinity)
                     .animation(.snappy, value: rows.map(\.id))
                 }
                 .defaultScrollAnchor(.bottom)
                 .defaultScrollAnchor(pinned ? .bottom : nil, for: .sizeChanges)
+                .onScrollPhaseChange { _, phase in scrolling = phase != .idle }
                 .onScrollGeometryChange(for: Bool.self) { $0.visibleRect.maxY > $0.contentSize.height - 40 } action: { _, near in
-                    pinned = near
+                    if scrolling || near { pinned = near }
+                }
+                .onChange(of: rows.last?.id) {
+                    guard pinned else { return }
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(30))
+                        withAnimation(.snappy) { proxy.scrollTo(Self.bottom, anchor: .bottom) }
+                    }
                 }
                 .onChange(of: rows.count > Self.page, initial: true) { _, long in
                     if long, floor == nil { floor = rows[rows.count - Self.page].id }
@@ -79,8 +88,7 @@ struct ChatView: View {
                         } label: {
                             Image(systemName: "chevron.down").font(.system(size: 14, weight: .semibold)).frame(width: 40, height: 40)
                         }
-                        .buttonStyle(.plain)
-                        .glassEffect(.regular.interactive(), in: .circle)
+                        .buttonStyle(Glassy(shape: Circle(), tint: .pane))
                         .padding(.bottom, composerHeight + Self.bottomGap + 12)
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                         .help("滚动到底部")
@@ -106,7 +114,7 @@ struct ChatView: View {
                 .foregroundStyle(Color.ink)
                 .padding(.horizontal, 14)
                 .frame(height: 32)
-                .glassEffect(.regular, in: .capsule)
+                .glass(Capsule())
                 .padding(.top, 70)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -174,8 +182,7 @@ struct ChatView: View {
                     } label: {
                         Text(text).type(13, .medium, line: 18).padding(.horizontal, 16).frame(height: 36)
                     }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular.interactive(), in: .capsule)
+                    .buttonStyle(Glassy(shape: Capsule(), tint: .pane))
                 }
             }
         }

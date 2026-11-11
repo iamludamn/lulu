@@ -129,7 +129,7 @@ func linkified(_ text: AttributedString) -> AttributedString {
 struct MarkdownText: View {
     let text: String
     var size: CGFloat = 15
-    var line: CGFloat = 19
+    var line: CGFloat = 22
     var selectable = false
     var document = false
 
@@ -184,9 +184,17 @@ struct MarkdownText: View {
                 .lineHeight(.exact(points: (points * 1.32).rounded()))
                 .tracking(document && level <= 2 ? -0.3 : 0)
         case .item(let marker, let depth, let text):
+            let task = text.hasPrefix("[x] ") || text.hasPrefix("[X] ") ? true : text.hasPrefix("[ ] ") ? false : nil
             HStack(alignment: .firstTextBaseline, spacing: document ? 10 : 6) {
-                Text(marker).monospacedDigit().foregroundStyle(Color.muted)
-                Text(inline(text))
+                if let task {
+                    Image(systemName: task ? "checkmark.square.fill" : "square")
+                        .foregroundStyle(task ? Color.info : Color.muted)
+                } else {
+                    Text(marker).monospacedDigit().foregroundStyle(Color.muted)
+                }
+                Text(inline(task == nil ? text : String(text.dropFirst(4))))
+                    .foregroundStyle(task == true ? Color.muted : Color.ink)
+                    .strikethrough(task == true, color: Color.muted)
             }
             .padding(.leading, CGFloat(depth) * (document ? 22 : 16))
         case .quote(let text):

@@ -281,7 +281,7 @@ struct WidgetBody: View {
                         .type(12, .semibold, line: 16)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .glassEffect(.regular, in: .capsule)
+                        .glass(Capsule())
                         .padding(8)
                 }
             }

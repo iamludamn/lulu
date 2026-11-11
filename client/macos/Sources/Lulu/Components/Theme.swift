@@ -27,6 +27,7 @@ extension Color {
     static let success = scheme(dark: rgba(0x96F0B0), light: rgba(0x0F9D58))
     static let warning = scheme(dark: rgba(0xFFC832), light: rgba(0xB45309))
     static let failure = scheme(dark: rgba(0xFF6464), light: rgba(0xD64545))
+    static let thumb = scheme(dark: rgba(0xF5F5F7), light: rgba(0xFFFFFF))
     static let knob = scheme(dark: rgba(0xF5F5F7), light: rgba(0x1D1D1F))
     static let knobInk = scheme(dark: rgba(0x1D1D1F), light: rgba(0xF5F5F7))
 }
@@ -47,10 +48,18 @@ extension View {
             .lineHeight(.exact(points: line ?? (size * 1.3).rounded()))
     }
 
-    func pane(_ radius: CGFloat, tint: Color = .pane, interactive: Bool = false) -> some View {
-        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-        return background { shape.fill(tint) }
-            .glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
+    func pane(_ radius: CGFloat, tint: Color = .pane) -> some View {
+        glass(RoundedRectangle(cornerRadius: radius, style: .continuous), tint: tint)
+    }
+
+    func glass(_ shape: some Shape, tint: Color? = nil) -> some View {
+        background {
+            ZStack {
+                Color.clear.glassEffect(.regular, in: shape)
+                if let tint { shape.fill(tint) }
+            }
+            .allowsHitTesting(false)
+        }
     }
 }
 
@@ -63,5 +72,34 @@ extension Tone {
         case .bad: .failure
         case .accent: .info
         }
+    }
+}
+
+struct Glassy<S: Shape>: ButtonStyle {
+    let shape: S
+    var tint: Color?
+
+    func makeBody(configuration: Configuration) -> some View {
+        GlassyBody(configuration: configuration, shape: shape, tint: tint)
+    }
+}
+
+private struct GlassyBody<S: Shape>: View {
+    let configuration: ButtonStyleConfiguration
+    let shape: S
+    let tint: Color?
+    @State private var hovering = false
+    @Environment(\.isEnabled) private var enabled
+
+    var body: some View {
+        configuration.label
+            .contentShape(shape)
+            .glass(shape, tint: tint)
+            .overlay { shape.fill(Color.ink.opacity(hovering && enabled ? 0.05 : 0)).allowsHitTesting(false) }
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .opacity(enabled ? 1 : 0.5)
+            .onHover { hovering = $0 }
+            .animation(.snappy(duration: 0.16), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.15), value: hovering)
     }
 }

@@ -115,7 +115,7 @@ struct AssetPage: View {
     var body: some View {
         Group {
             if let thumbnail {
-                Image(nsImage: thumbnail).resizable().scaledToFill()
+                Color.clear.overlay { Image(nsImage: thumbnail).resizable().scaledToFill() }
             } else if let text {
                 Color.clear.overlay(alignment: .topLeading) {
                     MarkdownText(text: String(text.prefix(1200)), size: 15, line: 22, document: true)

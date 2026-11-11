@@ -20,7 +20,6 @@ struct LuluApp: App {
                 .onAppear {
                     Notifier.shared.onOpen = { model.page = .chat }
                     Notifier.shared.authorize()
-                    NSApp.activate()
                 }
         }
         .windowStyle(.hiddenTitleBar)
@@ -53,7 +52,6 @@ private struct WindowFrame: NSViewRepresentable {
             guard let window = view.window else { return }
             window.setFrameAutosaveName("lulu.main")
             window.titlebarAppearsTransparent = true
-            window.isMovableByWindowBackground = true
         }
         return view
     }

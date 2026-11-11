@@ -58,8 +58,8 @@ struct TypingBubble: View {
             }
             TypingDots(size: 7)
                 .padding(.horizontal, 18)
-                .frame(height: 48)
-                .pane(24, tint: .reply)
+                .frame(height: 44)
+                .pane(22, tint: .reply)
                 .scaleEffect(shown ? 1 : 0.6, anchor: .bottomLeading)
                 .opacity(shown ? 1 : 0)
         }

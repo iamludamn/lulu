@@ -41,7 +41,7 @@ struct HomeView: View {
             }
             .animation(.snappy(duration: 0.32), value: rail)
         }
-        .background { Wallpaper() }
+        .background { Backdrop() }
         .ignoresSafeArea()
         .overlay {
             if model.settings {
@@ -99,11 +99,10 @@ struct HomeView: View {
                 .padding(.top, 3)
             }
             switcher(pages: pages, page: page)
-                .position(x: center, y: 24)
-                .frame(height: 48)
+                .offset(x: center - width / 2)
         }
+        .frame(width: width, height: 48, alignment: .top)
         .padding(.top, 14)
-        .frame(width: width, alignment: .top)
     }
 
     private func leadingSymbol(rail: Bool, width: CGFloat) -> String {
@@ -129,10 +128,15 @@ struct HomeView: View {
                 Button { withAnimation(.snappy) { model.page = item } } label: {
                     Text(item.title)
                         .type(14, .semibold, line: 18)
-                        .foregroundStyle(item == page ? Color.knobInk : Color.muted)
+                        .foregroundStyle(item == page ? Color.sheetInk : Color.muted)
                         .frame(width: 68, height: 40)
                         .background {
-                            if item == page { Capsule().fill(Color.knob).matchedGeometryEffect(id: "pill", in: pill) }
+                            if item == page {
+                                Capsule()
+                                    .fill(Color.thumb)
+                                    .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+                                    .matchedGeometryEffect(id: "pill", in: pill)
+                            }
                         }
                         .contentShape(.capsule)
                 }
@@ -140,7 +144,7 @@ struct HomeView: View {
             }
         }
         .padding(4)
-        .glassEffect(.regular.tint(.pane), in: .capsule)
+        .glass(Capsule(), tint: .pane)
     }
 
     private func send(_ text: String) {

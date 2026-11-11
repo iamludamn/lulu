@@ -8,27 +8,27 @@ struct Composer: View {
     let focus: Int
     let onSend: () -> Void
     let onStop: () -> Void
-    @State private var textHeight: CGFloat = 19
+    @State private var textHeight: CGFloat = 22
 
     static let minHeight: CGFloat = 48
     static let maxHeight: CGFloat = 219
 
     private var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    private var height: CGFloat { min(Self.maxHeight, max(Self.minHeight, textHeight + 29)) }
+    private var height: CGFloat { min(Self.maxHeight, max(Self.minHeight, textHeight + 26)) }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             ComposerField(text: $draft, height: $textHeight, focus: focus, onSubmit: submit)
                 .padding(.leading, 16)
                 .padding(.trailing, 52)
-                .padding(.vertical, 14.5)
+                .padding(.vertical, 13)
                 .overlay(alignment: .topLeading) {
                     if draft.isEmpty {
                         Text(placeholder)
-                            .type(15, line: 19)
+                            .type(15, line: 22)
                             .foregroundStyle(Color.muted)
                             .padding(.leading, 16)
-                            .padding(.top, 14.5)
+                            .padding(.top, 13)
                             .allowsHitTesting(false)
                     }
                 }
@@ -36,7 +36,7 @@ struct Composer: View {
         }
         .frame(height: height)
         .pane(24)
-        .overlay { RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Color.line.opacity(0.6), lineWidth: 0.5) }
+        .overlay { RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Color.line.opacity(0.6), lineWidth: 0.5).allowsHitTesting(false) }
         .animation(.snappy(duration: 0.22), value: height)
     }
 
@@ -90,10 +90,10 @@ private struct ComposerField: NSViewRepresentable {
         view.textContainerInset = .zero
         view.textContainer?.lineFragmentPadding = 0
         let paragraph = NSMutableParagraphStyle()
-        paragraph.minimumLineHeight = 19
-        paragraph.maximumLineHeight = 19
+        paragraph.minimumLineHeight = 22
+        paragraph.maximumLineHeight = 22
         let font = NSFont.systemFont(ofSize: 15)
-        let baseline = (19 - (font.ascender - font.descender)) / 2
+        let baseline = (22 - (font.ascender - font.descender)) / 2
         view.defaultParagraphStyle = paragraph
         view.typingAttributes = [.font: font, .paragraphStyle: paragraph, .foregroundColor: NSColor.textColor, .baselineOffset: baseline]
         view.font = font
@@ -154,7 +154,7 @@ private struct ComposerField: NSViewRepresentable {
             guard let view, let manager = view.layoutManager, let container = view.textContainer else { return }
             manager.ensureLayout(for: container)
             let used = manager.usedRect(for: container).height
-            let lines = max(19, used)
+            let lines = max(22, used)
             if abs(parent.height - lines) > 0.5 { parent.height = lines }
         }
     }
