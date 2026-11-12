@@ -70,10 +70,20 @@ data without production writes.
 - Workspace type checks and lint pass after a clean lockfile install.
 - iOS simulator build passes.
 - Full `npm run build` passes, including the web and desktop builds.
-- Actual device interaction, screenshots and recording are **not yet verified**:
-  three listed simulators are held by other sessions. The device tool does not
-  recognize the newly created simulator. No other session was reused or closed.
+- Real iOS Simulator interaction passes on the actual built app with a local
+  deterministic fixture backend invoking the production `keepWidget` handler:
+  create/swipe add; propose @2 while @1 remains canonical; inject a failed keep;
+  swipe retry; preserve ID/order/daily refresh/saved budget; open current @2 from
+  the original receipt; supersede pending @3 with @4; relaunch/reconnect; partial
+  swipe leaves the accepted @2 unchanged. This is not a production deployment or
+  a two-device live sync test.
+- Screenshots: `01-add.png`, `03-update.png`, `04-failed.png`,
+  `05-updated.png`, `06-open-current.png`, `07-superseded.png`,
+  `08-reloaded-panel.png`, `09-reconnected.png` in the evidence directory.
+- The device block was a stale ownership record belonging to a completed
+  verification thread. The owning thread released its own connection through
+  `device_close`; no foreign session was reused and no claim files were changed.
 
 Local evidence directory: `/tmp/lulu-49/` (baseline.log, core-test.log,
 swift-test.log, check.log, lint.log, ios-build.log, alignment.html).
-The HTML includes a clearly labeled interaction schematic, not app screenshots.
+The HTML includes actual simulator screenshots and the verification results.
