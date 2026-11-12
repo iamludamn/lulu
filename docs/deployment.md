@@ -5,6 +5,7 @@ lulu runs as a single Cloudflare Worker named `lulu`, configured in `apps/cf/wra
 - URL: `https://lulu.jiahaowu0322.workers.dev`
 - Cloudflare account ID: `de4897a194002b8815e728d7240c4218`. The login has two Cloudflare accounts, so every `wrangler` command must set `CLOUDFLARE_ACCOUNT_ID`.
 - State: the `LULU_MCP` KV namespace and the Durable Objects `Bot`, `Memory` and `Artifact`. Migration history is in `wrangler.jsonc`.
+- MCP server configs are encrypted in KV. OAuth credentials and pending sign-ins are encrypted in the Bot Durable Object; existing KV credentials are imported on first use.
 - Destructive commands such as `wrangler delete` must pass `--name lulu` explicitly.
 - The old `pistack-cf` worker was retired on 2026-11-01 and is not deployed.
 
@@ -25,6 +26,7 @@ Run `wrangler deploy` from `apps/cf` with the secrets file passed as `--secrets-
 - `OPENCODE_API_KEY`
 - `DOUBAO_API_KEY`
 - `MCP_ENCRYPTION_KEY`
+- `MCP_ADMIN_TOKEN` (the passphrase for the MCP registry page at `/mcp`; the registry API answers 503 until it is set)
 - `OTEL_EXPORTER_OTLP_HEADERS` (see [observability](observability.md))
 
 Secrets are never committed. They live in the root `.env` file, which is gitignored and can be used directly as the secrets file.

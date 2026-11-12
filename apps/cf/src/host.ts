@@ -10,6 +10,7 @@ const stringsOf = (env: Env): Environment =>
 const kvOf = (kv: KVNamespace): KeyValue => ({
   get: (key) => kv.get(key),
   put: (key, value) => kv.put(key, value),
+  delete: (key) => kv.delete(key),
   list: async (prefix) => (await kv.list({ prefix })).keys.map((key) => key.name),
 });
 
@@ -42,7 +43,14 @@ export function durableHost(ctx: DurableObjectState, env: Env): DurableHost {
   const environment = stringsOf(env);
   const telemetry = createTelemetry(environment, (task) => ctx.waitUntil(task));
   const kv = kvOf(env.LULU_MCP);
-  const mcp = mcpStore({ env: environment, kv }, name);
+  const storage: DurableHost["storage"] = {
+    get: <T = unknown>(key: string) => ctx.storage.get<T>(key),
+    put: (entries) => ctx.storage.put(entries),
+    delete: (keys) => ctx.storage.delete(typeof keys === "string" ? [keys] : keys),
+    deleteAll: () => ctx.storage.deleteAll(),
+    list: <T = unknown>(options: { prefix: string }) => ctx.storage.list<T>(options),
+  };
+  const mcp = mcpStore({ env: environment, kv, storage }, name);
   return {
     env: environment,
     telemetry,
@@ -50,13 +58,7 @@ export function durableHost(ctx: DurableObjectState, env: Env): DurableHost {
     writeMcpAuth: (content) => mcp.writeAuth(content),
     name,
     id: ctx.id.toString(),
-    storage: {
-      get: <T = unknown>(key: string) => ctx.storage.get<T>(key),
-      put: (entries) => ctx.storage.put(entries),
-      delete: (keys) => ctx.storage.delete(typeof keys === "string" ? [keys] : keys),
-      deleteAll: () => ctx.storage.deleteAll(),
-      list: <T = unknown>(options: { prefix: string }) => ctx.storage.list<T>(options),
-    },
+    storage,
     alarm: {
       get: () => ctx.storage.getAlarm(),
       set: (time) => ctx.storage.setAlarm(time),
@@ -75,6 +77,7 @@ export function workerHost(env: Env, ctx: ExecutionContext): ApiHost {
   const environment = stringsOf(env);
   return {
     env: environment,
+    kv: kvOf(env.LULU_MCP),
     telemetry: createTelemetry(environment, (task) => ctx.waitUntil(task)),
     objects: { BOTS: env.BOTS, MEMORY: env.MEMORY, ARTIFACTS: env.ARTIFACTS },
   };

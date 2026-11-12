@@ -49,6 +49,7 @@ export interface McpHost {
   readonly extension: Extension;
   readonly namespaces: NonNullable<CodemodeToolOptions["namespaces"]>;
   readonly statuses: readonly McpConnection[];
+  reconnect(servers: Record<string, McpServerConfig>, names?: readonly string[]): Promise<McpHost>;
   remote(): Promise<RemoteMcpServer[]>;
   close(): Promise<void>;
 }
@@ -122,50 +123,69 @@ function toolFor(server: string, client: McpClient, tool: Tool): ToolRegistratio
   });
 }
 
-export async function openMcp(servers: Record<string, McpServerConfig>, host: McpHostServices): Promise<McpHost> {
-  const clients: McpClient[] = [];
-  const connected: { server: string; client: McpClient; tool: Tool }[] = [];
-  const statuses: McpConnection[] = [];
-  const reachable: { server: string; url: string; headers: Record<string, string> | undefined; auth: AuthProvider | undefined }[] = [];
-  for (const [server, config] of Object.entries(servers)) {
-    await host.telemetry.startSpan({ name: "mcp.connect", attributes: { "lulu.mcp.server": server } }, async (span) => {
-      const checkedAt = Date.now();
-      let headers: Record<string, string> | undefined = undefined;
-      try {
-        headers = headersOf(server, config, host);
-        const auth = config.fetch === undefined ? authOf(server, config, headers, host) : undefined;
-        const client = new McpClient({ name: "pistack", version: "0.1.0" });
-        await client.connect(
-          new StreamableHttpTransport({
-            url: config.url,
-            ...(headers === undefined ? {} : { headers }),
-            ...(auth === undefined ? {} : { authProvider: auth }),
-            ...(config.fetch === undefined ? {} : { fetch: config.fetch, openGetStream: false }),
-          }),
-        );
-        clients.push(client);
-        const tools = await client.listTools();
-        for (const tool of tools) connected.push({ server, client, tool });
-        statuses.push({ name: server, state: "connected", tools: tools.length, checkedAt });
-        span.setAttributes({ "lulu.mcp.state": "connected", "lulu.mcp.tools": tools.length });
-        if (config.fetch === undefined) reachable.push({ server, url: config.url, headers, auth });
-      } catch (error) {
-        const message = redact(error instanceof Error ? error.message : String(error), config, headers);
-        const state = error instanceof McpAuthRequiredError ? "needs-auth" : "failed";
-        console.error(`[pistack] MCP server "${server}" unavailable: ${message}`);
-        statuses.push({ name: server, state, tools: 0, error: truncate(message, MAX_ERROR_CHARS), checkedAt });
-        span.setAttributes({ "lulu.mcp.state": state });
-        span.setStatus({ status: "error", error: { name: error instanceof Error ? error.name : "Error", message: truncate(message, MAX_ERROR_CHARS) } });
-      }
+interface McpSession {
+  readonly config: McpServerConfig;
+  readonly client: McpClient | undefined;
+  readonly tools: readonly Tool[];
+  readonly status: McpConnection;
+  readonly headers: Record<string, string> | undefined;
+  readonly auth: AuthProvider | undefined;
+}
+
+async function connectMcp(server: string, config: McpServerConfig, host: McpHostServices): Promise<McpSession> {
+  return host.telemetry.startSpan({ name: "mcp.connect", attributes: { "lulu.mcp.server": server } }, async (span) => {
+    const checkedAt = Date.now();
+    let headers: Record<string, string> | undefined = undefined;
+    const client = new McpClient({ name: "lulu", version: "0.1.0" });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error("MCP connection timed out")), 10_000);
+    let connecting = true;
+    const fetchMcp: McpFetch = (input, init) => (config.fetch ?? fetch)(input, {
+      ...init,
+      signal: AbortSignal.any([
+        ...(init?.signal === undefined || init.signal === null ? [] : [init.signal]),
+        ...(connecting ? [controller.signal] : []),
+        ...(init?.method === "DELETE" ? [AbortSignal.timeout(5_000)] : []),
+      ]),
     });
-  }
+    try {
+      headers = headersOf(server, config, host);
+      const auth = config.fetch === undefined ? authOf(server, config, headers, host) : undefined;
+      await client.connect(new StreamableHttpTransport({
+        url: config.url,
+        ...(headers === undefined ? {} : { headers }),
+        ...(auth === undefined ? {} : { authProvider: auth }),
+        fetch: fetchMcp,
+        ...(config.fetch === undefined ? {} : { openGetStream: false }),
+      }));
+      const tools = await client.listTools({ signal: controller.signal });
+      span.setAttributes({ "lulu.mcp.state": "connected", "lulu.mcp.tools": tools.length });
+      return { config, client, tools, status: { name: server, state: "connected", tools: tools.length, checkedAt }, headers, auth };
+    } catch (error) {
+      await client.close().catch(() => undefined);
+      const message = redact(error instanceof Error ? error.message : String(error), config, headers);
+      const state = error instanceof McpAuthRequiredError ? "needs-auth" : "failed";
+      console.error(`[pistack] MCP server "${server}" unavailable: ${message}`);
+      span.setAttributes({ "lulu.mcp.state": state });
+      span.setStatus({ status: "error", error: { name: error instanceof Error ? error.name : "Error", message: truncate(message, MAX_ERROR_CHARS) } });
+      return { config, client: undefined, tools: [], status: { name: server, state, tools: 0, error: truncate(message, MAX_ERROR_CHARS), checkedAt }, headers, auth: undefined };
+    } finally {
+      connecting = false;
+      clearTimeout(timer);
+    }
+  });
+}
+
+function mcpHost(sessions: ReadonlyMap<string, McpSession>, host: McpHostServices): McpHost {
+  const owned = new Set(sessions.values());
   const listed = new Map<string, { description: string; count: number }>();
-  for (const { server, client } of connected) {
-    const entry = listed.get(server) ?? { description: truncate(client.instructions ?? "", MAX_SERVER_DESCRIPTION_CHARS), count: 0 };
-    entry.count += 1;
-    listed.set(server, entry);
+  const tools: ToolRegistration[] = [];
+  for (const [server, session] of sessions) {
+    const client = session.client;
+    if (client === undefined) continue;
+    for (const tool of session.tools) tools.push(toolFor(server, client, tool));
+    if (session.tools.length > 0) listed.set(server, { description: truncate(client.instructions ?? "", MAX_SERVER_DESCRIPTION_CHARS), count: session.tools.length });
   }
-  const tools = connected.map(({ server, client, tool }) => toolFor(server, client, tool));
   const namespaces = [...listed].map(([server, entry]) => ({
     name: server,
     description: entry.description || "MCP server " + server,
@@ -173,19 +193,33 @@ export async function openMcp(servers: Record<string, McpServerConfig>, host: Mc
   }));
   return {
     namespaces,
-    statuses,
+    statuses: [...sessions.values()].map((session) => session.status),
+    async reconnect(servers, names) {
+      const next = new Map(await Promise.all(Object.entries(servers).map(async ([server, config]): Promise<[string, McpSession]> => {
+        const previous = sessions.get(server);
+        const reuse = names !== undefined && !names.includes(server) && previous !== undefined && previous.config.url === config.url && previous.config.fetch === config.fetch && JSON.stringify(previous.config.headers) === JSON.stringify(config.headers);
+        return [server, reuse ? previous : await connectMcp(server, config, host)];
+      })));
+      for (const session of next.values()) owned.delete(session);
+      return mcpHost(next, host);
+    },
     async remote() {
-      return Promise.all(
-        reachable.map(async ({ server, url, headers, auth }) => {
-          const token = await auth?.token();
-          const all = { ...headers, ...(token === undefined ? {} : { Authorization: `Bearer ${token}` }) };
-          return { name: server, url, headers: Object.entries(all).map(([name, value]) => ({ name, value })) };
-        }),
-      );
+      return Promise.all([...sessions].filter(([, session]) => session.client !== undefined && session.config.fetch === undefined).map(async ([server, session]) => {
+        const token = await session.auth?.token();
+        const headers = { ...session.headers, ...(token === undefined ? {} : { Authorization: `Bearer ${token}` }) };
+        return { name: server, url: session.config.url, headers: Object.entries(headers).map(([name, value]) => ({ name, value })) };
+      }));
     },
     extension: defineExtension({ name: "pistack.mcp", tools, sections: [serversSection(listed)] }),
     async close() {
-      await Promise.all(clients.map((client) => client.close()));
+      const closing = [...owned];
+      owned.clear();
+      await Promise.all(closing.flatMap((session) => session.client === undefined ? [] : [session.client.close()]));
     },
   };
+}
+
+export async function openMcp(servers: Record<string, McpServerConfig>, host: McpHostServices): Promise<McpHost> {
+  const sessions = await Promise.all(Object.entries(servers).map(async ([name, config]): Promise<[string, McpSession]> => [name, await connectMcp(name, config, host)]));
+  return mcpHost(new Map(sessions), host);
 }

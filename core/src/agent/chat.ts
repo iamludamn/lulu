@@ -39,8 +39,11 @@ export async function reconnectChatMcp(
   registry: Registry,
   previous: McpHost,
   botServers: Record<string, McpServerConfig>,
+  names?: readonly string[],
 ): Promise<{ host: McpHost; statuses: McpStatus[] }> {
-  const opened = await openChatMcp(host, botServers);
+  const platform = platformServers(host);
+  const mcp = await previous.reconnect({ ...botServers, ...platform }, names);
+  const opened = { host: mcp, statuses: mcp.statuses.map((status): McpStatus => ({ ...status, source: Object.hasOwn(platform, status.name) ? "platform" : "bot" })) };
   installHarness(
     registry,
     DEFAULT_HARNESS.extensions.filter((name) => name === "mcp" || name === "codemode" || name === "delegate"),

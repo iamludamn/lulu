@@ -1,9 +1,10 @@
 import type { DurableHost } from "../host/types.js";
 import { SPACE_ID } from "../protocol/panel.js";
+import { mcpCatalog } from "./mcp-catalog.js";
 
 export const BOT_ID = "main";
 
-export type ApiHost = Pick<DurableHost, "env" | "objects" | "telemetry">;
+export type ApiHost = Pick<DurableHost, "env" | "objects" | "telemetry" | "kv">;
 
 const PREFIX = `/api/bots/${BOT_ID}`;
 
@@ -46,6 +47,28 @@ function botSocket(request: Request, host: ApiHost): Promise<Response> {
   return host.objects.BOTS.getByName(BOT_ID).fetch(request);
 }
 
+const MCP_CALLBACK = "/mcp/callback";
+
+async function mcpRegistry(request: Request, host: ApiHost, rest: string): Promise<Response> {
+  if (rest !== MCP_CALLBACK) {
+    const token = host.env.MCP_ADMIN_TOKEN;
+    if (token === undefined || token === "") return json({ error: "MCP_ADMIN_TOKEN is not configured" }, 503);
+    const given = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+    if (!(await tokensMatch(given, token))) return json({ error: "Unauthorized" }, 401, { "WWW-Authenticate": "Bearer" });
+  }
+  if (rest === "/mcp/catalog") return mcpCatalog(request, host.kv);
+  const url = new URL(request.url);
+  url.pathname = rest;
+  const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.text();
+  return host.objects.BOTS.getByName(BOT_ID).fetch(new Request(url, { method: request.method, headers: request.headers, redirect: "manual", ...(body === undefined ? {} : { body }) }));
+}
+
+async function tokensMatch(given: string, expected: string): Promise<boolean> {
+  const digest = async (text: string): Promise<Uint8Array> => new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
+  const [a, b] = await Promise.all([digest(given), digest(expected)]);
+  return a.every((byte, index) => byte === b[index]);
+}
+
 const reads: Record<string, (request: Request, host: ApiHost) => Promise<Response>> = {
   "/memory": (_request, host) => memoryListing(host),
   "/memory/file": memoryFile,
@@ -74,6 +97,7 @@ async function route(request: Request, host: ApiHost, pathname: string): Promise
     if (request.method !== "GET" && request.method !== "PUT") return json({ error: "Method not allowed" }, 405, { Allow: "GET, PUT" });
     return spaceState(request, host);
   }
+  if (rest === "/mcp" || rest.startsWith("/mcp/")) return mcpRegistry(request, host, rest);
   const read = reads[rest];
   if (read === undefined) return notFound();
   if (request.method !== "GET") return json({ error: "Method not allowed" }, 405, { Allow: "GET" });
