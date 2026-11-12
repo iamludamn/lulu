@@ -31,8 +31,6 @@ struct HomeView: View {
     @State private var reading: ChatRow?
     @State private var readerFrame: ReaderFrame?
     @State private var bottomInset: CGFloat = 0
-    @Namespace private var reader
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var composing: Bool
     @Environment(\.scenePhase) private var phase
 
@@ -53,7 +51,6 @@ struct HomeView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .opacity(veiled ? 0 : 1)
-            .environment(\.longReaderSpace, reader)
             .environment(\.keepTargets, targets)
             .environment(\.topInset, barBottom)
             .environment(\.keepPull) { page, progress in pull = progress > 0 ? (page, progress) : nil }
@@ -68,22 +65,19 @@ struct HomeView: View {
             WindowBottomInsetReader { bottomInset = $0 }
                 .allowsHitTesting(false)
         }
-        // The legacy reader keeps its original canvas; only its backdrop spans the screen.
+        // Preserve the reference reader's original canvas while its backdrop covers the screen.
         .overlay {
             if let reading, let text = reading.body, let readerFrame, readerFrame.id == reading.id {
-                ZStack(alignment: .topLeading) {
-                    Color.black.opacity(0.25)
-                        .contentShape(Rectangle())
-                        .onTapGesture { closeReader() }
-                        .transition(.opacity)
-                    LongReader(id: reading.id, text: text, space: reader,
-                               size: CGSize(width: readerFrame.canvas.width - 20,
-                                            height: (readerFrame.canvas.height - bottomInset) * 2 / 3)) {
-                        closeReader()
+                GeometryReader { proxy in
+                    let offset = proxy.frame(in: .global).origin
+                    LongReader(summary: reading.text, text: text,
+                               origin: readerFrame.origin.offsetBy(dx: -offset.x, dy: -offset.y),
+                               canvas: CGSize(width: readerFrame.canvas.width,
+                                              height: readerFrame.canvas.height - bottomInset)) {
+                        self.reading = nil
+                        self.readerFrame = nil
                     }
-                    .frame(width: readerFrame.canvas.width,
-                           height: readerFrame.canvas.height - bottomInset)
-                    .transition(.opacity)
+                    .id(reading.id)
                 }
                 .ignoresSafeArea()
             }
@@ -109,11 +103,7 @@ struct HomeView: View {
             PanelView(widgets: store.snapshot.panel.list, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onCheck: store.check, onCompose: fadeToChat)
         case .chat:
             ChatView(bot: bot, store: store, api: api, draft: $draft, composing: $composing, onKept: land, bottomInset: bottomInset,
-                     reading: $reading, onReaderFrame: { frame in
-                         withAnimation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.45, dampingFraction: 0.86)) {
-                             readerFrame = frame
-                         }
-                     })
+                     reading: $reading, onReaderFrame: { readerFrame = $0 })
         case .assets:
             AssetsView(items: store.snapshot.assets, botId: bot.id, api: api, onDrop: store.drop, onOrder: store.reorderAssets)
         }
@@ -146,13 +136,6 @@ struct HomeView: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
-    }
-
-    private func closeReader() {
-        withAnimation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.45, dampingFraction: 0.86)) {
-            reading = nil
-            readerFrame = nil
-        }
     }
 
     private func land(_ target: Page) {
@@ -234,12 +217,10 @@ private struct PageSwitcher: View {
 /// Preserve the chat page's original reader canvas while drawing its backdrop outside the pager.
 struct ReaderFrame: Equatable {
     let id: String
+    let origin: CGRect
     let canvas: CGSize
 }
 
-extension EnvironmentValues {
-    @Entry var longReaderSpace: Namespace.ID? = nil
-}
 
 /// Read the container inset from the window so keyboard height is never counted as bottom padding.
 private struct WindowBottomInsetReader: UIViewRepresentable {

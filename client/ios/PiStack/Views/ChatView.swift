@@ -18,7 +18,6 @@ struct ChatView: View {
     @State private var floor: String?
     @State private var position = ScrollPosition()
     @State private var metrics = Metrics()
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.topInset) private var topInset
     @Environment(\.openArtifact) private var openArtifact
 
@@ -46,11 +45,7 @@ struct ChatView: View {
                             .id("earlier")
                     }
                     ForEach(rows[start...]) { row in
-                        MessageRow(row: row, store: store, botId: bot.id, api: api, expanded: row.id == reading?.id, onRead: { id in
-                            withAnimation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.45, dampingFraction: 0.86)) {
-                                reading = rows.first { $0.id == id }
-                            }
-                        }, onOpen: openArtifact, onKept: onKept)
+                        MessageRow(row: row, store: store, botId: bot.id, api: api, expanded: row.id == reading?.id, onRead: { id in reading = rows.first { $0.id == id } }, onOpen: openArtifact, onKept: onKept)
                             .equatable()
                             .padding(.bottom, row.tail ? 12 : 0)
                             .transition(.opacity.animation(.easeOut(duration: 0.2)))
@@ -130,10 +125,13 @@ struct ChatView: View {
         }
         .overlayPreferenceValue(LongBubbleBounds.self) { bounds in
             GeometryReader { proxy in
-                if let row = reading, row.body != nil, bounds[row.id] != nil {
+                if let row = reading, row.body != nil, let anchor = bounds[row.id] {
                     Color.clear
                         .onGeometryChange(for: ReaderFrame.self) { _ in
-                            ReaderFrame(id: row.id, canvas: proxy.size)
+                            let offset = proxy.frame(in: .global).origin
+                            return ReaderFrame(id: row.id,
+                                               origin: proxy[anchor].offsetBy(dx: offset.x, dy: offset.y),
+                                               canvas: proxy.size)
                         } action: { onReaderFrame($0) }
                 }
             }
