@@ -1,3 +1,4 @@
+import { serviceFetch } from "../telemetry/service.js";
 import type { TelemetryContext } from "@earendil-works/pi-telemetry";
 import type { Environment } from "../host/types.js";
 import type { Episode } from "./doc.js";
@@ -30,14 +31,14 @@ const question = {
 const stateOf = (turns: readonly Turn[]): string =>
   turns.map((turn) => `${turn.role}: ${isSensitive(turn.text) ? "[redacted]" : turn.text}`).join("\n");
 
-async function ask(key: string, turns: readonly Turn[]): Promise<RecallDecision> {
+async function ask(telemetry: TelemetryContext, key: string, turns: readonly Turn[]): Promise<RecallDecision> {
   try {
-    const response = await fetch(ENDPOINT, {
+    const response = await serviceFetch(telemetry, "typesafe", "classify", () => fetch(ENDPOINT, {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({ model: MODEL, state: stateOf(turns), questions: { [QUESTION]: question } }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
+    }));
     if (!response.ok) return { inject: true, fallback: "error" };
     const body = (await response.json()) as { answers?: Record<string, { noul?: number }> };
     const probability = body.answers?.[QUESTION]?.noul;
@@ -51,7 +52,7 @@ async function ask(key: string, turns: readonly Turn[]): Promise<RecallDecision>
 export function judgeRecall(env: Environment, telemetry: TelemetryContext, turns: readonly Turn[]): Promise<RecallDecision> {
   const key = env.TYPESAFE_API_KEY;
   return telemetry.startSpan({ name: "memory.recall", attributes: { "lulu.recall.threshold": THRESHOLD, "lulu.recall.configured": Boolean(key) } }, async (span) => {
-    const decision: RecallDecision = key ? await ask(key, turns) : { inject: true, fallback: "unconfigured" };
+    const decision: RecallDecision = key ? await ask(telemetry, key, turns) : { inject: true, fallback: "unconfigured" };
     span.setAttributes({ "lulu.recall.inject": decision.inject, "lulu.recall.probability": decision.probability, "lulu.recall.fallback": decision.fallback ?? "none" });
     return decision;
   });

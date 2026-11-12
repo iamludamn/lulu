@@ -1,3 +1,5 @@
+import type { TelemetryContext } from "@earendil-works/pi-telemetry";
+import { serviceFetch } from "../telemetry/service.js";
 import { AwsClient } from "aws4fetch";
 import type { Environment } from "../host/types.js";
 
@@ -13,7 +15,7 @@ export interface ObjectStore {
 export const artifactConfigured = (env: Environment): boolean =>
   Boolean(env.S3_ENDPOINT && env.S3_BUCKET && env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY);
 
-export function objectStore(env: Environment): ObjectStore | undefined {
+export function objectStore(env: Environment, telemetry: TelemetryContext): ObjectStore | undefined {
   const { S3_ENDPOINT: endpoint, S3_BUCKET: bucket, S3_ACCESS_KEY_ID: accessKeyId, S3_SECRET_ACCESS_KEY: secretAccessKey } = env;
   if (!endpoint || !bucket || !accessKeyId || !secretAccessKey) return undefined;
   const aws = new AwsClient({ accessKeyId, secretAccessKey, service: "s3", region: env.S3_REGION || DEFAULT_REGION });
@@ -26,7 +28,7 @@ export function objectStore(env: Environment): ObjectStore | undefined {
       return { url: signed.url, method, expiresInSeconds: PRESIGN_SECONDS };
     },
     async size(key) {
-      const response = await aws.fetch(urlOf(key), { method: "HEAD" });
+      const response = await serviceFetch(telemetry, "s3", "head", () => aws.fetch(urlOf(key), { method: "HEAD" }));
       if (response.status === 404) return undefined;
       if (!response.ok) throw new Error(`object store head failed (${response.status})`);
       return Number(response.headers.get("content-length") ?? 0);
@@ -34,7 +36,7 @@ export function objectStore(env: Environment): ObjectStore | undefined {
     async remove(keys) {
       await Promise.all(
         keys.map(async (key) => {
-          const response = await aws.fetch(urlOf(key), { method: "DELETE" });
+          const response = await serviceFetch(telemetry, "s3", "delete", () => aws.fetch(urlOf(key), { method: "DELETE" }));
           if (!response.ok && response.status !== 404) throw new Error(`object store delete failed (${response.status})`);
         }),
       );

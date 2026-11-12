@@ -1,3 +1,5 @@
+import { meteredVoiceConnect } from "../voice/usage.js";
+import { recordModelUsage } from "../telemetry/model.js";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai/models";
 import type { ConversationView, Harness } from "@earendil-works/pi-durable";
@@ -71,7 +73,7 @@ export class VoiceSession {
           this.#watchers.set(taskId, [...(this.#watchers.get(taskId) ?? []), done]);
         },
         recent: () => this.#written(),
-        connect: (url, headers, handlers) => host.connect(url, headers, handlers),
+        connect: meteredVoiceConnect((url, headers, handlers) => host.connect(url, headers, handlers), host.telemetry),
       },
       voiceEndpoint(host.env),
       voiceWriter(host.env, { compose: (updates) => this.#compose(updates) }),
@@ -154,11 +156,16 @@ export class VoiceSession {
     await models.getAvailable(model.provider);
     const resolved = models.getModel(model.provider, model.modelId);
     if (resolved === undefined) throw new Error(`model ${model.provider}/${model.modelId} is not available`);
-    const reply = await models.completeSimple(
-      resolved,
-      { systemPrompt: VOICE_WRITER_PROMPT, messages: [{ role: "user", content: JSON.stringify(updates.map((update) => update.text)), timestamp: Date.now() }] },
-      { sessionId: host.id },
-    );
+    const reply = await host.telemetry.startSpan({ name: "chat", attributes: { "lulu.agent": "voice-writer", "gen_ai.operation.name": "chat" } }, async (span) => {
+      const reply = await models.completeSimple(
+        resolved,
+        { systemPrompt: VOICE_WRITER_PROMPT, messages: [{ role: "user", content: JSON.stringify(updates.map((update) => update.text)), timestamp: Date.now() }] },
+        { sessionId: host.id },
+      );
+      recordModelUsage(span, reply);
+      if (reply.stopReason === "error") span.setStatus({ status: "error", error: { name: "Error", message: "voice writer model failed" } });
+      return reply;
+    });
     return reply.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
   }
 

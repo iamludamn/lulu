@@ -1,3 +1,4 @@
+import { serviceUsage } from "../telemetry/service.js";
 import type { CodemodeToolOptions } from "@earendil-works/pi-durable/codemode";
 import type { TSchema } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, section } from "@earendil-works/pi-durable";
@@ -105,7 +106,7 @@ export function mcpToolName(server: string, tool: string): string {
   return "mcp__" + server + "__" + tool;
 }
 
-function toolFor(server: string, client: McpClient, tool: Tool): ToolRegistration {
+function toolFor(server: string, client: McpClient, tool: Tool, host: McpHostServices, external: boolean): ToolRegistration {
   return defineTool({
     name: mcpToolName(server, tool.name),
     callers: ["tools"],
@@ -113,7 +114,15 @@ function toolFor(server: string, client: McpClient, tool: Tool): ToolRegistratio
     description: tool.description?.trim() || tool.title || `MCP tool ${tool.name} from server ${server}`,
     parameters: parameters(tool.inputSchema),
     execute: async (args, _api, context) => {
-      const result = await client.callTool(tool.name, (args ?? {}) as Record<string, unknown>, { signal: context.abortSignal });
+      const call = () => client.callTool(tool.name, (args ?? {}) as Record<string, unknown>, { signal: context.abortSignal });
+      const result = external ? await serviceUsage(host.telemetry, server, tool.name, async (span) => {
+        const result = await call();
+        if (result.isError) {
+          span.setAttributes({ "lulu.service.outcome": "error" });
+          span.setStatus({ status: "error", error: { name: "Error", message: "external MCP tool failed" } });
+        }
+        return result;
+      }) : await call();
       return {
         output: toLlmContent(result),
         ...(result.isError === true ? { isError: true } : {}),
@@ -183,7 +192,7 @@ function mcpHost(sessions: ReadonlyMap<string, McpSession>, host: McpHostService
   for (const [server, session] of sessions) {
     const client = session.client;
     if (client === undefined) continue;
-    for (const tool of session.tools) tools.push(toolFor(server, client, tool));
+    for (const tool of session.tools) tools.push(toolFor(server, client, tool, host, session.config.fetch === undefined));
     if (session.tools.length > 0) listed.set(server, { description: truncate(client.instructions ?? "", MAX_SERVER_DESCRIPTION_CHARS), count: session.tools.length });
   }
   const namespaces = [...listed].map(([server, entry]) => ({
