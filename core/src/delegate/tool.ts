@@ -159,7 +159,7 @@ export const createDelegateTool = (presets: DelegatePresets, sandboxes: SandboxP
   name: "delegate",
   description: [
     "Launch a background child agent to handle a complex, multi-step task autonomously, and get its result back automatically.",
-    "If an ask needs more than a single tool call, call this tool with action=spawn as your first step.",
+    "If a new task needs more than a single tool call, call this tool with action=spawn as your first step.",
     "After spawn, continue other work or end the turn. When the child finishes you are revived automatically with its result.",
     "Each child sees this conversation up to now and works in a sandbox with the file and command tools that are refused for you. Children share one persistent sandbox; closing a child leaves it untouched.",
     "Children cannot message the user: their report comes back to you, and you send any widget or asset card it carries with send_to_user.",
