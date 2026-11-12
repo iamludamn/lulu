@@ -39,8 +39,8 @@ struct HomeView: View {
     }
 
     var body: some View {
-        // Keep this container in the safe area so the floating controls avoid the status bar.
         ZStack {
+            Wallpaper()
             TabView(selection: $page) {
                 ForEach(Page.allCases) { item in
                     content(item).tag(item)
@@ -52,24 +52,24 @@ struct HomeView: View {
             .environment(\.topInset, barBottom)
             .environment(\.keepPull) { page, progress in pull = progress > 0 ? (page, progress) : nil }
             .ignoresSafeArea(.container, edges: .top)
-        }
-        .background { Wallpaper() }
-        // Only the controls draw glass; a safe-area bar adds a full-width scroll edge effect.
-        .overlay(alignment: .top) {
-            topBar.onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { barBottom = $0 }
+            .safeAreaBar(edge: .top, spacing: 0) {
+                topBar.onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { barBottom = $0 }
+            }
+            // Only the controls draw glass; suppress the bar's full-width scroll edge layer.
+            .scrollEdgeEffectHidden(true, for: [.top, .bottom])
         }
         // Present above the pager and floating controls so dimming reaches every screen edge.
         .overlay {
-            GeometryReader { proxy in
-                if let reading, let text = reading.row.body {
+            if let reading, let text = reading.row.body {
+                GeometryReader { proxy in
                     let offset = proxy.frame(in: .global).origin
                     LongReader(summary: reading.row.text, text: text,
                                origin: reading.origin.offsetBy(dx: -offset.x, dy: -offset.y),
                                canvas: proxy.size) { self.reading = nil }
                         .id(reading.row.id)
                 }
+                .ignoresSafeArea()
             }
-            .ignoresSafeArea()
         }
         .artifactViewer(botId: bot.id, api: api)
         .sheet(isPresented: $inspector) { InspectorView(store: store, botId: bot.id, api: api) }
