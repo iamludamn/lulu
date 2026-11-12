@@ -1,0 +1,630 @@
+{
+  "uid": "lulu-services",
+  "title": "Lulu third-party usage and cost coverage",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Coverage and billing gaps",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 11
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "| Service | Observed usage | Cost / remaining balance |\n| --- | --- | --- |\n| Chat + memory + voice writer models | Provider-reported tokens, including cache | Pi pricing **estimate**, not invoice; zero means free **or missing pricing** |\n| Remote MCP tools | Tool attempts and outcomes through Lulu MCP | Tool responses are not assumed to carry billing units; see account collection below |\n| Typesafe | HTTP classification attempts and outcomes | **Unavailable**: provider billing units and balance |\n| E2B / configured compatible backends | Lifecycle SDK operations | **Unavailable**: sandbox lifetime, CPU/RAM usage, billable seconds and balance |\n| Doubao voice | Connections, observed connection seconds, sent input PCM seconds and audio bytes | **Unavailable**: provider token/credit billing and balance |\n| S3-compatible artifacts / R2 | Server operations plus configured shared-bucket requests and storage maxima | **Unavailable**: reconciled R2 bill and Lulu-only allocation. Bandwidth analytics exclude transfers below 100 KiB |\n| Cloudflare | Separate [Cloudflare dashboard](/d/lulu-cloudflare) | **Unavailable**: reconciled bill, shared allowance allocation. Local unattended collection is enabled; check health and freshness below. |\n\n**No combined actual-spend total is available.** Unobserved services are missing, not zero. Worker instrumentation and the matching collector configuration were deployed on November 12, 2026. Panels populate from new traffic; there is no historical backfill.\n\nAccount exporter: Tavily exposes credit usage/limits by key and account. Exa exposes key MTD USD cost and team balance through an enabled Team Management API and separate `EXA_SERVICE_KEY`. Account/team totals may include other workloads. Panels remain **Not observed** until configured and collected; no key or service credential is displayed."
+      }
+    },
+    {
+      "id": 2,
+      "title": "External operation attempts by provider and outcome",
+      "type": "timeseries",
+      "description": "SDK operations / MCP tool calls, not billable credits or SDK retry counts. Errors can still consume provider usage.",
+      "gridPos": {
+        "x": 0,
+        "y": 11,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (lulu_service_provider, lulu_service_operation, lulu_service_outcome) (sum_over_time(lulu_service_requests_total[$__interval]))",
+          "legendFormat": "{{lulu_service_provider}} {{lulu_service_operation}} {{lulu_service_outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Model estimated cost (USD)",
+      "type": "timeseries",
+      "description": "Includes voice writer after rollout. Estimates only; never add run costs.",
+      "gridPos": {
+        "x": 12,
+        "y": 11,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (gen_ai_provider_name, gen_ai_request_model) (sum_over_time(lulu_chat_cost_total[$__interval]))",
+          "legendFormat": "{{gen_ai_provider_name}} {{gen_ai_request_model}} {{lulu_usage_cost_status}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Model cost coverage: estimated vs unpriced/free",
+      "type": "table",
+      "description": "Calls with zero pricing remain ambiguous; an estimated value does not establish billed cost.",
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (gen_ai_provider_name, gen_ai_request_model, lulu_usage_cost_status) (sum_over_time(lulu_chat_cost_observations_total[$__range]))",
+          "legendFormat": "{{gen_ai_provider_name}} {{gen_ai_request_model}} {{lulu_usage_cost_status}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "External attempts in selected range",
+      "type": "table",
+      "description": "",
+      "gridPos": {
+        "x": 12,
+        "y": 19,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (lulu_service_provider, lulu_service_operation, lulu_service_outcome) (sum_over_time(lulu_service_requests_total[$__range]))",
+          "legendFormat": "{{lulu_service_provider}} {{lulu_service_operation}} {{lulu_service_outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Doubao input audio seconds",
+      "type": "timeseries",
+      "description": "PCM sent to upstream at 16kHz, signed 16-bit mono. Not recognized speech or billed duration.",
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (lulu_service_provider) (sum_over_time(lulu_service_input_audio_seconds_total[$__interval]))",
+          "legendFormat": "{{lulu_service_provider}} {{lulu_service_operation}} {{lulu_service_outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Doubao observed connection seconds",
+      "type": "timeseries",
+      "description": "Flushed on traffic after 30 seconds and on close; abrupt process loss can omit the last segment. Not billed duration.",
+      "gridPos": {
+        "x": 12,
+        "y": 27,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (lulu_service_provider) (sum_over_time(lulu_service_connection_seconds_total[$__interval]))",
+          "legendFormat": "{{lulu_service_provider}} {{lulu_service_operation}} {{lulu_service_outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Observed upload bytes",
+      "type": "timeseries",
+      "description": "Doubao input audio and successful server S3 PUT payloads only; excludes direct signed-URL transfers.",
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (lulu_service_provider, lulu_service_operation) (sum_over_time(lulu_service_upload_bytes_total[$__interval]))",
+          "legendFormat": "{{lulu_service_provider}} {{lulu_service_operation}} {{lulu_service_outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Received voice audio bytes",
+      "type": "timeseries",
+      "description": "Counts all upstream audio deltas, including discarded playback; not billed output tokens.",
+      "gridPos": {
+        "x": 12,
+        "y": 35,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (lulu_service_provider) (sum_over_time(lulu_service_download_bytes_total[$__interval]))",
+          "legendFormat": "{{lulu_service_provider}} {{lulu_service_operation}} {{lulu_service_outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Cloudflare collection availability",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 43,
+        "w": 24,
+        "h": 4
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Cloudflare and account collectors run locally every fifteen minutes using a read-only 1Password service account and a systemd encrypted credential. A stale/missing value is **not zero consumption**. Health panels cover the last 45 minutes; missing health requires investigation."
+      }
+    },
+    {
+      "id": 11,
+      "title": "Cloudflare exporter health (last 45 minutes)",
+      "type": "stat",
+      "description": "Missing means no recent health observation; see Cloudflare dashboard for dataset health and freshness.",
+      "gridPos": {
+        "x": 0,
+        "y": 47,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "last_over_time(lulu_cf_exporter_success[45m])",
+          "legendFormat": "{{gen_ai_provider_name}} {{gen_ai_request_model}} {{lulu_usage_cost_status}}"
+        }
+      ]
+    },
+    {
+      "id": 100,
+      "title": "Account collection health",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 55,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "last_over_time(lulu_account_collection_success[45m])",
+          "instant": true,
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 101,
+      "title": "Tavily credit observations",
+      "type": "table",
+      "gridPos": {
+        "x": 12,
+        "y": 55,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "last_over_time(lulu_account_tavily_credits[45m]) and on (account_provider, account_dataset, account_scope, account_field) (last_over_time(lulu_account_tavily_field_present[45m]) == 1) and on (account_provider, account_dataset) (last_over_time(lulu_account_collection_success[45m]) == 1) and on () (last_over_time(lulu_account_exporter_success[45m]) == 1)",
+          "instant": true,
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "title": "Exa key cost: calendar month to date",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 63,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "last_over_time(lulu_account_exa_cost_usd[45m]) and on (account_provider, account_dataset) (last_over_time(lulu_account_collection_success[45m]) == 1) and on () (last_over_time(lulu_account_exporter_success[45m]) == 1)",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "description": "Current configured API key only. Key rotation does not merge historical costs from previous keys. Missing billing access is Not observed."
+    },
+    {
+      "id": 103,
+      "title": "Exa team credit balance (shared)",
+      "type": "table",
+      "gridPos": {
+        "x": 12,
+        "y": 63,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "last_over_time(lulu_account_exa_balance_usd[45m]) and on (account_provider, account_dataset) (last_over_time(lulu_account_collection_success[45m]) == 1) and on () (last_over_time(lulu_account_exporter_success[45m]) == 1)",
+          "instant": true,
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 104,
+      "title": "Account observation age (seconds)",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 71,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - last_over_time(lulu_account_data_timestamp[45m])",
+          "instant": true,
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 105,
+      "title": "Account API credentials configured",
+      "type": "table",
+      "gridPos": {
+        "x": 12,
+        "y": 71,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "last_over_time(lulu_account_configured[45m])",
+          "instant": true,
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 106,
+      "title": "R2 shared-bucket requests (rolling 24h)",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 79,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "last_over_time(lulu_account_r2_requests{account_dataset=\"operations\"}[45m]) and on (account_provider, account_dataset) (last_over_time(lulu_account_collection_success[45m]) == 1) and on (account_provider, account_dataset) (last_over_time(lulu_account_r2_data_present[45m]) == 1) and on (account_provider, account_dataset) ((time() - last_over_time(lulu_account_data_timestamp[45m])) < 1800) and on () (last_over_time(lulu_account_exporter_success[45m]) == 1)",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "description": "Configured shared S3 bucket verified against R2. Aggregate observations include other workloads using this bucket. Storage is a window maximum, not GB-month. Bandwidth excludes transfers below 100 KiB. Missing rows remain Not observed; no retail-price bill is inferred."
+    },
+    {
+      "id": 107,
+      "title": "R2 shared-bucket storage maxima (rolling 24h)",
+      "type": "table",
+      "gridPos": {
+        "x": 12,
+        "y": 79,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "last_over_time(lulu_account_r2_payload_max_bytes{account_dataset=\"storage\"}[45m]) and on (account_provider, account_dataset) (last_over_time(lulu_account_collection_success[45m]) == 1) and on (account_provider, account_dataset) (last_over_time(lulu_account_r2_data_present[45m]) == 1) and on (account_provider, account_dataset) ((time() - last_over_time(lulu_account_data_timestamp[45m])) < 1800) and on () (last_over_time(lulu_account_exporter_success[45m]) == 1)",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "B",
+          "expr": "last_over_time(lulu_account_r2_metadata_max_bytes{account_dataset=\"storage\"}[45m]) and on (account_provider, account_dataset) (last_over_time(lulu_account_collection_success[45m]) == 1) and on (account_provider, account_dataset) (last_over_time(lulu_account_r2_data_present[45m]) == 1) and on (account_provider, account_dataset) ((time() - last_over_time(lulu_account_data_timestamp[45m])) < 1800) and on () (last_over_time(lulu_account_exporter_success[45m]) == 1)",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "description": "Configured shared S3 bucket verified against R2. Aggregate observations include other workloads using this bucket. Storage is a window maximum, not GB-month. Bandwidth excludes transfers below 100 KiB. Missing rows remain Not observed; no retail-price bill is inferred."
+    },
+    {
+      "id": 108,
+      "title": "R2 shared-bucket object maximum (rolling 24h)",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 87,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "last_over_time(lulu_account_r2_objects_max{account_dataset=\"storage\"}[45m]) and on (account_provider, account_dataset) (last_over_time(lulu_account_collection_success[45m]) == 1) and on (account_provider, account_dataset) (last_over_time(lulu_account_r2_data_present[45m]) == 1) and on (account_provider, account_dataset) ((time() - last_over_time(lulu_account_data_timestamp[45m])) < 1800) and on () (last_over_time(lulu_account_exporter_success[45m]) == 1)",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "description": "Configured shared S3 bucket verified against R2. Aggregate observations include other workloads using this bucket. Storage is a window maximum, not GB-month. Bandwidth excludes transfers below 100 KiB. Missing rows remain Not observed; no retail-price bill is inferred."
+    },
+    {
+      "id": 109,
+      "title": "R2 shared-bucket recorded bandwidth (rolling 24h)",
+      "type": "table",
+      "gridPos": {
+        "x": 12,
+        "y": 87,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "last_over_time(lulu_account_r2_upload_bytes{account_dataset=\"bandwidth\"}[45m]) and on (account_provider, account_dataset) (last_over_time(lulu_account_collection_success[45m]) == 1) and on (account_provider, account_dataset) (last_over_time(lulu_account_r2_data_present[45m]) == 1) and on (account_provider, account_dataset) ((time() - last_over_time(lulu_account_data_timestamp[45m])) < 1800) and on () (last_over_time(lulu_account_exporter_success[45m]) == 1)",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "B",
+          "expr": "last_over_time(lulu_account_r2_download_bytes{account_dataset=\"bandwidth\"}[45m]) and on (account_provider, account_dataset) (last_over_time(lulu_account_collection_success[45m]) == 1) and on (account_provider, account_dataset) (last_over_time(lulu_account_r2_data_present[45m]) == 1) and on (account_provider, account_dataset) ((time() - last_over_time(lulu_account_data_timestamp[45m])) < 1800) and on () (last_over_time(lulu_account_exporter_success[45m]) == 1)",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "description": "Configured shared S3 bucket verified against R2. Aggregate observations include other workloads using this bucket. Storage is a window maximum, not GB-month. Bandwidth excludes transfers below 100 KiB. Missing rows remain Not observed; no retail-price bill is inferred."
+    }
+  ]
+}

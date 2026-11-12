@@ -1,3 +1,4 @@
+import { serviceFetch } from "../telemetry/service.js";
 import type { DurableHost } from "../host/types.js";
 import { objectStore, type ObjectStore } from "./s3.js";
 import { handleMcp } from "./server.js";
@@ -79,7 +80,7 @@ export class ArtifactObject {
 
   constructor(host: DurableHost) {
     this.#host = host;
-    this.#store = objectStore(host.env);
+    this.#store = objectStore(host.env, host.telemetry);
   }
 
   fetch(request: Request): Promise<Response> {
@@ -136,7 +137,8 @@ export class ArtifactObject {
     const clean = validName(name);
     const entry = await this.#version(clean, version ?? (await this.#liveHead(clean)).latest);
     if (entry.size > MAX_INLINE_BYTES) throw new Error(`artifact is ${entry.size} bytes; use download_url for files over ${MAX_INLINE_BYTES} bytes`);
-    const response = await fetch((await this.#bucket().presign("GET", entry.key)).url);
+    const url = (await this.#bucket().presign("GET", entry.key)).url;
+    const response = await serviceFetch(this.#host.telemetry, "s3", "get", () => fetch(url));
     if (!response.ok) throw new Error(`download failed (${response.status})`);
     return { ...reference(clean, entry), notice: UNTRUSTED, text: await response.text() };
   }
@@ -165,7 +167,8 @@ export class ArtifactObject {
       if (bytes.byteLength > MAX_INLINE_BYTES) throw new Error(`content is over ${MAX_INLINE_BYTES} bytes; use upload_url`);
       const upload = await this.#reserve(validName(name), bytes.byteLength, contentType, requestId);
       if (!upload.committed) {
-        const put = await fetch((await this.#bucket().presign("PUT", upload.key)).url, { method: "PUT", headers: { "Content-Type": contentType }, body: bytes });
+        const url = (await this.#bucket().presign("PUT", upload.key)).url;
+        const put = await serviceFetch(this.#host.telemetry, "s3", "put", () => fetch(url, { method: "PUT", headers: { "Content-Type": contentType }, body: bytes }), bytes.byteLength);
         if (!put.ok) throw new Error(`upload failed (${put.status})`);
       }
       return this.#commit(upload.uploadId);

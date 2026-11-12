@@ -4,8 +4,11 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+RuntimeDirectory=lulu-cloudflare
+RuntimeDirectoryMode=0700
+Environment=TMPDIR=%t/lulu-cloudflare
 WorkingDirectory=%h/projects/lulu
-ExecStart=/usr/bin/mise exec -- node ops/observability/cloudflare.mjs --remote
-ExecStopPost=/bin/sh -c 'if [ "$EXIT_STATUS" = "9" ]; then /usr/bin/systemctl --user stop lulu-cloudflare.timer; fi'
+LoadCredentialEncrypted=op-token:%h/.config/lulu-observability/op-token.cred
+ExecStart=/usr/bin/mise exec -- /bin/bash ops/observability/collect.sh cloudflare
 TimeoutStartSec=150
 NoNewPrivileges=true

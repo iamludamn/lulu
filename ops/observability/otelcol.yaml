@@ -48,6 +48,62 @@ connectors:
 
   signal_to_metrics:
     spans:
+      - name: lulu.service.requests
+        description: Observed external SDK operations or MCP tool attempts, not billing units
+        attributes: &service_dims
+          - key: lulu.service.provider
+          - key: lulu.service.operation
+          - key: lulu.service.cost_status
+          - key: lulu.service.outcome
+            optional: true
+        conditions:
+          - span.name == "service.request"
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.service.requests"]
+      - name: lulu.service.upload_bytes
+        description: Observed upload payload bytes
+        attributes: *service_dims
+        conditions:
+          - span.attributes["lulu.service.upload_bytes"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.service.upload_bytes"]
+      - name: lulu.service.download_bytes
+        description: Observed received audio payload bytes
+        attributes: *service_dims
+        conditions:
+          - span.attributes["lulu.service.download_bytes"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.service.download_bytes"]
+      - name: lulu.service.input_audio_seconds
+        description: Sent PCM input duration, not billed duration
+        attributes: *service_dims
+        conditions:
+          - span.attributes["lulu.service.input_audio_seconds"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.service.input_audio_seconds"]
+      - name: lulu.service.connection_seconds
+        description: Observed voice connection time, not billed duration
+        attributes: *service_dims
+        conditions:
+          - span.attributes["lulu.service.connection_seconds"] != nil
+        sum:
+          monotonic: true
+          value: span.attributes["lulu.service.connection_seconds"]
+      - name: lulu.chat.cost_observations
+        description: Model calls by estimated or unpriced/free cost coverage
+        attributes:
+          - key: gen_ai.provider.name
+          - key: gen_ai.request.model
+          - key: lulu.usage.cost_status
+        conditions:
+          - span.attributes["lulu.usage.cost_status"] != nil
+        sum:
+          monotonic: true
+          value: "1"
       - name: lulu.memory.request_attempts
         description: Model request attempts by actual replayed memory section coverage
         attributes:

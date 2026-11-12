@@ -1,3 +1,4 @@
+import { serviceUsage } from "../../telemetry/service.js";
 import type { Context } from "@earendil-works/chord";
 import type { TelemetryContext } from "@earendil-works/pi-telemetry";
 import { NotFoundError, Sandbox } from "e2b";
@@ -32,6 +33,7 @@ export function createE2bProvider(env: Environment, scope: string, telemetry: Te
   const sandboxUrl = config.sandboxUrl ?? env.E2B_SANDBOX_URL;
   const profile = config.template ?? env.E2B_TEMPLATE ?? "default";
   const options = (context: Context) => ({ apiKey, domain, apiUrl, ...(sandboxUrl ? { sandboxUrl } : {}), signal: context.abortSignal, requestTimeoutMs: 30_000 });
+  const measured = <T>(operation: string, run: () => Promise<T>) => serviceUsage(telemetry, backend, operation, run);
   return {
     backend,
     profile,
@@ -40,12 +42,12 @@ export function createE2bProvider(env: Environment, scope: string, telemetry: Te
         let sandbox;
         if (request.ref) {
           const id = idOf(request.ref);
-          sandbox = await existing(() => Sandbox.connect(id, { ...options(context), timeoutMs: SANDBOX_LEASE_MS }));
+          sandbox = await existing(() => measured("connect", () => Sandbox.connect(id, { ...options(context), timeoutMs: SANDBOX_LEASE_MS })));
         } else {
           const createOptions = { ...options(context), idempotencyKey: await idempotencyKeyOf(scope, `${backend}:${request.requestId}`), timeoutMs: SANDBOX_LEASE_MS, metadata: { app: "pistack", scope, workspace: request.key, backend }, lifecycle: { onTimeout: "pause" as const } };
-          sandbox = request.profile === "default" ? await Sandbox.create(createOptions) : await Sandbox.create(request.profile, createOptions);
+          sandbox = request.profile === "default" ? await measured("create", () => Sandbox.create(createOptions)) : await measured("create", () => Sandbox.create(request.profile, createOptions));
           const id = sandbox.sandboxId;
-          sandbox = await existing(() => Sandbox.connect(id, { ...options(context), timeoutMs: SANDBOX_LEASE_MS }));
+          sandbox = await existing(() => measured("connect", () => Sandbox.connect(id, { ...options(context), timeoutMs: SANDBOX_LEASE_MS })));
         }
         const cwd = request.cwd || (await sandbox.commands.run("pwd", { signal: context.abortSignal })).stdout.trim();
         const ref: SandboxRef = { backend, resource: { id: sandbox.sandboxId } };
@@ -53,14 +55,14 @@ export function createE2bProvider(env: Environment, scope: string, telemetry: Te
         return { ref, cwd, env: new E2bExecutionEnv(sandbox, cwd, telemetry, scope, backend) };
       });
     },
-    renew: (ref, context) => existing(() => Sandbox.setTimeout(idOf(ref), SANDBOX_LEASE_MS, options(context))),
+    renew: (ref, context) => existing(() => measured("renew", () => Sandbox.setTimeout(idOf(ref), SANDBOX_LEASE_MS, options(context)))),
     async idle(ref, _requestId, context) {
-      await existing(() => Sandbox.pause(idOf(ref), options(context)));
+      await existing(() => measured("pause", () => Sandbox.pause(idOf(ref), options(context))));
       return ref;
     },
     async destroy(ref, _requestId, context) {
       try {
-        await Sandbox.kill(idOf(ref), options(context));
+        await measured("kill", () => Sandbox.kill(idOf(ref), options(context)));
       } catch (error) {
         if (!(error instanceof NotFoundError)) throw error;
       }
