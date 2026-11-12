@@ -1,0 +1,33 @@
+name: Bug report
+description: Report a reproducible problem in lulu.
+body:
+  - type: markdown
+    attributes:
+      value: "For vulnerabilities, follow [SECURITY.md](https://github.com/iamludamn/lulu/blob/main/SECURITY.md). Never include credentials, conversation content, or unredacted logs."
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Commit, client, OS, runtime versions, and relevant integrations (without secrets).
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Use synthetic data and include the smallest reproducible example.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include sanitized error messages or screenshots if useful.
+    validations:
+      required: true

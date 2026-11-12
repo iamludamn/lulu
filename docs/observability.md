@@ -1,22 +1,30 @@
 # Observability
 
-Telemetry is self-hosted on the omarchy machine. Honeycomb is no longer used.
+Telemetry is optional and can be self-hosted. The Worker exports traces; the collector derives metrics. Without an OTLP endpoint, export is disabled.
 
 ## Data flow
 
 1. The worker exports OTLP/HTTP JSON traces only (`core/src/telemetry/otlp.ts`). It emits no metrics.
 2. Worker configuration:
-   - `OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.ludamn.xyz`, a var in `apps/cf/wrangler.jsonc`.
-   - `OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <token>`, a secret that must be in the secrets file on deploy.
-3. A Cloudflare Tunnel named `lulu-otel` routes `otel.ludamn.xyz` to the collector on omarchy.
+   - `OTEL_EXPORTER_OTLP_ENDPOINT` points to your authenticated OTLP/HTTP collector base URL. Replace or remove the maintainer endpoint in your local Wrangler config.
+   - `OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <token>`, a Worker secret injected through your secret manager.
+3. An authenticated HTTPS endpoint (for example, through Cloudflare Tunnel) routes requests to your collector.
 4. The OpenTelemetry Collector (contrib) rejects requests without the bearer token, derives metrics from spans with the `span_metrics` and `signal_to_metrics` connectors, and forwards everything to `grafana/otel-lgtm` (Grafana, Tempo, Prometheus, Loki).
 
-The stack lives in `~/observability/` on omarchy (`docker-compose.yml`, `otelcol.yaml`, `.env`, `grafana/`). The collector configuration is versioned at `ops/observability/otelcol.yaml`. Copy it to `~/observability/otelcol.yaml` and recreate the collector after reviewing local changes. Copy `ops/observability/lulu-cost.json` to `~/observability/grafana/dashboards/`; the existing file provider loads it automatically. Keep the compose file and secrets on the host.
+## Operating your own stack
+
+The repository includes `ops/observability/otelcol.yaml` and the `lulu-cost.json` Grafana dashboard. It does not include a complete Docker Compose stack, Grafana provisioning, tunnel configuration, or alert rules. Supply those in your infrastructure environment.
+
+The collector requires `OTLP_TOKEN` from its process environment and resolves `http://lgtm:4318` for its downstream OTLP receiver. Adjust the exporter for your network. Configure the Worker header with the matching bearer token. Keep Grafana and storage backends private; do not publish collector port 4318 directly without TLS and authentication.
+
+The configuration uses the contrib collector's bearer-token extension, `span_metrics`, and `signal_to_metrics` connectors. Choose versions that support this configuration and validate it before applying it. Copy the dashboard into your Grafana file-provider directory or import it, then select the appropriate Prometheus data source. Host credentials and deployment files belong in your infrastructure secret management, not this repository.
+
+Treat traces and correlated identifiers as sensitive. Review attributes, access policies, and retention before enabling export. The repository configuration does not enforce backend retention or provide a redaction guarantee.
 
 ## Reading the data
 
-- Humans: the Grafana dashboard `lulu-overview`.
-- Agents: the `grafana` MCP server (read-only service account). Use TraceQL for traces and PromQL for metrics.
+- Humans: import the versioned `lulu-cost` Grafana dashboard; additional dashboards depend on your host setup.
+- Operators and agents: use TraceQL for traces and PromQL for metrics. If exposing Grafana through MCP, provision a read-only service account yourself.
 - Metric names:
   - `lulu_span_calls_total`
   - `lulu_span_duration_milliseconds_{bucket,count,sum}`

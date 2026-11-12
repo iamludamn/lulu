@@ -12,3 +12,10 @@ client/ios/.build/
 client/ios/build/
 .secrets.json
 AGENTS.md
+
+.env.*
+!.env.index
+.dev.vars.*
+apps/cf/wrangler.local.jsonc
+*.pem
+*.key
