@@ -7,7 +7,8 @@ struct MessageRow: View, Equatable {
     let botId: String
     let api: Api
     let expanded: Bool
-    let onRead: (String) -> Void
+    let onRead: (String, CGRect) -> Void
+    @State private var bubbleFrame: CGRect = .zero
     let onOpen: (ArtifactAddress, String) -> Void
     let onKept: (Page) -> Void
     @Environment(\.openSpace) private var openSpace
@@ -76,10 +77,10 @@ struct MessageRow: View, Equatable {
                 content.background { shape.fill(.clear).glassEffect(.clear, in: shape) }
             } else if row.body != nil {
                 content.frosted(20)
-                    .longReplyHighlight(radius: 20, key: "pistack.longReply.read.\(api.base.absoluteString).\(botId).\(row.id)") { onRead(row.id) }
+                    .longReplyHighlight(radius: 20, key: "pistack.longReply.read.\(api.base.absoluteString).\(botId).\(row.id)") { onRead(row.id, bubbleFrame) }
                     .contentShape(shape)
                     .opacity(expanded ? 0 : 1)
-                    .anchorPreference(key: LongBubbleBounds.self, value: .bounds) { [row.id: $0] }
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { bubbleFrame = $0 }
             } else {
                 content.frosted(20)
             }

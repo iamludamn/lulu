@@ -8,13 +8,14 @@ struct ChatView: View {
     @Binding var draft: String
     var composing: FocusState<Bool>.Binding
     let onKept: (Page) -> Void
+    let readingId: String?
+    let onRead: (ChatRow, CGRect) -> Void
     @State private var pinned = true
     @State private var dragging = false
     @State private var sent = 0
     @State private var floor: String?
     @State private var position = ScrollPosition()
     @State private var metrics = Metrics()
-    @State private var reading: ChatRow?
     @Environment(\.topInset) private var topInset
     @Environment(\.openArtifact) private var openArtifact
 
@@ -42,7 +43,9 @@ struct ChatView: View {
                             .id("earlier")
                     }
                     ForEach(rows[start...]) { row in
-                        MessageRow(row: row, store: store, botId: bot.id, api: api, expanded: row.id == reading?.id, onRead: { id in reading = rows.first { $0.id == id } }, onOpen: openArtifact, onKept: onKept)
+                        MessageRow(row: row, store: store, botId: bot.id, api: api, expanded: row.id == readingId, onRead: { id, frame in
+                            if let row = rows.first(where: { $0.id == id }) { onRead(row, frame) }
+                        }, onOpen: openArtifact, onKept: onKept)
                             .equatable()
                             .padding(.bottom, row.tail ? 12 : 0)
                             .transition(.opacity.animation(.easeOut(duration: 0.2)))
@@ -119,17 +122,8 @@ struct ChatView: View {
                 Composer(draft: $draft, busy: busy, placeholder: placeholder, focused: composing, onSend: send)
             }
         }
-        .overlayPreferenceValue(LongBubbleBounds.self) { bounds in
-            GeometryReader { proxy in
-                if let row = reading, let text = row.body, let anchor = bounds[row.id] {
-                    LongReader(summary: row.text, text: text, origin: proxy[anchor], canvas: proxy.size) { reading = nil }
-                        .id(row.id)
-                }
-            }
-            .ignoresSafeArea()
-        }
         .sensoryFeedback(.impact(weight: .light), trigger: sent)
-        .sensoryFeedback(.impact(weight: .light), trigger: reading?.id) { _, new in new != nil }
+        .sensoryFeedback(.impact(weight: .light), trigger: readingId) { _, new in new != nil }
         .sensoryFeedback(.success, trigger: busy) { old, new in old && !new }
     }
 

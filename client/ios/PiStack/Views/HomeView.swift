@@ -27,6 +27,7 @@ struct HomeView: View {
     @State private var pull: (page: Page, progress: CGFloat)?
     @State private var barBottom: CGFloat = 0
     @State private var veiled = false
+    @State private var reading: ReaderOpening?
     @FocusState private var composing: Bool
     @Environment(\.scenePhase) private var phase
 
@@ -57,6 +58,19 @@ struct HomeView: View {
         .overlay(alignment: .top) {
             topBar.onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { barBottom = $0 }
         }
+        // Present above the pager and floating controls so dimming reaches every screen edge.
+        .overlay {
+            GeometryReader { proxy in
+                if let reading, let text = reading.row.body {
+                    let offset = proxy.frame(in: .global).origin
+                    LongReader(summary: reading.row.text, text: text,
+                               origin: reading.origin.offsetBy(dx: -offset.x, dy: -offset.y),
+                               canvas: proxy.size) { self.reading = nil }
+                        .id(reading.row.id)
+                }
+            }
+            .ignoresSafeArea()
+        }
         .artifactViewer(botId: bot.id, api: api)
         .sheet(isPresented: $inspector) { InspectorView(store: store, botId: bot.id, api: api) }
         .sensoryFeedback(.selection, trigger: page)
@@ -77,7 +91,10 @@ struct HomeView: View {
         case .panel:
             PanelView(widgets: store.snapshot.panel.list, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onCheck: store.check, onCompose: fadeToChat)
         case .chat:
-            ChatView(bot: bot, store: store, api: api, draft: $draft, composing: $composing, onKept: land)
+            ChatView(bot: bot, store: store, api: api, draft: $draft, composing: $composing, onKept: land,
+                     readingId: reading?.row.id, onRead: { row, origin in
+                         reading = ReaderOpening(row: row, origin: origin)
+                     })
         case .assets:
             AssetsView(items: store.snapshot.assets, botId: bot.id, api: api, onDrop: store.drop, onOrder: store.reorderAssets)
         }
@@ -186,4 +203,10 @@ private struct PageSwitcher: View {
         .background { Capsule().fill(.clear).glassEffect(.regular, in: .capsule) }
         .animation(.snappy(duration: 0.3), value: page)
     }
+}
+
+private struct ReaderOpening {
+    let row: ChatRow
+    /// Capture before opening, in a coordinate space shared by the page and its presentation host.
+    let origin: CGRect
 }
