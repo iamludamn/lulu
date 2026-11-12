@@ -65,7 +65,15 @@ public final class BotStore {
     public func submit(_ content: String) { dispatch(Command(.submit(content))) }
     public func abort() { dispatch(Command(.abort)) }
     public func selectModel(_ model: ModelRef) { dispatch(Command(.selectModel(model))) }
-    public func keep(_ origin: String) { dispatch(Command(.keep(origin: origin))) }
+    public func keep(_ origin: String) {
+        let matching = snapshot.requests.filter { request in
+            if case .keep(let value) = request.command.kind { return value == origin }
+            return false
+        }
+        guard !matching.contains(where: { $0.state == .sending }) else { return }
+        snapshot.requests.removeAll { request in matching.contains { $0.id == request.id } }
+        dispatch(Command(.keep(origin: origin)))
+    }
     public func drop(_ origin: String) { dispatch(Command(.drop(origin: origin))) }
 
     public func reorderAssets(_ ids: [String]) {

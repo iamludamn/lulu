@@ -56,3 +56,15 @@ export function spokenText(sent: readonly Sent[]): string {
     .filter((text) => text !== "")
     .join("\n\n");
 }
+
+// An unfinished or failed send is not an actionable offer.
+export function deliveredSentIn(entries: readonly { id?: unknown; kind?: unknown; model?: unknown }[]): Sent[] {
+  const delivered = new Set<string>();
+  for (const entry of entries) {
+    if (entry.kind !== "pi.tool-result" || !Array.isArray(entry.model)) continue;
+    for (const message of entry.model as Result[]) {
+      if (message.role === "toolResult" && message.isError !== true && typeof message.toolCallId === "string") delivered.add(message.toolCallId);
+    }
+  }
+  return sentIn(entries).filter((sent) => delivered.has(sent.id));
+}

@@ -21,5 +21,6 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run lint
+      - run: npm test
       - run: npm run build
       - run: npm run build:cross --prefix client/desktop

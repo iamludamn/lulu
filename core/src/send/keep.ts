@@ -1,15 +1,12 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Harness } from "@earendil-works/pi-durable";
 import { PanelDoc } from "../panel/doc.js";
-import type { Widget } from "../protocol/panel.js";
 import { artifactName } from "../protocol/send.js";
 import { AssetsDoc } from "./doc.js";
-import { sentOf } from "./sent.js";
+import { deliveredSentIn } from "./sent.js";
+import { acceptSpace, rememberSpace } from "./space-offers.js";
 
 const MAX_PANEL_WIDGETS = 24;
-
-// Cards offered before the rename carry body kind "web"; kept widgets must store "space".
-const current = (panel: Widget): Widget => ((panel.body.kind as string) === "web" ? { ...panel, body: { ...panel.body, kind: "space" } as Widget["body"] } : panel);
 
 type Entries = readonly { id?: unknown; kind?: unknown; model?: unknown }[];
 
@@ -31,13 +28,17 @@ export async function keepWidget(harness: Harness, entries: Entries, origin: str
       const panel = await tx.doc(PanelDoc);
       const dropped = panel.order.filter((id) => panel.widgets[id]?.origin === origin);
       panel.order = panel.order.filter((id) => !dropped.includes(id));
-      for (const id of dropped) delete panel.widgets[id];
+      for (const id of dropped) {
+        rememberSpace(panel, panel.widgets[id]);
+        delete panel.widgets[id];
+      }
       const assets = await tx.doc(AssetsDoc);
       assets.items = assets.items.filter((item) => item.origin !== origin);
     }, BACKGROUND_CONTEXT);
     return;
   }
-  const card = sentOf(entries, origin)?.input.widget;
+  const offers = deliveredSentIn(entries);
+  const card = offers.find((offer) => offer.id === origin)?.input.widget;
   if (card === undefined) throw new Error("这张卡片已不在对话里");
   await harness.commit(async (tx) => {
     if (card.kind === "asset") {
@@ -50,10 +51,16 @@ export async function keepWidget(harness: Harness, entries: Entries, origin: str
     }
     const panel = await tx.doc(PanelDoc);
     const id = card.panel.id;
+    const isSpace = ["space", "web"].includes(card.panel.body.kind);
+    if (isSpace) {
+      acceptSpace(panel, card.panel, origin, offers, Date.now());
+    } else if (["space", "web"].includes(panel.widgets[id]?.body.kind ?? "")) {
+      throw new Error("不能将 Space 替换为其他组件，请使用新的 ID");
+    }
     if (!panel.order.includes(id)) {
       if (panel.order.length >= MAX_PANEL_WIDGETS) throw new Error("视图已满，先移除一个组件");
       panel.order.push(id);
     }
-    panel.widgets[id] = current({ ...card.panel, updatedAt: Date.now(), origin });
+    if (!isSpace) panel.widgets[id] = { ...card.panel, updatedAt: Date.now(), origin };
   }, BACKGROUND_CONTEXT);
 }

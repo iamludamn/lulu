@@ -138,13 +138,23 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
     }
 }
 
+public struct SpaceReceipt: Decodable, Equatable, Sendable {
+    public enum Action: String, Decodable, Sendable { case add, update }
+    public let id: String
+    public let version: Int
+    public let action: Action
+}
+
 public struct PanelState: Decodable, Equatable, Sendable {
     public let order: [String]
     public let widgets: [String: PanelWidget]
 
-    public init(order: [String] = [], widgets: [String: PanelWidget] = [:]) {
+    public let spaceReceipts: [String: SpaceReceipt]
+
+    public init(order: [String] = [], widgets: [String: PanelWidget] = [:], spaceReceipts: [String: SpaceReceipt] = [:]) {
         self.order = order
         self.widgets = widgets
+        self.spaceReceipts = spaceReceipts
     }
 
     private struct Lenient: Decodable {
@@ -155,10 +165,11 @@ public struct PanelState: Decodable, Equatable, Sendable {
         }
     }
 
-    private enum Keys: String, CodingKey { case order, widgets }
+    private enum Keys: String, CodingKey { case order, widgets, spaceReceipts }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: Keys.self)
+        spaceReceipts = try container.decodeIfPresent([String: SpaceReceipt].self, forKey: .spaceReceipts) ?? [:]
         order = try container.decode([String].self, forKey: .order)
         widgets = try container.decode([String: Lenient].self, forKey: .widgets).compactMapValues(\.widget)
     }
@@ -168,7 +179,7 @@ public struct PanelState: Decodable, Equatable, Sendable {
     public func checking(_ id: String, item index: Int, done: Bool) -> PanelState {
         var copy = widgets
         copy[id] = widgets[id]?.checking(index, done: done)
-        return PanelState(order: order, widgets: copy)
+        return PanelState(order: order, widgets: copy, spaceReceipts: spaceReceipts)
     }
 }
 

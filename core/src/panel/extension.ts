@@ -1,7 +1,6 @@
 import { defineExtension, section } from "@earendil-works/pi-durable";
 import { PanelDoc } from "./doc.js";
 import { createPanelTool } from "./tool.js";
-import type { ArtifactCheck } from "../send/tool.js";
 
 const PanelSection = section("panel", async (input, context) => {
   const state = await input.read.snapshot(PanelDoc, context);
@@ -12,9 +11,9 @@ const PanelSection = section("panel", async (input, context) => {
   return rows.length === 0 ? undefined : rows.join("\n");
 });
 
-export const createPanelExtension = (exists: ArtifactCheck | undefined) =>
+export const createPanelExtension = () =>
   defineExtension({
     name: "pistack.panel",
-    tools: [createPanelTool(exists)],
+    tools: [createPanelTool()],
     sections: [PanelSection],
   });

@@ -2,10 +2,8 @@ import { defineTool, type ToolExecutionApi, type ToolExecutionResult } from "@ea
 import type { Context } from "@earendil-works/chord";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
-import { WidgetInput, type Widget } from "../protocol/panel.js";
-import { ARTIFACT_REF } from "../protocol/send.js";
-import { spaceRefProblem } from "../artifact/space.js";
-import type { ArtifactCheck } from "../send/tool.js";
+import { WidgetInput } from "../protocol/panel.js";
+import { rememberSpace } from "../send/space-offers.js";
 import { PanelDoc } from "./doc.js";
 
 const PanelParams = Type.Object({
@@ -25,22 +23,7 @@ function fail(text: string): ToolExecutionResult<PanelDetails> {
   return { output: [{ type: "text", text }], details: { action: "error", id: null }, isError: true };
 }
 
-async function spaceProblem(widget: NonNullable<PanelArgs["widget"]>, id: string, exists: ArtifactCheck | undefined): Promise<string | undefined> {
-  if (widget.body.kind !== "space") return undefined;
-  const refused = spaceRefProblem(id, widget.body.src);
-  if (refused !== undefined) return refused;
-  const match = ARTIFACT_REF.exec(widget.body.src);
-  if (match === null || exists === undefined) return undefined;
-  return (await exists(match[1], Number(match[2]))) ? undefined : `${widget.body.src} does not exist. Nothing was changed. Save the page with the artifact tools first and use the ref they return.`;
-}
-
-function kept(widget: NonNullable<PanelArgs["widget"]>, previous: Widget): NonNullable<PanelArgs["widget"]> {
-  const before = previous.body as { refresh?: string };
-  if (widget.body.kind !== "space" || widget.body.refresh !== undefined || before.refresh === undefined) return widget;
-  return { ...widget, body: { ...widget.body, refresh: before.refresh as "manual" | "open" | "daily" } };
-}
-
-async function update(api: ToolExecutionApi<PanelDetails>, args: PanelArgs, context: Context, exists: ArtifactCheck | undefined): Promise<ToolExecutionResult<PanelDetails>> {
+async function update(api: ToolExecutionApi<PanelDetails>, args: PanelArgs, context: Context): Promise<ToolExecutionResult<PanelDetails>> {
   const widget = args.widget;
   if (!widget) return fail("update requires widget");
   const id = widget.id.trim();
@@ -51,14 +34,14 @@ async function update(api: ToolExecutionApi<PanelDetails>, args: PanelArgs, cont
   if (wasSpace !== (widget.body.kind === "space")) {
     return fail(`${id} ${wasSpace ? "is a space and cannot become another kind of widget" : "is not a space and cannot become one"}: its saved state would be lost. Nothing was changed. Offer a new widget with a new id instead.`);
   }
-  const refused = await spaceProblem(widget, id, exists);
-  if (refused !== undefined) return fail(refused);
+  if (wasSpace) return fail("Space changes require user approval. Save a new page version, then offer a send_to_user panel card with the same id and new ref. The user swipes to apply it. Nothing was changed.");
   const updatedAt = Date.now();
   await api.commit(async (tx) => {
     const draft = await tx.doc(PanelDoc);
     const previous = draft.widgets[id];
-    if (previous === undefined) return;
-    draft.widgets[id] = { ...kept(widget, previous), id, updatedAt, ...(previous.origin !== undefined && { origin: previous.origin }) };
+    if (previous === undefined) throw new Error(`${id} was removed. Nothing was changed.`);
+    if (["space", "web"].includes(previous.body.kind)) throw new Error("Space changes require a preview card and user approval.");
+    draft.widgets[id] = { ...widget, id, updatedAt, ...(previous.origin !== undefined && { origin: previous.origin }) };
   }, context);
   return ok(`updated ${id} (${widget.body.kind}, ${widget.size})`, "update", id);
 }
@@ -69,6 +52,7 @@ async function remove(api: ToolExecutionApi<PanelDetails>, args: PanelArgs, cont
   await api.commit(async (tx) => {
     const draft = await tx.doc(PanelDoc);
     draft.order = draft.order.filter((entry) => entry !== id);
+    rememberSpace(draft, draft.widgets[id]);
     delete draft.widgets[id];
   }, context);
   return ok(`removed ${id}`, "remove", id);
@@ -80,12 +64,12 @@ async function list(api: ToolExecutionApi<PanelDetails>, context: Context): Prom
   return ok(widgets.length === 0 ? "Panel is empty." : JSON.stringify(widgets), "list", null);
 }
 
-export const createPanelTool = (exists: ArtifactCheck | undefined) =>
+export const createPanelTool = () =>
   defineTool({
     name: "panel",
     description: [
       "Maintain the widgets the user already keeps on their panel, the dashboard beside this chat.",
-      "update replaces a kept widget's content by id, keeping its id (a space keeps its refresh setting unless you pass a new one); it cannot add new widgets, which only the user does by swiping a card you offer with send_to_user.",
+      "update replaces a kept non-space widget by id. Space revisions must instead be offered with send_to_user using the same id and a new artifact ref for the user to swipe and accept; it cannot add new widgets, which only the user does by swiping a card you offer with send_to_user.",
       "Pick the body kind by the shape of the information: stat for one number or status, gauge for progress toward a limit, chart for a trend, list for items or a checklist, timeline for dated events, note for a short summary, media for one image, actions for ready-made requests, weather for a city's forecast (only the city; the client fetches and refreshes it by itself once a day, so never update it), space for a small app page the user keeps, one that fetches live data or remembers what the user does (an .html artifact; read the `space` skill of the artifact server first). Never change a widget into or out of a space: its saved state would be lost.",
       "Offer a panel widget only for information the user will check repeatedly and that changes over time, such as a balance, a progress figure, a countdown, a schedule or a short checklist. Do not offer one for a one-off answer; that is a chat reply or a document. Offer at most one widget per conversation topic, and prefer updating a kept widget over offering a new one.",
       "To keep a widget fresh, create a daily schedule whose prompt updates it by id. Weather and space widgets refresh themselves, so never schedule updates for them.",
@@ -96,7 +80,7 @@ export const createPanelTool = (exists: ArtifactCheck | undefined) =>
     execute: async (args, api, context) => {
       switch ((args as PanelArgs).action) {
         case "update":
-          return update(api, args as PanelArgs, context, exists);
+          return update(api, args as PanelArgs, context);
         case "remove":
           return remove(api, args as PanelArgs, context);
         case "list":
