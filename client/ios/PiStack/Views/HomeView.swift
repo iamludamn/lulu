@@ -27,7 +27,8 @@ struct HomeView: View {
     @State private var pull: (page: Page, progress: CGFloat)?
     @State private var barBottom: CGFloat = 0
     @State private var veiled = false
-    @State private var reading: ReaderOpening?
+    @State private var reading: ChatRow?
+    @State private var readerFrame: ReaderFrame?
     @FocusState private var composing: Bool
     @Environment(\.scenePhase) private var phase
 
@@ -60,13 +61,16 @@ struct HomeView: View {
         }
         // Present above the pager and floating controls so dimming reaches every screen edge.
         .overlay {
-            if let reading, let text = reading.row.body {
+            if let reading, let text = reading.body, let readerFrame, readerFrame.id == reading.id {
                 GeometryReader { proxy in
                     let offset = proxy.frame(in: .global).origin
-                    LongReader(summary: reading.row.text, text: text,
-                               origin: reading.origin.offsetBy(dx: -offset.x, dy: -offset.y),
-                               canvas: proxy.size) { self.reading = nil }
-                        .id(reading.row.id)
+                    LongReader(summary: reading.text, text: text,
+                               origin: readerFrame.origin.offsetBy(dx: -offset.x, dy: -offset.y),
+                               canvas: readerFrame.canvas) {
+                        self.reading = nil
+                        self.readerFrame = nil
+                    }
+                        .id(reading.id)
                 }
                 .ignoresSafeArea()
             }
@@ -92,9 +96,7 @@ struct HomeView: View {
             PanelView(widgets: store.snapshot.panel.list, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onCheck: store.check, onCompose: fadeToChat)
         case .chat:
             ChatView(bot: bot, store: store, api: api, draft: $draft, composing: $composing, onKept: land,
-                     readingId: reading?.row.id, onRead: { row, origin in
-                         reading = ReaderOpening(row: row, origin: origin)
-                     })
+                     reading: $reading, onReaderFrame: { readerFrame = $0 })
         case .assets:
             AssetsView(items: store.snapshot.assets, botId: bot.id, api: api, onDrop: store.drop, onOrder: store.reorderAssets)
         }
@@ -205,8 +207,9 @@ private struct PageSwitcher: View {
     }
 }
 
-private struct ReaderOpening {
-    let row: ChatRow
-    /// Capture before opening, in a coordinate space shared by the page and its presentation host.
+/// Preserve the chat page's original reader canvas while drawing its backdrop outside the pager.
+struct ReaderFrame: Equatable {
+    let id: String
     let origin: CGRect
+    let canvas: CGSize
 }
