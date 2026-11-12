@@ -11,9 +11,9 @@ export async function memoryContext(host: Stub, botId: string): Promise<string> 
   return response.text();
 }
 
-export async function memoryTouch(host: Stub, botId: string): Promise<void> {
-  const response = await memory(host, botId).fetch("https://memory/touch", { method: "POST" });
-  if (!response.ok) throw new Error(`memory touch failed (${response.status})`);
+export async function memoryRemember(host: Stub, botId: string, requestId: string, conversationId: string, through: number): Promise<void> {
+  const response = await memory(host, botId).fetch(`https://memory/remember?through=${through}`, { method: "POST", headers: { "x-lulu-request-id": requestId, "x-lulu-conversation-id": conversationId } });
+  if (!response.ok) throw new Error(`memory update failed (${response.status})`);
 }
 
 export function remoteFiles(host: Stub, botId: string): ReadableFiles {

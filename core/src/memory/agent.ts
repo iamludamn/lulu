@@ -13,6 +13,7 @@ import {
   type Storage,
   type Submission,
 } from "@earendil-works/pi-durable";
+import { memorySpan } from "./telemetry.js";
 import { getContext } from "./context.js";
 import type { Episode } from "./doc.js";
 import type { MemoryFiles } from "./files.js";
@@ -29,10 +30,11 @@ export type MemoryAgentOptions = {
   readonly models: Models;
   readonly model: ModelRef;
   readonly sessionId: string;
+  readonly botId: string;
   readonly telemetry: TelemetryContext;
 };
 
-export type MemoryRun = { committed: boolean };
+export type MemoryRun = { committed: boolean; outcome: "committed" | "replay" | "empty" | "unchanged" | "blocked"; blocked: number };
 
 const trailer = (message: string, key: string): string | undefined =>
   message
@@ -66,6 +68,7 @@ export class MemoryAgent {
   readonly #models: Models;
   readonly #model: ModelRef;
   readonly #sessionId: string;
+  readonly #botId: string;
   readonly #telemetry: TelemetryContext;
   #harness!: Harness;
   #root!: Conversation;
@@ -76,6 +79,7 @@ export class MemoryAgent {
     this.#models = options.models;
     this.#model = options.model;
     this.#sessionId = options.sessionId;
+    this.#botId = options.botId;
     this.#telemetry = options.telemetry;
   }
 
@@ -84,8 +88,8 @@ export class MemoryAgent {
     registry.install(
       defineExtension({
         name: EXTENSION,
-        tools: [...createReadTools(this.#files), ...createWriteTools(this.#files)],
-        sections: [section("rules", () => MEMORY_RULES, { tag: false }), section("memory", () => getContext(this.#files), { tag: false })],
+        tools: [...createReadTools(this.#files, this.#telemetry), ...createWriteTools(this.#files)],
+        sections: [section("rules", () => MEMORY_RULES, { tag: false }), section("memory", () => getContext(this.#files, this.#telemetry), { tag: false })],
       }),
     );
     const harness = await Harness.open(
@@ -93,25 +97,32 @@ export class MemoryAgent {
       {
         models: this.#models,
         registry,
-        onReport: (error) => console.error(JSON.stringify({ message: "Memory agent background task failed", sessionId: this.#sessionId, error: String(error) })),
+        onReport: () => console.error(JSON.stringify({ message: "Memory agent background task failed", sessionId: this.#sessionId, category: "background_task" })),
       },
       BACKGROUND_CONTEXT,
     );
     const root = await harness.root(BACKGROUND_CONTEXT, { agent: { model: this.#model, thinkingLevel: "off" } });
     await root.configure({ model: this.#model }, BACKGROUND_CONTEXT);
-    traceHarness(harness, this.#telemetry, { "lulu.agent": "memory" })(root.id);
+    traceHarness(harness, this.#telemetry, { "lulu.agent": "memory", "lulu.bot.id": this.#botId })(root.id);
     harness.resume();
     this.#harness = harness;
     this.#root = root;
   }
 
   remember(requestId: string, episodes: readonly Episode[], through: number): Promise<MemoryRun> {
-    if (episodes.length === 0) return Promise.resolve({ committed: false });
-    return this.#serial(() => this.#run(requestId, rememberTask(episodes, today()), "记忆更新", [`through: ${through}`]));
+    return this.#serial(() => memorySpan(this.#telemetry, "memory.remember", { "lulu.memory.request_id": requestId, "lulu.memory.episodes": episodes.length, "lulu.memory.cursor.target": through }, async (span) => {
+      const result: MemoryRun = episodes.length === 0 ? { committed: false, outcome: "empty", blocked: 0 } : await this.#run(requestId, rememberTask(episodes, today()), "记忆更新", [`through: ${through}`]);
+      span.setAttributes({ "lulu.memory.outcome": result.outcome, "lulu.memory.blocked": result.blocked });
+      return result;
+    }));
   }
 
   consolidate(requestId: string): Promise<MemoryRun> {
-    return this.#serial(() => this.#run(requestId, consolidateTask(today()), "整理", []));
+    return this.#serial(() => memorySpan(this.#telemetry, "memory.consolidate", { "lulu.memory.request_id": requestId }, async (span) => {
+      const result = await this.#run(requestId, consolidateTask(today()), "整理", []);
+      span.setAttributes({ "lulu.memory.outcome": result.outcome, "lulu.memory.blocked": result.blocked });
+      return result;
+    }));
   }
 
   async close(): Promise<void> {
@@ -125,15 +136,16 @@ export class MemoryAgent {
   }
 
   async #run(requestId: string, task: string, fallback: string, trailers: readonly string[]): Promise<MemoryRun> {
-    if (await committedBefore(this.#files, requestId)) return { committed: false };
+    if (await committedBefore(this.#files, requestId)) return { committed: false, outcome: "replay", blocked: 0 };
     const submission = await this.#submit(requestId, task);
     const settled = await submission.wait(BACKGROUND_CONTEXT);
     if (settled.status !== "done" || settled.type !== "input") throw new Error(`Memory agent run ${requestId} ${settled.status}`);
     const summary = summaryOf(await this.#reply(settled.answer)) ?? fallback;
     const { blocked } = await guardChanges(this.#files);
-    if ((await this.#files.changed()).length === 0) return { committed: false };
+    if ((await this.#files.changed()).length === 0) return { committed: false, outcome: blocked.length > 0 ? "blocked" : "unchanged", blocked: blocked.length };
     const lines = [`requestId: ${requestId}`, ...trailers, ...(blocked.length === 0 ? [] : [`blocked: ${blocked.join(",")}`])];
-    return { committed: (await this.#files.commit(`${summary}\n\n${lines.join("\n")}`)) !== undefined };
+    const committed = (await this.#files.commit(`${summary}\n\n${lines.join("\n")}`)) !== undefined;
+    return { committed, outcome: committed ? "committed" : "unchanged", blocked: blocked.length };
   }
 
   async #submit(requestId: string, task: string): Promise<Submission> {

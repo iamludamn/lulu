@@ -1,7 +1,7 @@
 import type { AttachedReplicatedState } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai/models";
-import { type Conversation, type ConversationView, type EntryId, Harness, type Registry, type Storage } from "@earendil-works/pi-durable";
+import { type Conversation, type ConversationView, type EntryId, CompactionEntry, Harness, type Registry, type Storage } from "@earendil-works/pi-durable";
 import type { TelemetrySpan } from "@earendil-works/pi-telemetry";
 import type { McpHost, McpServerConfig } from "../agent/mcp.js";
 import { handleMcpRegistry } from "../agent/mcp-registry.js";
@@ -28,7 +28,8 @@ import { MAX_CLIENT_FRAME_CHARACTERS, type ClientMessage, type ServerMessage } f
 import { parseFrame } from "./frame.js";
 import { createChatHarnessOptions, reconnectChatMcp } from "../agent/chat.js";
 import { chatModelConfig, chatModelRef, createChatModels, durableModel } from "../agent/models.js";
-import { memoryTouch } from "../memory/client.js";
+import { memoryTelemetry } from "../memory/telemetry.js";
+import { createMemoryUpdate, recoverMemoryUpdates, MEMORY_UPDATE } from "../memory/schedule.js";
 import { RecallDoc } from "../memory/doc.js";
 import { judgeRecall } from "../memory/recall.js";
 import { traceHarness } from "../telemetry/agent.js";
@@ -126,7 +127,7 @@ export class BotSession {
     this.#harness = harness;
     const trace = traceHarness(harness, this.#host.telemetry, { "lulu.bot.id": this.#host.name });
     harness.subscribeCommits((publication) => {
-      if (publication.changes.some((change) => (change.type === "document" && (change.record.kind === CRON_KIND || change.record.kind === SANDBOX_KIND)) || (change.type === "task" && change.value.kind === SANDBOX_LIFECYCLE))) {
+      if (publication.changes.some((change) => (change.type === "document" && (change.record.kind === CRON_KIND || change.record.kind === SANDBOX_KIND)) || (change.type === "task" && (change.value.kind === SANDBOX_LIFECYCLE || change.value.kind === MEMORY_UPDATE)))) {
         void this.#refreshAlarm().catch((error: unknown) => reportError("Schedule alarm reconciliation failed", error));
       }
     });
@@ -141,6 +142,13 @@ export class BotSession {
     const root = await harness.root(BACKGROUND_CONTEXT, { agent: { model, thinkingLevel: "off" } });
     await root.configure({ model, tools: null }, BACKGROUND_CONTEXT);
     this.#root = root;
+    const update = createMemoryUpdate(this.#host);
+    harness.subscribeCommits((publication) => {
+      if (publication.changes.some((change) => change.type === "entry" && change.value.conversationId === root.id && CompactionEntry.is(change.value))) {
+        void recoverMemoryUpdates(harness, root, update).catch((error: unknown) => reportError("Memory compaction scheduling failed", error));
+      }
+    });
+    await recoverMemoryUpdates(harness, root, update);
     await recoverSandboxLifecycle(harness, root.id, createSandboxProvider(this.#host.env, this.#host.name, this.#host.telemetry), BACKGROUND_CONTEXT);
     trace(root.id);
 
@@ -361,7 +369,6 @@ export class BotSession {
   }
 
   async #submitPrompt(socket: Socket, command: Extract<Command, { type: "prompt.submit" }>): Promise<void> {
-    void memoryTouch(this.#host, this.#host.name).catch((error: unknown) => reportError("Memory touch failed", error));
     const content = command.content;
     await this.#recall(command.requestId, content);
     await recordChatMessage(this.#harness, this.#view, command.requestId, content);
@@ -383,7 +390,7 @@ export class BotSession {
   async #recall(requestId: string, content: string): Promise<void> {
     if ((await this.#harness.snapshot(RecallDoc, BACKGROUND_CONTEXT))?.requestId === requestId) return;
     const turns = [...episodesOf(this.#view.value.entries.slice(-RECALL_ENTRIES)), { role: "user" as const, text: content }];
-    const decision = await judgeRecall(this.#host.env, this.#host.telemetry, turns);
+    const decision = await judgeRecall(this.#host.env, memoryTelemetry(this.#host.telemetry, this.#host.name, requestId, String(this.#root.id)), turns);
     await this.#harness.commit(async (tx) => {
       const recall = await tx.doc(RecallDoc);
       recall.requestId = requestId;
@@ -402,13 +409,16 @@ export class BotSession {
 
   async #memorySource(request: Request): Promise<Response> {
     const after = Number(new URL(request.url).searchParams.get("after") ?? "0");
+    const through = Number(new URL(request.url).searchParams.get("through"));
+    if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(through) || through < after) return new Response(null, { status: 400 });
     const page = await this.#root.entries(
-      { minEntryId: (after + 1) as EntryId, order: "ascending" },
+      { minEntryId: (after + 1) as EntryId, maxEntryId: through as EntryId, order: "ascending" },
       MEMORY_SOURCE_ENTRIES,
       undefined,
       BACKGROUND_CONTEXT,
     );
     const source: EpisodeSource = {
+      conversationId: String(this.#root.id),
       model: chatModelRef(this.#host.env, this.#selected),
       episodes: episodesOf(page.items),
       through: page.items.at(-1)?.id ?? after,
@@ -545,6 +555,7 @@ export class BotSession {
     const selected = chatModelRef(this.#host.env, this.#selected);
     let outcome: AlarmOutcome;
     try {
+      await recoverMemoryUpdates(this.#harness, this.#root, createMemoryUpdate(this.#host));
       outcome = await fireSchedules(this.#harness, parentId, selected, now);
     } catch (error) {
       reportError("Schedule run failed", error);

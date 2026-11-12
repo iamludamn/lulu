@@ -1,3 +1,5 @@
+import { NOOP_TELEMETRY_CONTEXT, type TelemetryContext } from "@earendil-works/pi-telemetry";
+import { memorySpan } from "./telemetry.js";
 import { defineTool, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import { Type } from "typebox";
 import type { MemoryFiles, ReadableFiles } from "./files.js";
@@ -46,16 +48,17 @@ const occurrences = (text: string, part: string): number => text.split(part).len
 
 const alreadyApplied = (text: string, old: string, next: string): boolean => next !== "" && text.includes(next) && !text.split(next).join("\u0000").includes(old);
 
-export function createReadTools(files: ReadableFiles) {
+export function createReadTools(files: ReadableFiles, telemetry: TelemetryContext = NOOP_TELEMETRY_CONTEXT) {
   const read = defineTool({
     name: "memory_read",
     description: "读取一个长期记忆文件的全文。",
     parameters: Type.Object({ path: PathParam }),
     replay: "safe",
-    execute: async ({ path }) => {
+    execute: async ({ path }) => memorySpan(telemetry, "memory.retrieve", { "gen_ai.tool.name": "memory_read" }, async (span) => {
       const text = await files.read(path);
+      span.setAttributes({ "lulu.memory.outcome": text === undefined || text === "" ? "empty" : "success", "lulu.memory.characters": Math.min(text?.length ?? 0, OUTPUT_CHARACTERS) });
       return text === undefined ? fail(`${path} 不存在。`) : ok(text);
-    },
+    }),
   });
 
   const ls = defineTool({
@@ -63,11 +66,12 @@ export function createReadTools(files: ReadableFiles) {
     description: "列出所有长期记忆文件，每行一个“路径: description”。",
     parameters: Type.Object({}),
     replay: "safe",
-    execute: async () => {
+    execute: async () => memorySpan(telemetry, "memory.retrieve", { "gen_ai.tool.name": "memory_ls" }, async (span) => {
       const paths = await markdownPaths(files);
       const lines = await Promise.all(paths.map(async (path) => `${path}: ${descriptionOf((await files.read(path)) ?? "")}`));
+      span.setAttributes({ "lulu.memory.outcome": lines.length === 0 ? "empty" : "success", "lulu.memory.matches": lines.length });
       return ok(lines.length === 0 ? "（空）" : lines.join("\n"));
-    },
+    }),
   });
 
   const grep = defineTool({
@@ -78,7 +82,7 @@ export function createReadTools(files: ReadableFiles) {
       path: Type.Optional(Type.String({ description: "文件路径或目录前缀，如 people/" })),
     }),
     replay: "safe",
-    execute: async ({ pattern, path }) => {
+    execute: async ({ pattern, path }) => memorySpan(telemetry, "memory.retrieve", { "gen_ai.tool.name": "memory_grep" }, async (span) => {
       const test = matcher(pattern);
       const hits: string[] = [];
       for (const file of (await markdownPaths(files)).filter((candidate) => within(candidate, path))) {
@@ -90,9 +94,10 @@ export function createReadTools(files: ReadableFiles) {
         }
         if (hits.length > GREP_MATCHES) break;
       }
+      span.setAttributes({ "lulu.memory.outcome": hits.length === 0 ? "empty" : "success", "lulu.memory.matches": Math.min(hits.length, GREP_MATCHES), "lulu.memory.clipped": hits.length > GREP_MATCHES });
       if (hits.length === 0) return ok("无匹配。");
       return ok(hits.length > GREP_MATCHES ? `${hits.slice(0, GREP_MATCHES).join("\n")}\n...[匹配过多，请缩小 pattern 或 path]` : hits.join("\n"));
-    },
+    }),
   });
 
   return [read, ls, grep];

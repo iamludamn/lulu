@@ -50,10 +50,9 @@ async function ask(key: string, turns: readonly Turn[]): Promise<RecallDecision>
 
 export function judgeRecall(env: Environment, telemetry: TelemetryContext, turns: readonly Turn[]): Promise<RecallDecision> {
   const key = env.TYPESAFE_API_KEY;
-  if (!key) return Promise.resolve({ inject: true, fallback: "unconfigured" });
-  return telemetry.startSpan({ name: "memory.recall", attributes: { "lulu.recall.threshold": THRESHOLD } }, async (span) => {
-    const decision = await ask(key, turns);
-    span.setAttributes({ "lulu.recall.inject": decision.inject, "lulu.recall.probability": decision.probability, "lulu.recall.fallback": decision.fallback });
+  return telemetry.startSpan({ name: "memory.recall", attributes: { "lulu.recall.threshold": THRESHOLD, "lulu.recall.configured": Boolean(key) } }, async (span) => {
+    const decision: RecallDecision = key ? await ask(key, turns) : { inject: true, fallback: "unconfigured" };
+    span.setAttributes({ "lulu.recall.inject": decision.inject, "lulu.recall.probability": decision.probability, "lulu.recall.fallback": decision.fallback ?? "none" });
     return decision;
   });
 }

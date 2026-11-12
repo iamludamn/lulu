@@ -103,7 +103,7 @@ class ConversationTrace {
         const incomplete = event.entry === undefined && event.result === undefined;
         const errored = result?.role === "toolResult" && result.isError;
         if (incomplete) failed(tool, "tool call did not complete");
-        else if (errored) failed(tool, failureText(result));
+        else if (errored) failed(tool, this.#attributes["lulu.agent"] === "memory" || event.toolName.startsWith("memory_") ? "memory tool failed" : failureText(result));
         if (incomplete || errored) this.#totals.tool_errors += 1;
         tool.end();
         this.#tools.delete(event.toolCallId);
@@ -116,22 +116,22 @@ class ConversationTrace {
       case "compaction_end": {
         const compaction = this.#compactions.get(String(event.taskId));
         if (compaction === undefined) return;
-        if (event.error !== undefined) failed(compaction, event.error);
+        if (event.error !== undefined) failed(compaction, this.#attributes["lulu.agent"] === "memory" ? "memory compaction failed" : event.error);
         compaction.end();
         this.#compactions.delete(String(event.taskId));
         return;
       }
       case "auto_retry_start":
         this.#totals.retries += 1;
-        (this.#turn ?? this.#run)?.span.addEvent("lulu.retry", { "lulu.retry.attempt": event.attempt, "lulu.retry.error": event.errorMessage });
+        (this.#turn ?? this.#run)?.span.addEvent("lulu.retry", { "lulu.retry.attempt": event.attempt, "lulu.retry.error": this.#attributes["lulu.agent"] === "memory" ? "memory model retry" : event.errorMessage });
         return;
       case "entry_appended": {
         const message = event.entry.model?.[0] as AssistantMessage | undefined;
-        if (message?.role === "assistant" && message.stopReason === "error") (this.#turn ?? this.#run)?.span.addEvent("lulu.model_error", { "lulu.model.error": errorText(message.errorMessage) });
+        if (message?.role === "assistant" && message.stopReason === "error") (this.#turn ?? this.#run)?.span.addEvent("lulu.model_error", { "lulu.model.error": this.#attributes["lulu.agent"] === "memory" ? "memory model failed" : errorText(message.errorMessage) });
         return;
       }
       case "task_failed":
-        (this.#turn ?? this.#run)?.span.addEvent("lulu.task_failed", { "lulu.task.kind": event.kind, "lulu.task.error": event.message });
+        (this.#turn ?? this.#run)?.span.addEvent("lulu.task_failed", { "lulu.task.kind": event.kind, "lulu.task.error": this.#attributes["lulu.agent"] === "memory" ? "memory task failed" : event.message });
         return;
       default:
         return;
@@ -181,7 +181,7 @@ class ConversationTrace {
       this.#totals.cache_read_tokens += assistant.usage.cacheRead;
       this.#totals.cache_write_tokens += assistant.usage.cacheWrite;
       this.#totals.cost += assistant.usage.cost.total;
-      if (assistant.stopReason === "error") failed(held, assistant.errorMessage ?? "model request failed");
+      if (assistant.stopReason === "error") failed(held, this.#attributes["lulu.agent"] === "memory" ? "memory model failed" : assistant.errorMessage ?? "model request failed");
     }
     held.end();
     this.#message = undefined;

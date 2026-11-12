@@ -12,9 +12,15 @@ receivers:
           authenticator: bearertokenauth
 
 processors:
+  transform/memory_metric_scope:
+    trace_statements:
+      - context: span
+        statements:
+          - delete_key(attributes, "lulu.bot.id") where IsMatch(name, "^memory[.]") or attributes["lulu.agent"] == "memory"
   batch:
 
 connectors:
+  forward/metrics:
   span_metrics:
     namespace: lulu.span
     aggregation_temporality: AGGREGATION_TEMPORALITY_DELTA
@@ -28,6 +34,13 @@ connectors:
       - name: lulu.agent
       - name: gen_ai.request.model
       - name: gen_ai.tool.name
+      - name: lulu.memory.failure_category
+      - name: lulu.memory.outcome
+      - name: lulu.recall.configured
+      - name: lulu.recall.inject
+      - name: lulu.recall.fallback
+      - name: lulu.memory.coverage
+      - name: lulu.memory.available
       - name: lulu.command
     metrics_flush_interval: 15s
     exemplars:
@@ -35,6 +48,79 @@ connectors:
 
   signal_to_metrics:
     spans:
+      - name: lulu.memory.request_attempts
+        description: Model request attempts by actual replayed memory section coverage
+        attributes:
+          - key: lulu.memory.coverage
+        conditions:
+          - span.name == "memory.request"
+        sum:
+          monotonic: true
+          value: "1"
+      - name: lulu.memory.episodes
+        attributes:
+          - key: lulu.memory.outcome
+            optional: true
+        conditions:
+          - IsMatch(span.name, "^memory[.](alarm|update)$")
+          - span.attributes["lulu.memory.episodes"] != nil
+        histogram:
+          value: span.attributes["lulu.memory.episodes"]
+          buckets: [0, 1, 10, 100, 1000, 10000, 60000, 600000, 3600000, 86400000]
+      - name: lulu.memory.blocked
+        attributes:
+          - key: lulu.memory.outcome
+            optional: true
+        conditions:
+          - span.attributes["lulu.memory.blocked"] != nil
+        histogram:
+          value: span.attributes["lulu.memory.blocked"]
+          buckets: [0, 1, 10, 100, 1000, 10000, 60000, 600000, 3600000, 86400000]
+      - name: lulu.memory.clipped_files
+        attributes:
+          - key: lulu.memory.outcome
+            optional: true
+        conditions:
+          - span.attributes["lulu.memory.clipped_files"] != nil
+        histogram:
+          value: span.attributes["lulu.memory.clipped_files"]
+          buckets: [0, 1, 10, 100, 1000, 10000, 60000, 600000, 3600000, 86400000]
+      - name: lulu.memory.characters
+        attributes:
+          - key: lulu.memory.outcome
+            optional: true
+        conditions:
+          - span.attributes["lulu.memory.characters"] != nil
+        histogram:
+          value: span.attributes["lulu.memory.characters"]
+          buckets: [0, 1, 10, 100, 1000, 10000, 60000, 600000, 3600000, 86400000]
+      - name: lulu.memory.pending_age_ms
+        attributes:
+          - key: lulu.memory.outcome
+            optional: true
+        conditions:
+          - span.attributes["lulu.memory.pending_age_ms"] != nil
+        histogram:
+          value: span.attributes["lulu.memory.pending_age_ms"]
+          buckets: [0, 1, 10, 100, 1000, 10000, 60000, 600000, 3600000, 86400000]
+      - name: lulu.memory.overdue_ms
+        attributes:
+          - key: lulu.memory.outcome
+            optional: true
+        conditions:
+          - span.attributes["lulu.memory.overdue_ms"] != nil
+        histogram:
+          value: span.attributes["lulu.memory.overdue_ms"]
+          buckets: [0, 1, 10, 100, 1000, 10000, 60000, 600000, 3600000, 86400000]
+      - name: lulu.memory.retries
+        attributes:
+          - key: lulu.memory.outcome
+            optional: true
+        conditions:
+          - span.attributes["lulu.memory.retries"] != nil
+        histogram:
+          value: span.attributes["lulu.memory.retries"]
+          buckets: [0, 1, 10, 100, 1000, 10000, 60000, 600000, 3600000, 86400000]
       - name: lulu.chat.input_tokens
         description: Input tokens summed from chat spans
         attributes: &chat_dims
@@ -224,7 +310,11 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlp_http/lgtm, span_metrics, signal_to_metrics]
+      exporters: [otlp_http/lgtm, forward/metrics]
+    traces/metrics:
+      receivers: [forward/metrics]
+      processors: [transform/memory_metric_scope, batch]
+      exporters: [span_metrics, signal_to_metrics]
     metrics:
       receivers: [span_metrics, signal_to_metrics]
       processors: [batch]
