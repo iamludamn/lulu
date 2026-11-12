@@ -38,19 +38,23 @@ struct HomeView: View {
     }
 
     var body: some View {
-        TabView(selection: $page) {
-            ForEach(Page.allCases) { item in
-                content(item).tag(item)
+        // Keep this container in the safe area so the floating controls avoid the status bar.
+        ZStack {
+            TabView(selection: $page) {
+                ForEach(Page.allCases) { item in
+                    content(item).tag(item)
+                }
             }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .opacity(veiled ? 0 : 1)
+            .environment(\.keepTargets, targets)
+            .environment(\.topInset, barBottom)
+            .environment(\.keepPull) { page, progress in pull = progress > 0 ? (page, progress) : nil }
+            .ignoresSafeArea(.container, edges: .top)
         }
-        .tabViewStyle(.page(indexDisplayMode: .never))
-        .opacity(veiled ? 0 : 1)
-        .environment(\.keepTargets, targets)
-        .environment(\.topInset, barBottom)
-        .environment(\.keepPull) { page, progress in pull = progress > 0 ? (page, progress) : nil }
         .background { Wallpaper() }
-        .ignoresSafeArea(.container, edges: .top)
-        .safeAreaBar(edge: .top, spacing: 0) {
+        // Only the controls draw glass; a safe-area bar adds a full-width scroll edge effect.
+        .overlay(alignment: .top) {
             topBar.onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { barBottom = $0 }
         }
         .artifactViewer(botId: bot.id, api: api)

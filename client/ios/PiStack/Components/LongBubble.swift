@@ -110,6 +110,7 @@ struct LongReader: View {
     let canvas: CGSize
     let onClose: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var scheme
     @State private var expanded = false
     @State private var revealed = false
     @State private var closing = false
@@ -127,7 +128,12 @@ struct LongReader: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            Color.black.opacity(expanded ? 0.25 : 0)
+            // The pager clips this backdrop at the navigation and home-indicator edges.
+            // Keep light-mode wallpaper continuous while retaining tap-to-dismiss.
+            Color.clear
+                .overlay {
+                    if scheme == .dark { Color.black.opacity(expanded ? 0.25 : 0) }
+                }
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { close() }
