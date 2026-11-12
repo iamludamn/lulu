@@ -8,7 +8,7 @@ const FAILURE_CHARACTERS = 300;
 
 type Held = { readonly span: TelemetrySpan; end(): void };
 
-const TOTALS = ["turns", "chats", "tools", "tool_errors", "delegates", "retries", "compactions", "input_tokens", "output_tokens", "cache_read_tokens", "cost"] as const;
+const TOTALS = ["turns", "chats", "tools", "tool_errors", "delegates", "retries", "compactions", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cost"] as const;
 
 type Totals = Record<(typeof TOTALS)[number], number>;
 
@@ -169,12 +169,17 @@ class ConversationTrace {
         "lulu.usage.total_tokens": assistant.usage.totalTokens,
         "lulu.usage.prompt_tokens": prompt,
         "lulu.usage.cost": assistant.usage.cost.total,
+        "lulu.usage.cost.input": assistant.usage.cost.input,
+        "lulu.usage.cost.output": assistant.usage.cost.output,
+        "lulu.usage.cost.cache_read": assistant.usage.cost.cacheRead,
+        "lulu.usage.cost.cache_write": assistant.usage.cost.cacheWrite,
         "lulu.usage.cache_hit_ratio": prompt > 0 ? assistant.usage.cacheRead / prompt : undefined,
       });
       this.#totals.chats += 1;
       this.#totals.input_tokens += assistant.usage.input;
       this.#totals.output_tokens += assistant.usage.output;
       this.#totals.cache_read_tokens += assistant.usage.cacheRead;
+      this.#totals.cache_write_tokens += assistant.usage.cacheWrite;
       this.#totals.cost += assistant.usage.cost.total;
       if (assistant.stopReason === "error") failed(held, assistant.errorMessage ?? "model request failed");
     }

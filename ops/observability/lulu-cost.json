@@ -1,0 +1,196 @@
+{
+  "uid": "lulu-cost",
+  "title": "Lulu token costs",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Estimated model cost (USD)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (gen_ai_provider_name, gen_ai_request_model) (sum_over_time(lulu_chat_cost_total[$__interval]))",
+          "legendFormat": "{{gen_ai_provider_name}} / {{gen_ai_request_model}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Input tokens",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (gen_ai_request_model) (sum_over_time(lulu_chat_input_tokens_total[$__interval]))",
+          "legendFormat": "{{gen_ai_request_model}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Output tokens",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (gen_ai_request_model) (sum_over_time(lulu_chat_output_tokens_total[$__interval]))",
+          "legendFormat": "{{gen_ai_request_model}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Cache Read tokens",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (gen_ai_request_model) (sum_over_time(lulu_chat_cache_read_tokens_total[$__interval]))",
+          "legendFormat": "{{gen_ai_request_model}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Cache Write tokens",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (gen_ai_request_model) (sum_over_time(lulu_chat_cache_write_tokens_total[$__interval]))",
+          "legendFormat": "{{gen_ai_request_model}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Estimated cost components (USD)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(sum_over_time(lulu_chat_cost_input_total[$__interval]))",
+          "legendFormat": "input"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(sum_over_time(lulu_chat_cost_output_total[$__interval]))",
+          "legendFormat": "output"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(sum_over_time(lulu_chat_cost_cache_read_total[$__interval]))",
+          "legendFormat": "cache_read"
+        },
+        {
+          "refId": "D",
+          "expr": "sum(sum_over_time(lulu_chat_cost_cache_write_total[$__interval]))",
+          "legendFormat": "cache_write"
+        }
+      ]
+    }
+  ]
+}
