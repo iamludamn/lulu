@@ -1,5 +1,6 @@
 import PiStackKit
 import SwiftUI
+import UIKit
 
 enum Page: Int, CaseIterable, Identifiable {
     case panel, chat, assets
@@ -29,6 +30,9 @@ struct HomeView: View {
     @State private var veiled = false
     @State private var reading: ChatRow?
     @State private var readerFrame: ReaderFrame?
+    @State private var bottomInset: CGFloat = 0
+    @Namespace private var reader
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var composing: Bool
     @Environment(\.scenePhase) private var phase
 
@@ -44,33 +48,42 @@ struct HomeView: View {
             Wallpaper()
             TabView(selection: $page) {
                 ForEach(Page.allCases) { item in
-                    content(item).tag(item)
+                    content(item).safeAreaPadding(.bottom, composing ? 0 : bottomInset).tag(item)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .opacity(veiled ? 0 : 1)
+            .environment(\.longReaderSpace, reader)
             .environment(\.keepTargets, targets)
             .environment(\.topInset, barBottom)
             .environment(\.keepPull) { page, progress in pull = progress > 0 ? (page, progress) : nil }
-            .ignoresSafeArea(.container, edges: .top)
+            .ignoresSafeArea(.container, edges: [.top, .bottom])
             .safeAreaBar(edge: .top, spacing: 0) {
                 topBar.onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { barBottom = $0 }
             }
             // Only the controls draw glass; suppress the bar's full-width scroll edge layer.
             .scrollEdgeEffectHidden(true, for: [.top, .bottom])
         }
-        // Present above the pager and floating controls so dimming reaches every screen edge.
+        .background {
+            WindowBottomInsetReader { bottomInset = $0 }
+                .allowsHitTesting(false)
+        }
+        // The legacy reader keeps its original canvas; only its backdrop spans the screen.
         .overlay {
             if let reading, let text = reading.body, let readerFrame, readerFrame.id == reading.id {
-                GeometryReader { proxy in
-                    let offset = proxy.frame(in: .global).origin
-                    LongReader(summary: reading.text, text: text,
-                               origin: readerFrame.origin.offsetBy(dx: -offset.x, dy: -offset.y),
-                               canvas: readerFrame.canvas) {
-                        self.reading = nil
-                        self.readerFrame = nil
+                ZStack(alignment: .topLeading) {
+                    Color.black.opacity(0.25)
+                        .contentShape(Rectangle())
+                        .onTapGesture { closeReader() }
+                        .transition(.opacity)
+                    LongReader(id: reading.id, text: text, space: reader,
+                               size: CGSize(width: readerFrame.canvas.width - 20,
+                                            height: (readerFrame.canvas.height - bottomInset) * 2 / 3)) {
+                        closeReader()
                     }
-                        .id(reading.id)
+                    .frame(width: readerFrame.canvas.width,
+                           height: readerFrame.canvas.height - bottomInset)
+                    .transition(.opacity)
                 }
                 .ignoresSafeArea()
             }
@@ -95,8 +108,12 @@ struct HomeView: View {
         case .panel:
             PanelView(widgets: store.snapshot.panel.list, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onCheck: store.check, onCompose: fadeToChat)
         case .chat:
-            ChatView(bot: bot, store: store, api: api, draft: $draft, composing: $composing, onKept: land,
-                     reading: $reading, onReaderFrame: { readerFrame = $0 })
+            ChatView(bot: bot, store: store, api: api, draft: $draft, composing: $composing, onKept: land, bottomInset: bottomInset,
+                     reading: $reading, onReaderFrame: { frame in
+                         withAnimation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.45, dampingFraction: 0.86)) {
+                             readerFrame = frame
+                         }
+                     })
         case .assets:
             AssetsView(items: store.snapshot.assets, botId: bot.id, api: api, onDrop: store.drop, onOrder: store.reorderAssets)
         }
@@ -129,6 +146,13 @@ struct HomeView: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
+    }
+
+    private func closeReader() {
+        withAnimation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.45, dampingFraction: 0.86)) {
+            reading = nil
+            readerFrame = nil
+        }
     }
 
     private func land(_ target: Page) {
@@ -210,6 +234,46 @@ private struct PageSwitcher: View {
 /// Preserve the chat page's original reader canvas while drawing its backdrop outside the pager.
 struct ReaderFrame: Equatable {
     let id: String
-    let origin: CGRect
     let canvas: CGSize
+}
+
+extension EnvironmentValues {
+    @Entry var longReaderSpace: Namespace.ID? = nil
+}
+
+/// Read the container inset from the window so keyboard height is never counted as bottom padding.
+private struct WindowBottomInsetReader: UIViewRepresentable {
+    let onChange: (CGFloat) -> Void
+
+    func makeUIView(context: Context) -> InsetView {
+        let view = InsetView()
+        view.onChange = onChange
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ view: InsetView, context: Context) { view.onChange = onChange }
+
+    final class InsetView: UIView {
+        var onChange: (CGFloat) -> Void = { _ in }
+        private var last: CGFloat?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            publish()
+        }
+
+        override func safeAreaInsetsDidChange() {
+            super.safeAreaInsetsDidChange()
+            publish()
+        }
+
+        private func publish() {
+            guard let window else { return }
+            let bottom = window.safeAreaInsets.bottom
+            guard bottom != last else { return }
+            last = bottom
+            DispatchQueue.main.async { [weak self] in self?.onChange(bottom) }
+        }
+    }
 }

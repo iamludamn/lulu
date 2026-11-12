@@ -11,6 +11,7 @@ struct MessageRow: View, Equatable {
     let onOpen: (ArtifactAddress, String) -> Void
     let onKept: (Page) -> Void
     @Environment(\.openSpace) private var openSpace
+    @Environment(\.longReaderSpace) private var reader
 
     static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.row == rhs.row && lhs.expanded == rhs.expanded && lhs.botId == rhs.botId && lhs.api.base == rhs.api.base }
 
@@ -79,6 +80,11 @@ struct MessageRow: View, Equatable {
                     .longReplyHighlight(radius: 20, key: "pistack.longReply.read.\(api.base.absoluteString).\(botId).\(row.id)") { onRead(row.id) }
                     .contentShape(shape)
                     .opacity(expanded ? 0 : 1)
+                    .overlay {
+                        if !expanded, let reader {
+                            Color.clear.matchedGeometryEffect(id: row.id, in: reader)
+                        }
+                    }
                     .anchorPreference(key: LongBubbleBounds.self, value: .bounds) { [row.id: $0] }
             } else {
                 content.frosted(20)
