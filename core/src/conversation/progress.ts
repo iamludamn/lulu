@@ -1,10 +1,11 @@
 import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { type ConversationView, defineDoc, type Harness, type SubmissionId } from "@earendil-works/pi-durable";
+import { type CommitPublication, type ConversationView, defineDoc, type Harness, type SubmissionId } from "@earendil-works/pi-durable";
 import type { MessageProgress, MessageState, SessionProgress, SubtaskProgress } from "../protocol/contract.js";
 import { DelegateIndex, RunFamily, type RunDoc } from "../delegate/runs.js";
 import { owedDeliveries, type Entries } from "../send/delivery.js";
 import { DeliveryDoc, MakeDoc } from "../send/doc.js";
+import { readSubmission, trackSubmissions, type SubmissionReader } from "./submissions.js";
 
 export type ChatMessage = { requestId: string; id: number | null; text: string; after: number | null; at?: number };
 
@@ -50,11 +51,10 @@ async function subtasksOf(harness: Harness, runs: readonly RunDoc[], message: Su
   return subtasks;
 }
 
-async function noticePending(harness: Harness, runs: readonly RunDoc[], message: SubmissionId, context: Context): Promise<boolean> {
+async function noticePending(read: SubmissionReader, runs: readonly RunDoc[], message: SubmissionId, context: Context): Promise<boolean> {
   for (const run of runs) {
     if (!run.origin.includes(message) || run.noticeId === null) continue;
-    const notice = await harness.submission(run.noticeId, context);
-    const record = notice ? await notice.status(context) : undefined;
+    const record = await read(run.noticeId, context);
     if (record?.status === "queued" || record?.status === "placed") return true;
   }
   return false;
@@ -66,19 +66,23 @@ function stateOf(status: string | undefined, pending: boolean): MessageState {
   return "done";
 }
 
-export async function computeProgress(harness: Harness, entries: () => Entries, context: Context): Promise<SessionProgress> {
+export async function computeProgress(
+  harness: Harness,
+  entries: () => Entries,
+  context: Context,
+  read: SubmissionReader = (id, ctx) => readSubmission(harness, id, ctx),
+): Promise<SessionProgress> {
   const chat = await harness.snapshot(ChatDoc, context);
   const index = await harness.snapshot(DelegateIndex, context);
   const runs = (await Promise.all((index?.ids ?? []).map((id) => harness.snapshot(RunFamily, id, context)))).filter((run): run is RunDoc => run !== undefined);
-  const owed = new Set((await owedDeliveries(harness, entries(), context)).map((item) => item.message));
+  const owed = new Set((await owedDeliveries(harness, entries(), context, read)).map((item) => item.message));
   const messages: MessageProgress[] = [];
   for (const message of chat?.messages ?? []) {
     if (message.id === null) continue;
     const id = message.id as SubmissionId;
-    const submission = await harness.submission(id, context);
-    const record = submission ? await submission.status(context) : undefined;
+    const record = await read(id, context);
     const subtasks = await subtasksOf(harness, runs, id, context);
-    const pending = subtasks.some((subtask) => subtask.running) || (await noticePending(harness, runs, id, context));
+    const pending = subtasks.some((subtask) => subtask.running) || (await noticePending(read, runs, id, context));
     messages.push({
       id: message.id,
       requestId: message.requestId,
@@ -95,20 +99,17 @@ export async function computeProgress(harness: Harness, entries: () => Entries, 
   const hiddenEntries: string[] = [];
   for (const run of runs) {
     if (run.noticeId === null) continue;
-    const notice = await harness.submission(run.noticeId, context);
-    const record = notice ? await notice.status(context) : undefined;
+    const record = await read(run.noticeId, context);
     if (record?.entry !== undefined) hiddenEntries.push(String(record.entry));
   }
   for (const nudge of (await harness.snapshot(DeliveryDoc, context))?.nudges ?? []) {
     if (nudge.id === null) continue;
-    const submission = await harness.submission(nudge.id as SubmissionId, context);
-    const record = submission ? await submission.status(context) : undefined;
+    const record = await read(nudge.id as SubmissionId, context);
     if (record?.entry !== undefined) hiddenEntries.push(String(record.entry));
   }
   for (const make of (await harness.snapshot(MakeDoc, context))?.makes ?? []) {
     if (make.id === null) continue;
-    const submission = await harness.submission(make.id as SubmissionId, context);
-    const record = submission ? await submission.status(context) : undefined;
+    const record = await read(make.id as SubmissionId, context);
     if (record?.entry !== undefined) hiddenEntries.push(String(record.entry));
   }
   return { messages, hiddenEntries };
@@ -117,25 +118,63 @@ export async function computeProgress(harness: Harness, entries: () => Entries, 
 export function trackSnapshot<T>(
   harness: Harness,
   compute: (context: Context) => Promise<T>,
-  sink: { replace(context: Context, value: T): void },
+  sink: { replace(context: Context, value: T): void; pending?(): void },
   context: Context,
   onError: (error: unknown) => void,
+  relevant: (publication: CommitPublication) => boolean = () => true,
 ): () => void {
-  let queue: Promise<void> = Promise.resolve();
-  const refresh = (): void => {
-    queue = queue.then(async () => sink.replace(context, await compute(context))).catch(onError);
+  let dirty = false;
+  let running = false;
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const run = async (): Promise<void> => {
+    timer = undefined;
+    running = true;
+    try {
+      while (dirty && !stopped) {
+        dirty = false;
+        try {
+          const value = await compute(context);
+          if (!stopped && !dirty) sink.replace(context, value);
+        } catch (error) {
+          if (!stopped) onError(error);
+        }
+      }
+    } finally {
+      running = false;
+    }
   };
-  const unsubscribe = harness.subscribeCommits(() => setTimeout(refresh));
+  const refresh = (): void => {
+    if (stopped) return;
+    dirty = true;
+    sink.pending?.();
+    if (!running && timer === undefined) timer = setTimeout(() => void run());
+  };
+  const unsubscribe = harness.subscribeCommits((publication) => {
+    if (relevant(publication)) refresh();
+  });
+  const stop = (): void => {
+    stopped = true;
+    clearTimeout(timer);
+    unsubscribe();
+    unsubscribeClose();
+  };
+  const unsubscribeClose = harness.subscribeClose(stop);
   refresh();
-  return unsubscribe;
+  return stop;
 }
 
 export function trackProgress(
   harness: Harness,
-  progress: { replace(context: Context, value: SessionProgress): void },
+  progress: { replace(context: Context, value: SessionProgress): void; pending?(): void },
   entries: () => Entries,
   context: Context,
   onError: (error: unknown) => void,
 ): () => void {
-  return trackSnapshot(harness, (ctx) => computeProgress(harness, entries, ctx), progress, context, onError);
+  const submissions = trackSubmissions(harness);
+  const stop = trackSnapshot(harness, (ctx) => computeProgress(harness, entries, ctx, submissions.read), progress, context, onError);
+  return () => {
+    stop();
+    submissions.stop();
+  };
 }
