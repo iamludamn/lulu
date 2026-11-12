@@ -1,10 +1,10 @@
 # Contributing
 
-Bug reports, focused improvements, and documentation corrections are welcome. Open an issue before a substantial behavior or architecture change so maintainers can discuss the scope. For vulnerabilities, follow [Security](SECURITY.md).
+Bug reports, focused improvements, and documentation corrections are welcome. Open an issue before a substantial behavior or architecture change so maintainers can discuss the scope. For vulnerabilities, follow [Security](../SECURITY.md).
 
 ## Development
 
-Start with the prerequisites and build in [README](README.md), then follow [deployment](docs/deployment.md) for a local Worker. Keep credentials in a secret manager and inject them at runtime. `.env.index` lists variable names only; never commit credentials, conversation exports, or unredacted telemetry.
+Start with the prerequisites and build in [README](../README.md), then follow [deployment](deployment.md) for a local Worker. Keep credentials in a secret manager and inject them at runtime. `.env.index` lists variable names only; never commit credentials, conversation exports, or unredacted telemetry.
 
 For web development, run the Worker first, then `npm run dev -w @lulu/client`. Vite proxies `/api`, including WebSockets, to `http://127.0.0.1:8787`. Set `LULU_WORKER_URL` to use another local Worker address.
 
@@ -19,7 +19,7 @@ For desktop development, run `npm run dev --prefix client/desktop` on a supporte
 - Keep recoverable state in Docs and model-visible context in sections.
 - Keep modules aligned with the existing feature boundaries; avoid speculative abstractions.
 - Do not add code comments. Keep names and implementation clear.
-- Keep documentation concise and grounded in code; `docs/` is for operational guides.
+- Keep documentation concise and grounded in code. Put architecture, contributor, community, and operational guides in `docs/`.
 
 ## Validation
 
@@ -39,4 +39,4 @@ Branch from current `main` using `<type>/<short-kebab-description>`. Use English
 
 Explain the problem, resulting behavior, and verification. Note any limitations, especially unverified native clients or external integrations. Screenshots help when UI behavior changes. Do not include secrets or private user data. Maintainers review and squash-merge changes into `main`.
 
-By contributing, you agree to license your contribution under the repository's [MIT license](LICENSE). Retain required third-party notices and disclose newly introduced dependencies.
+By contributing, you agree to license your contribution under the repository's [MIT license](../LICENSE). Retain required third-party notices and disclose newly introduced dependencies.

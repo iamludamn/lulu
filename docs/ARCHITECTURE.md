@@ -39,7 +39,7 @@ A successful `result` for prompt submission acknowledges acceptance, not a compl
 
 On object initialization, lulu opens the stored Harness, installs its extension registry, resumes durable work, reopens/configures the root conversation, and attaches state observers. Promise queues, submission caches, socket bookkeeping, and broadcast timers coordinate a live instance; they are not durable checkpoints. Changing persisted Doc kinds, versions, extension names, or task inputs requires considering existing sessions and migrations.
 
-Sources: [BotSession](core/src/conversation/bot.ts), [progress records](core/src/conversation/progress.ts), [submission reads](core/src/conversation/submissions.ts), and [harness installation](core/src/agent/catalog.ts).
+Sources: [BotSession](../core/src/conversation/bot.ts), [progress records](../core/src/conversation/progress.ts), [submission reads](../core/src/conversation/submissions.ts), and [harness installation](../core/src/agent/catalog.ts).
 
 ## Memory: extraction, storage, and injection
 
@@ -56,7 +56,7 @@ For injection, `judgeRecall` examines recent turns and the new prompt, then save
 
 `getContext` includes clipped system-file content and a path/description catalog for other Markdown files. Read/grep tools retrieve additional content on demand. Keep extraction checkpoints, stored memory content, and model-visible context distinct when modifying this module.
 
-Sources: [Memory object](core/src/memory/object.ts), [agent and commit handling](core/src/memory/agent.ts), [episode extraction](core/src/memory/episodes.ts), [recall](core/src/memory/recall.ts), [context construction](core/src/memory/context.ts), and [injection extension](core/src/memory/extension.ts).
+Sources: [Memory object](../core/src/memory/object.ts), [agent and commit handling](../core/src/memory/agent.ts), [episode extraction](../core/src/memory/episodes.ts), [recall](../core/src/memory/recall.ts), [context construction](../core/src/memory/context.ts), and [injection extension](../core/src/memory/extension.ts).
 
 ## Delegated work and execution environments
 
@@ -70,7 +70,7 @@ Execution resources are tracked separately in the conversation-scoped `SandboxDo
 
 The lifecycle task persists `check`, `wait`, and `apply` phases. It renews resources while tasks use them, idles unused resources, and destroys them after the retention interval. External operations are reserved before calling the provider, and results are accepted only if the operation and workspace epoch still match. `WorkspaceLost` marks loss explicitly; stale results must not silently resurrect or replace a newer workspace. Startup recovery recreates a missing lifecycle task for an existing binding. Resource timing constants and backend behavior remain defined in code.
 
-Sources: [run records](core/src/delegate/runs.ts), [spawn transaction](core/src/delegate/spawn.ts), [wait/settlement](core/src/delegate/wait.ts), [tool guards](core/src/delegate/extension.ts), [sandbox state](core/src/sandbox/doc.ts), [workspace reservations](core/src/sandbox/workspace.ts), and [lifecycle](core/src/sandbox/lifecycle.ts).
+Sources: [run records](../core/src/delegate/runs.ts), [spawn transaction](../core/src/delegate/spawn.ts), [wait/settlement](../core/src/delegate/wait.ts), [tool guards](../core/src/delegate/extension.ts), [sandbox state](../core/src/sandbox/doc.ts), [workspace reservations](../core/src/sandbox/workspace.ts), and [lifecycle](../core/src/sandbox/lifecycle.ts).
 
 ## Scheduling and alarm recovery
 
@@ -82,7 +82,7 @@ Late delivery is bounded by a grace period. Beyond it, a one-shot job becomes `m
 
 The Bot's single alarm also supports durable-task recovery and sandbox lifecycle wakeups. `nextAlarmAt` chooses among scheduled work and task recovery deadlines; relevant committed changes trigger alarm reconciliation. A schedule-processing error schedules a recovery retry. New alarm users must participate in this arbitration rather than independently overwriting the Bot alarm. The separate Memory object has its own alarm.
 
-Sources: [schedule structures and time calculation](core/src/cron/schedule.ts), [schedule tool](core/src/cron/tool.ts), [dispatch/watchdog](core/src/cron/engine.ts), and [alarm arbitration](core/src/cron/alarm.ts).
+Sources: [schedule structures and time calculation](../core/src/cron/schedule.ts), [schedule tool](../core/src/cron/tool.ts), [dispatch/watchdog](../core/src/cron/engine.ts), and [alarm arbitration](../core/src/cron/alarm.ts).
 
 ## Sending, artifacts, and user acceptance
 
@@ -94,7 +94,7 @@ Artifacts use versioned `artifact://name@version` references. The Artifact objec
 
 Card delivery and keeping are separate state changes. `widget.keep` resolves a delivered offer, then updates `AssetsDoc` or `PanelDoc`. Space revisions retain the widget ID and require acceptance; stored receipts prevent an old/retried offer from rolling back a newer accepted revision. Generating a file, delivering its card, and adding it to a user's assets or panel must not be conflated.
 
-Sources: [send validation](core/src/send/tool.ts), [delivery recovery](core/src/send/delivery.ts), [artifact storage](core/src/artifact/object.ts), [acceptance](core/src/send/keep.ts), and [space receipts](core/src/send/space-offers.ts).
+Sources: [send validation](../core/src/send/tool.ts), [delivery recovery](../core/src/send/delivery.ts), [artifact storage](../core/src/artifact/object.ts), [acceptance](../core/src/send/keep.ts), and [space receipts](../core/src/send/space-offers.ts).
 
 ## Clients and protocol
 
@@ -102,12 +102,12 @@ Sources: [send validation](core/src/send/tool.ts), [delivery recovery](core/src/
 
 A client sends `hello` after connecting. The server replies with model configuration and a full current state. Subsequent state frames include the complete entry `order` but only changed entry bodies; consumers merge bodies by entry ID and use `order` for membership and ordering. An empty `entries` array in an update does not clear the transcript. Reconnecting and sending `hello` obtains a fresh full state, rather than replaying a durable socket-event log. Local client caches and command acknowledgements are not the authoritative conversation state.
 
-The wire contract is in [wire.ts](core/src/protocol/wire.ts); frame validation is in [frame.ts](core/src/conversation/frame.ts). Changes to frame shapes or Pi's serialized conversation view need review across web, desktop, and Swift consumers, including snapshot/merge behavior.
+The wire contract is in [wire.ts](../core/src/protocol/wire.ts); frame validation is in [frame.ts](../core/src/conversation/frame.ts). Changes to frame shapes or Pi's serialized conversation view need review across web, desktop, and Swift consumers, including snapshot/merge behavior.
 
-The public router uses `/api/bots/main/`. WebSockets carry conversation activity; HTTP routes expose memory, schedules, artifacts, spaces, and MCP administration. The current fixed bot identity is a single-user convention, not an authorization boundary. See [Security](SECURITY.md).
+The public router uses `/api/bots/main/`. WebSockets carry conversation activity; HTTP routes expose memory, schedules, artifacts, spaces, and MCP administration. The current fixed bot identity is a single-user convention, not an authorization boundary. See [Security](../SECURITY.md).
 
 ## Integrations
 
 Model registration and selection live in `core/src/agent/models.ts`. Sandbox selection lives in `core/src/sandbox/backends.ts`; the implemented backend type is E2B. MCP configuration, encryption, and authorization live under `core/src/agent/mcp*.ts`. Voice transport lives under `core/src/voice/`.
 
-Telemetry is exported as OTLP/HTTP traces and converted into metrics by the external collector. [Observability](docs/observability.md) describes deployment requirements and query conventions. Neither the collector nor external services are part of the Worker deployment.
+Telemetry is exported as OTLP/HTTP traces and converted into metrics by the external collector. [Observability](observability.md) describes deployment requirements and query conventions. Neither the collector nor external services are part of the Worker deployment.

@@ -45,12 +45,12 @@ Some client targets and internal names still use `PiStack`; the project is calle
 
 ## Documentation
 
-- [Architecture and extension boundaries](ARCHITECTURE.md)
-- [Development and contributions](CONTRIBUTING.md)
+- [Architecture and extension boundaries](docs/ARCHITECTURE.md)
+- [Development and contributions](docs/CONTRIBUTING.md)
 - [Deployment and configuration](docs/deployment.md)
 - [Telemetry and operations](docs/observability.md)
 - [Security policy](SECURITY.md)
-- [Community expectations](CODE_OF_CONDUCT.md)
+- [Community expectations](docs/CODE_OF_CONDUCT.md)
 
 Use GitHub Issues for bugs and proposals. Maintainers may track follow-up work internally, but contributors do not need access to internal systems.
 
