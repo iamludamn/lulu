@@ -45,18 +45,20 @@ Sources: [BotSession](../core/src/conversation/bot.ts), [progress records](../co
 
 Memory writing and memory injection are separate paths. The chat harness exposes read tools; a background memory agent owns updates.
 
-1. A prompt requests a touch on the Memory object. Its alarm coalesces work. At processing time it asks the Bot for a bounded page of transcript entries after the persisted cursor.
-2. `episodesOf` extracts user text and the assistant's user-facing `send_to_user` text, excluding refused sends. Tool traces and private assistant scratch text are not treated as assistant memory episodes.
-3. `MemoryAgent` uses a separate Harness to update versioned memory files. `guardChanges` checks the resulting changes before a file commit. Commit trailers record the logical request ID and processed transcript position when changes are committed.
-4. After `remember` succeeds, the Memory object advances its cursor. Consolidation is checked during processing and recorded by date; it is not an independently scheduled daily cron. Caught processing failures re-arm the alarm for a later retry.
+1. A committed compaction in the main conversation triggers discovery of memory work. `recoverMemoryUpdates` scans the durable transcript and atomically advances `MemoryTriggerDoc` with creation of background update tasks. Repeated discovery does not enqueue the same compaction twice; failed or delegate compactions do not trigger this path.
+2. Each update task sends its fixed compaction boundary to the Memory object. The object reads transcript pages after its persisted cursor until that boundary is reached. Later entries wait for a later compaction. `episodesOf` extracts user text and user-facing `send_to_user` text, excluding refused sends; tool traces and private assistant scratch text are not assistant memory episodes.
+3. `MemoryAgent` uses a separate Harness to update versioned memory files. `guardChanges` checks resulting changes before a file commit. Commit trailers record the logical request ID and processed transcript position when changes are committed.
+4. After each successful batch, the Memory object checkpoints its cursor. Consolidation is checked during triggered processing and recorded by date; it is not a daily cron. A failed consolidation can be retried even when the episode cursor has already reached the boundary.
 
-The transcript cursor, versioned memory file commits, and memory-agent Harness have different responsibilities. The file commit and cursor update are separate operations. Replay handling consults request-ID trailers in recent file history and existing durable submissions; an in-memory serial queue alone cannot prevent duplicate work after a restart. Processing is paged, so one alarm does not imply the entire transcript backlog has been drained.
+The trigger scan position, extraction cursor, versioned file commits, and memory-agent Harness have different responsibilities. File commits and cursor updates are separate operations. Replay handling consults request-ID trailers in recent file history and existing durable submissions; an in-memory serial queue alone cannot prevent duplicate work after a restart.
+
+A failed update remains a durable task with a retry checkpoint. Its wait deadline participates in the Bot recovery alarm. User messages no longer schedule memory processing, and legacy Memory object alarms are cleared when delivered. Diagnostic `/status` fields describe processing attempts; they are not the authoritative trigger queue or idempotency record.
 
 For injection, `judgeRecall` examines recent turns and the new prompt, then saves `{ requestId, inject }` in `RecallDoc`. Missing classifier configuration or a failed classification falls back to injection. The memory `section` refreshes context when requested; otherwise it can reuse the previously shown section. An `inject: false` decision therefore does not guarantee the model sees no memory.
 
 `getContext` includes clipped system-file content and a path/description catalog for other Markdown files. Read/grep tools retrieve additional content on demand. Keep extraction checkpoints, stored memory content, and model-visible context distinct when modifying this module.
 
-Sources: [Memory object](../core/src/memory/object.ts), [agent and commit handling](../core/src/memory/agent.ts), [episode extraction](../core/src/memory/episodes.ts), [recall](../core/src/memory/recall.ts), [context construction](../core/src/memory/context.ts), and [injection extension](../core/src/memory/extension.ts).
+Sources: [compaction discovery and update task](../core/src/memory/schedule.ts), [Memory object](../core/src/memory/object.ts), [agent and commit handling](../core/src/memory/agent.ts), [episode extraction](../core/src/memory/episodes.ts), [recall](../core/src/memory/recall.ts), [context construction](../core/src/memory/context.ts), and [injection extension](../core/src/memory/extension.ts).
 
 ## Delegated work and execution environments
 
@@ -80,7 +82,7 @@ On alarm delivery, `fireDue` creates delegated work and advances the job in the 
 
 Late delivery is bounded by a grace period. Beyond it, a one-shot job becomes `missed`, and a recurring job advances to a future occurrence instead of replaying every missed occurrence. The watchdog marks overdue running jobs failed and requests child abortion when evaluated; it is not a hard real-time execution deadline.
 
-The Bot's single alarm also supports durable-task recovery and sandbox lifecycle wakeups. `nextAlarmAt` chooses among scheduled work and task recovery deadlines; relevant committed changes trigger alarm reconciliation. A schedule-processing error schedules a recovery retry. New alarm users must participate in this arbitration rather than independently overwriting the Bot alarm. The separate Memory object has its own alarm.
+The Bot's single alarm also supports durable-task recovery, memory-update retries, and sandbox lifecycle wakeups. `nextAlarmAt` chooses among scheduled work and task recovery deadlines; relevant committed changes trigger alarm reconciliation. A schedule-processing error schedules a recovery retry. New alarm users must participate in this arbitration rather than independently overwriting the Bot alarm. Memory processing retries use this arbitration rather than a separate Memory object alarm.
 
 Sources: [schedule structures and time calculation](../core/src/cron/schedule.ts), [schedule tool](../core/src/cron/tool.ts), [dispatch/watchdog](../core/src/cron/engine.ts), and [alarm arbitration](../core/src/cron/alarm.ts).
 
