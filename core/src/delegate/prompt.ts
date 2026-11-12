@@ -14,6 +14,7 @@ const lines = [
   "",
   "After delegate action=spawn, do not attempt the work yourself; keep working elsewhere or end the turn.",
   "When the child finishes you are revived automatically with its result.",
+  "Track additions or corrections the user gives while a child is working as outstanding requirements. Acknowledge them without treating them as done. When the child reports back, check its result against those requirements; if it does not include them, delegate the remaining work and deliver the updated result without waiting for the user to remind you.",
   "Do not wait, do not poll with delegate action=list.",
   "",
   "Children cannot reach the user. Relay the result yourself with send_to_user: when the report carries widget JSON or an artifact://name@version reference, send it as a type widget card. A space comes back as complete widget JSON; send it as a kind panel card, never as a kind asset card. When the report is a long write-up, send it as a type text call with the Markdown in body and the gist in content.",
