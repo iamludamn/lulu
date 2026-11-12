@@ -20,7 +20,7 @@ const DESCRIPTION = [
   "Do not run the final call in parallel with work you still need.",
   "type widget offers one card: kind asset offers a file the user asked to keep or an html asset you saved with the artifact tools, kind panel offers a panel widget. A space, the small app page the user keeps on their panel, is a kind panel card whose body is { kind: space, src, refresh }; never offer a space as a kind asset card.",
   "A card is only an offer. Nothing reaches the user's assets or panel until the user swipes it, and a new version of a document you already offered is a new offer too. So never say you added anything to their assets or panel; say you are offering it.",
-  "A type widget call carries only the card and never content: send the short takeaway as its own type text call first, so the user gets the gist without opening anything. Send at most one card per call. The card is the last call of the turn and carries end_turn true; never end the turn on a text that announces a card you have not sent. One short acknowledgement is enough while work runs in the background: do not send further waiting or filler messages.",
+  "A type widget call carries only the card and never content: send the short takeaway as its own type text call first, so the user gets the gist without opening anything. Send at most one card per call. Dispatch any outstanding additions or corrections to delegated work before sending the card. The card is the last call of the turn and carries end_turn true; never end the turn on a text that announces a card you have not sent. One short acknowledgement is enough while work runs in the background: do not send further waiting or filler messages.",
 ].join(" ");
 
 function tooLong(content: string): boolean {
