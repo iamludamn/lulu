@@ -2,6 +2,7 @@ import type { Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Conversation, Harness, SubmissionId } from "@earendil-works/pi-durable";
 import { ChatDoc } from "../conversation/progress.js";
+import { readSubmission, type SubmissionReader } from "../conversation/submissions.js";
 import { DeliveryDoc } from "./doc.js";
 import { sentIn } from "./sent.js";
 
@@ -16,16 +17,20 @@ export type Entries = readonly { id?: unknown; kind?: unknown; model?: unknown }
 
 export type Owed = { message: number; requestId: string };
 
-async function silent(harness: Harness, id: number, entries: Entries, context: Context): Promise<boolean> {
-  const submission = await harness.submission(id as SubmissionId, context);
-  const record = submission ? await submission.status(context) : undefined;
+async function silent(read: SubmissionReader, id: number, entries: Entries, context: Context): Promise<boolean> {
+  const record = await read(id as SubmissionId, context);
   if (record?.status !== "done") return false;
   const from = Number(record.entry);
   const to = Number(record.answer);
   return sentIn(entries.filter((entry) => Number(entry.id) > from && Number(entry.id) <= to)).length === 0;
 }
 
-export async function owedDeliveries(harness: Harness, entries: Entries, context: Context): Promise<Owed[]> {
+export async function owedDeliveries(
+  harness: Harness,
+  entries: Entries,
+  context: Context,
+  read: SubmissionReader = (id, ctx) => readSubmission(harness, id, ctx),
+): Promise<Owed[]> {
   const chat = await harness.snapshot(ChatDoc, context);
   const delivery = await harness.snapshot(DeliveryDoc, context);
   const since = delivery?.since ?? Number.POSITIVE_INFINITY;
@@ -34,7 +39,7 @@ export async function owedDeliveries(harness: Harness, entries: Entries, context
   const chain = (delivery?.nudges ?? []).filter((nudge) => nudge.message === message.id);
   const last = chain.at(-1);
   if (last !== undefined && last.id === null) return [{ message: message.id, requestId: last.requestId }];
-  if (chain.length >= MAX_NUDGES || !(await silent(harness, last?.id ?? message.id, entries, context))) return [];
+  if (chain.length >= MAX_NUDGES || !(await silent(read, last?.id ?? message.id, entries, context))) return [];
   return [{ message: message.id, requestId: `nudge:${message.id}#${chain.length}` }];
 }
 

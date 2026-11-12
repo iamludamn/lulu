@@ -66,7 +66,7 @@ export class BotSession {
   readonly #sentEntries = new Map<string, string>();
   #sentRest = "";
   #cooling = false;
-  #awaiting = 0;
+  #awaiting = false;
   #waitTimer: ReturnType<typeof setTimeout> | undefined = undefined;
   readonly #deferred: Array<() => void> = [];
   #dirty = false;
@@ -125,14 +125,6 @@ export class BotSession {
     );
     this.#harness = harness;
     const trace = traceHarness(harness, this.#host.telemetry, { "lulu.bot.id": this.#host.name });
-    harness.subscribeCommits(() => {
-      this.#awaiting += 1;
-      this.#waitTimer ??= setTimeout(() => {
-        this.#waitTimer = undefined;
-        this.#awaiting = 0;
-        this.#broadcastState();
-      }, PROGRESS_WAIT_MS);
-    });
     harness.subscribeCommits((publication) => {
       if (publication.changes.some((change) => (change.type === "document" && (change.record.kind === CRON_KIND || change.record.kind === SANDBOX_KIND)) || (change.type === "task" && change.value.kind === SANDBOX_LIFECYCLE))) {
         void this.#refreshAlarm().catch((error: unknown) => reportError("Schedule alarm reconciliation failed", error));
@@ -162,13 +154,19 @@ export class BotSession {
     trackProgress(
       harness,
       {
+        pending: () => {
+          this.#awaiting = true;
+          this.#waitTimer ??= setTimeout(() => {
+            this.#waitTimer = undefined;
+            this.#awaiting = false;
+            this.#broadcastState();
+          }, PROGRESS_WAIT_MS);
+        },
         replace: (_context, value) => {
           this.#progress = value;
-          this.#awaiting = Math.max(0, this.#awaiting - 1);
-          if (this.#awaiting === 0) {
-            clearTimeout(this.#waitTimer);
-            this.#waitTimer = undefined;
-          }
+          this.#awaiting = false;
+          clearTimeout(this.#waitTimer);
+          this.#waitTimer = undefined;
           void this.#voice.settle().catch((error: unknown) => reportError("Voice settle failed", error));
           this.#chase();
           void this.#settleMakes();
@@ -194,6 +192,7 @@ export class BotSession {
       },
       BACKGROUND_CONTEXT,
       this.#snapshotFailed("layout"),
+      (publication) => publication.changes.some((change) => change.type === "document" && (change.record.kind === PanelDoc.definition.kind || change.record.kind === AssetsDoc.definition.kind)),
     );
     await harness.commit(async (tx) => {
       const delivery = await tx.doc(DeliveryDoc);
@@ -483,7 +482,7 @@ export class BotSession {
   }
 
   #broadcastState(): void {
-    if (this.#cooling || this.#awaiting > 0) {
+    if (this.#cooling || this.#awaiting) {
       this.#dirty = true;
       return;
     }
@@ -525,7 +524,7 @@ export class BotSession {
 
   #send(socket: Socket, message: ServerMessage): void {
     if (message.type === "result") {
-      if (this.#awaiting > 0) {
+      if (this.#awaiting) {
         this.#deferred.push(() => this.#send(socket, message));
         return;
       }
