@@ -1,0 +1,667 @@
+{
+  "uid": "lulu-memory",
+  "title": "Lulu memory diagnostics",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 105,
+      "title": "Requests carrying memory",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 8,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Model request attempts carrying rendered memory content or a non-empty memory catalog. Template-only seeds are excluded. Includes tool rounds, retries and recovery; not unique user messages or proof the provider accepted or used the memory.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(sum_over_time(lulu_memory_request_attempts_total{lulu_memory_coverage=~\"content|catalog\"}[$__range])) or (sum(sum_over_time(lulu_memory_request_attempts_total[$__range])) * 0)",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 100,
+      "title": "Requests with memory content",
+      "type": "stat",
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 8,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Counts model request attempts at the pi beforeRequest hook, including tool rounds, retries and recovery. Empty templates and frontmatter-only seeds do not count as content. No data means unobserved, not zero. History before rollout cannot be backfilled.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(sum_over_time(lulu_memory_request_attempts_total{lulu_memory_coverage=\"content\"}[$__range])) or (sum(sum_over_time(lulu_memory_request_attempts_total[$__range])) * 0)",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 101,
+      "title": "Requests with catalog only",
+      "type": "stat",
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 8,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Counts model request attempts at the pi beforeRequest hook, including tool rounds, retries and recovery. Empty templates and frontmatter-only seeds do not count as content. No data means unobserved, not zero. History before rollout cannot be backfilled.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(sum_over_time(lulu_memory_request_attempts_total{lulu_memory_coverage=\"catalog\"}[$__range])) or (sum(sum_over_time(lulu_memory_request_attempts_total[$__range])) * 0)",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 102,
+      "title": "Requests with empty template",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 8,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Counts model request attempts at the pi beforeRequest hook, including tool rounds, retries and recovery. Empty templates and frontmatter-only seeds do not count as content. No data means unobserved, not zero. History before rollout cannot be backfilled.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(sum_over_time(lulu_memory_request_attempts_total{lulu_memory_coverage=\"template\"}[$__range])) or (sum(sum_over_time(lulu_memory_request_attempts_total[$__range])) * 0)",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 103,
+      "title": "Requests without memory section",
+      "type": "stat",
+      "gridPos": {
+        "x": 8,
+        "y": 5,
+        "w": 8,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Counts model request attempts at the pi beforeRequest hook, including tool rounds, retries and recovery. Empty templates and frontmatter-only seeds do not count as content. No data means unobserved, not zero. History before rollout cannot be backfilled.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(sum_over_time(lulu_memory_request_attempts_total{lulu_memory_coverage=\"none\"}[$__range])) or (sum(sum_over_time(lulu_memory_request_attempts_total[$__range])) * 0)",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 106,
+      "title": "Unrecognized memory format",
+      "type": "stat",
+      "gridPos": {
+        "x": 16,
+        "y": 5,
+        "w": 8,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Counts model request attempts at the pi beforeRequest hook, including tool rounds, retries and recovery. Empty templates and frontmatter-only seeds do not count as content. No data means unobserved, not zero. History before rollout cannot be backfilled.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(sum_over_time(lulu_memory_request_attempts_total{lulu_memory_coverage=\"unknown\"}[$__range])) or (sum(sum_over_time(lulu_memory_request_attempts_total[$__range])) * 0)",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 1,
+      "title": "Processing outcomes",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (span_name, lulu_memory_outcome) (sum_over_time(lulu_span_calls_total{span_name=~\"memory.remember|memory.consolidate|memory.alarm|memory.update\"}[$__interval]))",
+          "legendFormat": "{{span_name}} / {{lulu_memory_outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Processing latency p95",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 10,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, span_name) (sum_over_time(lulu_span_duration_milliseconds_bucket{span_name=~\"memory.remember|memory.consolidate|memory.alarm|memory.update\"}[$__interval])))",
+          "legendFormat": "{{span_name}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Recall decisions and fallbacks",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (lulu_recall_inject, lulu_recall_fallback) (sum_over_time(lulu_span_calls_total{span_name=\"memory.recall\"}[$__interval]))",
+          "legendFormat": "inject={{lulu_recall_inject}} / {{lulu_recall_fallback}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Context delivery and availability",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 18,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (lulu_memory_outcome, lulu_memory_available) (sum_over_time(lulu_span_calls_total{span_name=\"memory.context.delivery\"}[$__interval]))",
+          "legendFormat": "{{lulu_memory_outcome}} / available={{lulu_memory_available}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Retrieval outcomes",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (gen_ai_tool_name, lulu_memory_outcome) (sum_over_time(lulu_span_calls_total{span_name=\"memory.retrieve\"}[$__interval]))",
+          "legendFormat": "{{gen_ai_tool_name}} / {{lulu_memory_outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Observed pending age p95",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 26,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (sum_over_time(lulu_memory_pending_age_ms_bucket[$__interval])))",
+          "legendFormat": "pending age"
+        }
+      ],
+      "description": "Sampled when memory processing starts after a committed root compaction. Missing samples do not mean idle or healthy. Durable update tasks hold pending/retry state; the internal memory /status endpoint reports processing diagnostics."
+    },
+    {
+      "id": 7,
+      "title": "Guard-blocked changes",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 34,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(sum_over_time(lulu_memory_blocked_sum[$__interval]))",
+          "legendFormat": "blocked files"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Clipped system files",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 34,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(sum_over_time(lulu_memory_clipped_files_sum[$__interval]))",
+          "legendFormat": "clipped files"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Memory model cost estimate (USD)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 42,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (gen_ai_request_model) (sum_over_time(lulu_chat_cost_total{lulu_agent=\"memory\"}[$__interval]))",
+          "legendFormat": "{{gen_ai_request_model}}"
+        }
+      ],
+      "description": "Model pricing estimate only. These calls already belong to the token-cost dashboard. Do not add run totals or interpret as Cloudflare charges."
+    },
+    {
+      "id": 10,
+      "title": "Memory model tokens",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 42,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (__name__) (sum_over_time({__name__=~\"lulu_chat_(input|output|cache_read|cache_write)_tokens_total\",lulu_agent=\"memory\"}[$__interval]))",
+          "legendFormat": "{{__name__}}"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Observed retry lateness p95",
+      "description": "Observed when a memory update retry runs; missing data does not establish health.",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 50,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (sum_over_time(lulu_memory_overdue_ms_bucket[$__interval])))",
+          "legendFormat": "overdue_ms"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Observed retry count p95",
+      "description": "Processing retries persisted across restarts; not model-provider retries.",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 50,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (sum_over_time(lulu_memory_retries_bucket[$__interval])))",
+          "legendFormat": "retries"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Episodes processed per batch p95",
+      "description": "Source episode count across all batches through one compaction boundary, not a difference of entry IDs.",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 58,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (sum_over_time(lulu_memory_episodes_bucket[$__interval])))",
+          "legendFormat": "episodes"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "Context size p95",
+      "description": "Character count; no memory text is exported. Build, delivery and retrieval observations are combined.",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 58,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (sum_over_time(lulu_memory_characters_bucket[$__interval])))",
+          "legendFormat": "characters"
+        }
+      ]
+    },
+    {
+      "id": 104,
+      "title": "Actual request memory coverage",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 66,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (lulu_memory_coverage) (sum_over_time(lulu_memory_request_attempts_total[$__interval]))",
+          "legendFormat": "{{lulu_memory_coverage}}"
+        }
+      ]
+    }
+  ]
+}

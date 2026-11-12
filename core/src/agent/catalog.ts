@@ -9,6 +9,8 @@ import { createSendExtension } from "../send/extension.js";
 import type { ArtifactCheck } from "../send/tool.js";
 import { createEnvironmentExtension } from "../sandbox/extension.js";
 import { createSandboxProvider } from "../sandbox/backends.js";
+import { memoryTelemetry } from "../memory/telemetry.js";
+import { createMemoryUpdate } from "../memory/schedule.js";
 import { createMemoryExtension } from "../memory/extension.js";
 import { memoryContext, remoteFiles } from "../memory/client.js";
 import { createArtifactExtension } from "../artifact/extension.js";
@@ -31,11 +33,6 @@ const PREAMBLE = [
 export const DEFAULT_HARNESS = {
   extensions: ["coding", "environment", "delegate", "cron", "chat", "mcp", "codemode", "memory", "artifact", "panel", "send"],
   prompt: PREAMBLE,
-};
-
-const contextFallback = (error: unknown): string => {
-  console.error(JSON.stringify({ message: "Memory context unavailable", error: error instanceof Error ? error.message : String(error) }));
-  return "";
 };
 
 const artifactCheck = (host: DurableHost): ArtifactCheck | undefined =>
@@ -64,7 +61,7 @@ export const CATALOG: Record<string, (deps: HarnessDeps) => Extension> = {
     }),
   mcp: ({ mcp }) => mcp.extension,
   codemode: ({ host, mcp }) => createCodemodeExtension({ sandbox: host.sandbox, namespaces: mcp.namespaces }),
-  memory: ({ host }) => createMemoryExtension(() => memoryContext(host, host.name).catch((error: unknown) => contextFallback(error)), remoteFiles(host, host.name)),
+  memory: ({ host }) => createMemoryExtension(() => memoryContext(host, host.name), remoteFiles(host, host.name), memoryTelemetry(host.telemetry, host.name), createMemoryUpdate(host)),
   artifact: ({ host }) => createArtifactExtension(artifactConfigured(host.env)),
 };
 

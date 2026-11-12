@@ -1,0 +1,11 @@
+[Unit]
+Description=Collect Lulu Cloudflare usage
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/lulu
+ExecStart=/usr/bin/mise exec -- node ops/observability/cloudflare.mjs --remote
+ExecStopPost=/bin/sh -c 'if [ "$EXIT_STATUS" = "9" ]; then /usr/bin/systemctl --user stop lulu-cloudflare.timer; fi'
+TimeoutStartSec=150
+NoNewPrivileges=true

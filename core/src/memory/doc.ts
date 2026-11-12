@@ -7,6 +7,7 @@ export type Episode = {
 };
 
 export type EpisodeSource = {
+  conversationId?: string;
   model: ModelRef;
   episodes: Episode[];
   through: number;

@@ -1,3 +1,4 @@
+import type { TelemetrySpan } from "@earendil-works/pi-telemetry";
 import type { Models } from "@earendil-works/pi-ai/models";
 import type { Storage } from "@earendil-works/pi-durable";
 import { createChatModels } from "../agent/models.js";
@@ -9,14 +10,15 @@ import type { MemoryFiles } from "./files.js";
 import { legacySource } from "./legacy.js";
 import { migrateLegacy } from "./migrate.js";
 import { isMemoryFile } from "./paths.js";
+import { memorySpan } from "./telemetry.js";
 
-const DEBOUNCE_MS = 10 * 60 * 1000;
 const RETRY_MS = 60 * 60 * 1000;
 const CURSOR_KEY = "cursor";
 const CONSOLIDATED_KEY = "consolidated";
 const LISTING_COMMITS = 20;
 
-const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+type MemoryStatus = { pendingSince?: number; due?: number; retries: number; lastSuccess?: number; failedStage?: string };
+const STATUS_KEY = "memory.status";
 
 export class MemoryObject {
   readonly #host: DurableHost;
@@ -40,15 +42,23 @@ export class MemoryObject {
 
   async fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
-    if (pathname === "/context") return new Response(await getContext(this.#files));
+    if (pathname === "/context") return new Response(await getContext(this.#files, this.#host.telemetry));
+    if (pathname === "/status") {
+      const status = await this.#status();
+      return Response.json({ ...status, overdueMs: status.due === undefined ? 0 : Math.max(0, Date.now() - status.due), cursor: (await this.#host.storage.get<number>(CURSOR_KEY)) ?? 0 });
+    }
     if (pathname === "/listing") return this.#listing();
     if (pathname === "/file") return this.#file(request);
-    if (pathname === "/touch" && request.method === "POST") return this.#touch();
+    if (pathname === "/remember" && request.method === "POST") {
+      const through = Number(new URL(request.url).searchParams.get("through"));
+      if (!Number.isSafeInteger(through) || through <= 0) return new Response(null, { status: 400 });
+      return memorySpan(this.#host.telemetry, "memory.update", { "lulu.bot.id": this.#host.name, "lulu.memory.request_id": request.headers.get("x-lulu-request-id") ?? undefined, "lulu.conversation.id": request.headers.get("x-lulu-conversation-id") ?? undefined, "lulu.memory.trigger": "compaction", "lulu.memory.cursor.target": through }, (span) => this.#serial(() => this.#update(span, through)));
+    }
     return new Response(null, { status: 404 });
   }
 
   alarm(): Promise<void> {
-    return this.#host.telemetry.startSpan({ name: "memory.alarm", attributes: { "lulu.bot.id": this.#host.name } }, () => this.#serial(() => this.#scheduled()));
+    return this.#host.alarm.delete();
   }
 
   async #listing(): Promise<Response> {
@@ -62,11 +72,12 @@ export class MemoryObject {
     return text === undefined ? new Response(null, { status: 404 }) : new Response(text);
   }
 
-  async #touch(): Promise<Response> {
-    const due = Date.now() + DEBOUNCE_MS;
-    const armed = await this.#host.alarm.get();
-    if (armed === null || armed > due) await this.#host.alarm.set(due);
-    return new Response(null, { status: 204 });
+  async #status(): Promise<MemoryStatus> {
+    return (await this.#host.storage.get<MemoryStatus>(STATUS_KEY)) ?? { retries: 0 };
+  }
+
+  async #saveStatus(entries: Record<string, unknown>): Promise<void> {
+    await this.#host.storage.put(entries).catch(() => console.error(JSON.stringify({ message: "Memory diagnostic checkpoint unavailable" })));
   }
 
   #serial<T>(task: () => Promise<T>): Promise<T> {
@@ -75,40 +86,76 @@ export class MemoryObject {
     return next;
   }
 
-  async #scheduled(): Promise<void> {
+  async #update(span: TelemetrySpan, through: number): Promise<Response> {
+    const status = await this.#status().catch((): MemoryStatus => ({ retries: 0 }));
+    span.setAttributes({ "lulu.memory.retries": status.retries, "lulu.memory.pending_age_ms": status.pendingSince === undefined ? 0 : Date.now() - status.pendingSince, "lulu.memory.overdue_ms": status.due === undefined ? 0 : Math.max(0, Date.now() - status.due), "lulu.memory.last_success": status.lastSuccess });
+    let stage = "source";
     try {
-      await this.#remember();
-    } catch (error) {
-      console.error(JSON.stringify({ message: "Memory update failed", error: errorText(error) }));
-      await this.#host.alarm.set(Date.now() + RETRY_MS);
+      const outcome = await this.#remember(span, through, (value) => { stage = value; });
+      await this.#saveStatus({ [STATUS_KEY]: { retries: 0, lastSuccess: Date.now() } });
+      span.setAttributes({ "lulu.memory.outcome": outcome });
+      return new Response(null, { status: 204 });
+    } catch {
+      const due = Date.now() + RETRY_MS;
+      span.setStatus({ status: "error", error: { name: "MemoryError", message: "memory update failed; retry scheduled" } });
+      span.setAttributes({ "lulu.memory.outcome": "failed", "lulu.memory.failure_category": stage, "lulu.memory.retry_at": due, "lulu.memory.retries": status.retries + 1 });
+      console.error(JSON.stringify({ message: "Memory update failed", category: "processing", retryAt: due }));
+      await this.#saveStatus({ [STATUS_KEY]: { ...status, pendingSince: status.pendingSince ?? Date.now(), due, retries: status.retries + 1, failedStage: stage } });
+      return new Response(null, { status: 500 });
     }
   }
 
-  async #remember(): Promise<void> {
-    const since = (await this.#host.storage.get<number>(CURSOR_KEY)) ?? 0;
-    const source = await this.#source(since);
+  async #remember(span: TelemetrySpan, through: number, stage: (value: string) => void): Promise<"empty" | "success"> {
+    let since = (await this.#host.storage.get<number>(CURSOR_KEY)) ?? 0;
+    span.setAttributes({ "lulu.memory.cursor.before": since });
+    if (since > through) return "empty";
+    let agent: MemoryAgent | undefined;
+    let episodes = 0;
+    let batches = 0;
     const date = new Date().toISOString().slice(0, 10);
     const consolidate = (await this.#host.storage.get<string>(CONSOLIDATED_KEY)) !== date;
-    if (source.episodes.length === 0 && !consolidate) {
-      await this.#host.storage.put({ [CURSOR_KEY]: source.through });
-      return;
-    }
-    const agent = new MemoryAgent({ files: this.#files, models: this.#models, model: source.model, sessionId: this.#host.id, telemetry: this.#host.telemetry });
-    await agent.start(this.#storage);
+    if (since === through && !consolidate) return "empty";
+    const openAgent = async (source: EpisodeSource): Promise<MemoryAgent> => {
+      if (agent === undefined) {
+        stage("agent_start");
+        const opened = new MemoryAgent({ files: this.#files, models: this.#models, model: source.model, sessionId: this.#host.id, botId: this.#host.name, telemetry: span });
+        await opened.start(this.#storage);
+        agent = opened;
+      }
+      return agent;
+    };
     try {
-      await agent.remember(`remember:${since}-${source.through}`, source.episodes, source.through);
-      await this.#host.storage.put({ [CURSOR_KEY]: source.through });
+      while (since < through) {
+        stage("source");
+        const source = await this.#source(since, through);
+        if (!Number.isSafeInteger(source.through) || source.through <= since || source.through > through) throw new Error("Memory source did not advance within the compaction boundary");
+        span.setAttributes({ "lulu.conversation.id": source.conversationId });
+        if (source.episodes.length > 0 || (source.through === through && consolidate)) {
+          const current = await openAgent(source);
+          stage("remember");
+          await current.remember(`remember:${since}-${source.through}`, source.episodes, source.through);
+        }
+        stage("checkpoint");
+        await this.#host.storage.put({ [CURSOR_KEY]: source.through });
+        since = source.through;
+        episodes += source.episodes.length;
+        batches += 1;
+        span.setAttributes({ "lulu.memory.cursor.after": since, "lulu.memory.episodes": episodes, "lulu.memory.batches": batches });
+      }
       if (consolidate) {
-        await agent.consolidate(`consolidate:${date}`);
+        const current = agent ?? await openAgent(await this.#source(through, through));
+        stage("consolidate");
+        await current.consolidate(`consolidate:${date}`);
         await this.#host.storage.put({ [CONSOLIDATED_KEY]: date });
       }
     } finally {
-      await agent.close();
+      await agent?.close();
     }
+    return "success";
   }
 
-  async #source(after: number): Promise<EpisodeSource> {
-    const response = await this.#host.objects.BOTS.getByName(this.#host.name).fetch(`https://bot/memory/source?after=${after}`);
+  async #source(after: number, through: number): Promise<EpisodeSource> {
+    const response = await this.#host.objects.BOTS.getByName(this.#host.name).fetch(`https://bot/memory/source?after=${after}&through=${through}`);
     if (!response.ok) throw new Error(`bot source failed (${response.status})`);
     return (await response.json()) as EpisodeSource;
   }

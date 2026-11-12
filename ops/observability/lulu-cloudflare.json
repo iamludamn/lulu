@@ -1,0 +1,649 @@
+{
+  "uid": "lulu-cloudflare",
+  "title": "Lulu Cloudflare usage",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "description": "Cloudflare Analytics usage scoped to Lulu. Gauges are window totals or storage maxima, not counters; never rate/increase/sum snapshots. Not invoice totals. S3 provider unconfirmed, so R2 is excluded. Logs written-event metering is not included. Mac credential availability is shown explicitly.",
+  "templating": {
+    "list": [
+      {
+        "name": "window",
+        "label": "Usage window",
+        "type": "custom",
+        "query": "Rolling 24 hours : trailing_24h,Previous complete UTC day : previous_day",
+        "current": {
+          "text": "Rolling 24 hours",
+          "value": "trailing_24h"
+        },
+        "options": [
+          {
+            "text": "Rolling 24 hours",
+            "value": "trailing_24h",
+            "selected": true
+          },
+          {
+            "text": "Previous complete UTC day",
+            "value": "previous_day",
+            "selected": false
+          }
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Credential source available",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "1 means the latest SSH/1Password collection completed, 0 means it failed. Mac reachability and 1Password authentication are required. No values means no observation. Authorization timeout stops the timer to avoid repeated desktop prompts; authorize 1Password before restarting it.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "last_over_time(lulu_cf_exporter_success[2d])",
+          "legendFormat": "source",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Oldest dataset age",
+      "type": "stat",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Time since the oldest last successful dataset query. Collection every 15 minutes; investigate over 30 minutes. No alerts are installed.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - min(last_over_time(lulu_cf_data_timestamp{cf_window=\"$window\"}[2d]))",
+          "legendFormat": "age",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Dataset query success",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "1 successful API query, 0 failed API query. A successful query can still return no resource rows.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "last_over_time(lulu_cf_collection_success{cf_window=\"$window\"}[45m])",
+          "legendFormat": "{{cf_dataset}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Resource observations present",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "0 means no row returned, not measured zero usage. Old usage points are suppressed when this observation is 0.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "last_over_time(lulu_cf_data_present{cf_window=\"$window\"}[45m])",
+          "legendFormat": "{{cf_dataset}} / {{cf_resource}} {{cf_operation}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Worker requests and errors",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Cloudflare Analytics estimates. Errors are not HTTP 5xx. Both series refer to the selected window, not cumulative counters.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(last_over_time(lulu_cf_worker_requests{cf_window=\"$window\"}[45m]) and on (cf_dataset, cf_window) (last_over_time(lulu_cf_collection_success{cf_window=\"$window\"}[45m]) == 1)) and on (cf_dataset, cf_window, cf_resource, cf_operation) (last_over_time(lulu_cf_data_present{cf_window=\"$window\"}[45m]) == 1)",
+          "legendFormat": "requests"
+        },
+        {
+          "refId": "B",
+          "expr": "(last_over_time(lulu_cf_worker_errors{cf_window=\"$window\"}[45m]) and on (cf_dataset, cf_window) (last_over_time(lulu_cf_collection_success{cf_window=\"$window\"}[45m]) == 1)) and on (cf_dataset, cf_window, cf_resource, cf_operation) (last_over_time(lulu_cf_data_present{cf_window=\"$window\"}[45m]) == 1)",
+          "legendFormat": "errors"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Worker CPU",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "cpuTimeUs converted to seconds; isolate startup CPU is not included.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(last_over_time(lulu_cf_worker_cpu_seconds{cf_window=\"$window\"}[45m]) and on (cf_dataset, cf_window) (last_over_time(lulu_cf_collection_success{cf_window=\"$window\"}[45m]) == 1)) and on (cf_dataset, cf_window, cf_resource, cf_operation) (last_over_time(lulu_cf_data_present{cf_window=\"$window\"}[45m]) == 1)",
+          "legendFormat": "CPU"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "DO requests",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(last_over_time(lulu_cf_do_requests{cf_window=\"$window\"}[45m]) and on (cf_dataset, cf_window) (last_over_time(lulu_cf_collection_success{cf_window=\"$window\"}[45m]) == 1)) and on (cf_dataset, cf_window, cf_resource, cf_operation) (last_over_time(lulu_cf_data_present{cf_window=\"$window\"}[45m]) == 1)",
+          "legendFormat": "{{cf_resource}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "DO errors",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(last_over_time(lulu_cf_do_errors{cf_window=\"$window\"}[45m]) and on (cf_dataset, cf_window) (last_over_time(lulu_cf_collection_success{cf_window=\"$window\"}[45m]) == 1)) and on (cf_dataset, cf_window, cf_resource, cf_operation) (last_over_time(lulu_cf_data_present{cf_window=\"$window\"}[45m]) == 1)",
+          "legendFormat": "{{cf_resource}}"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "DO duration (GB-s)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Already weighted by configured memory. Do not multiply by memory again. Not billed currency.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(last_over_time(lulu_cf_do_duration_gb_seconds{cf_window=\"$window\"}[45m]) and on (cf_dataset, cf_window) (last_over_time(lulu_cf_collection_success{cf_window=\"$window\"}[45m]) == 1)) and on (cf_dataset, cf_window, cf_resource, cf_operation) (last_over_time(lulu_cf_data_present{cf_window=\"$window\"}[45m]) == 1)",
+          "legendFormat": "{{cf_resource}}"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "DO active time",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(last_over_time(lulu_cf_do_active_seconds{cf_window=\"$window\"}[45m]) and on (cf_dataset, cf_window) (last_over_time(lulu_cf_collection_success{cf_window=\"$window\"}[45m]) == 1)) and on (cf_dataset, cf_window, cf_resource, cf_operation) (last_over_time(lulu_cf_data_present{cf_window=\"$window\"}[45m]) == 1)",
+          "legendFormat": "{{cf_resource}}"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "DO CPU",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(last_over_time(lulu_cf_do_cpu_seconds{cf_window=\"$window\"}[45m]) and on (cf_dataset, cf_window) (last_over_time(lulu_cf_collection_success{cf_window=\"$window\"}[45m]) == 1)) and on (cf_dataset, cf_window, cf_resource, cf_operation) (last_over_time(lulu_cf_data_present{cf_window=\"$window\"}[45m]) == 1)",
+          "legendFormat": "{{cf_resource}}"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "SQLite rows read",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(last_over_time(lulu_cf_do_rows_read{cf_window=\"$window\"}[45m]) and on (cf_dataset, cf_window) (last_over_time(lulu_cf_collection_success{cf_window=\"$window\"}[45m]) == 1)) and on (cf_dataset, cf_window, cf_resource, cf_operation) (last_over_time(lulu_cf_data_present{cf_window=\"$window\"}[45m]) == 1)",
+          "legendFormat": "{{cf_resource}}"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "SQLite rows written",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 48,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(last_over_time(lulu_cf_do_rows_written{cf_window=\"$window\"}[45m]) and on (cf_dataset, cf_window) (last_over_time(lulu_cf_collection_success{cf_window=\"$window\"}[45m]) == 1)) and on (cf_dataset, cf_window, cf_resource, cf_operation) (last_over_time(lulu_cf_data_present{cf_window=\"$window\"}[45m]) == 1)",
+          "legendFormat": "{{cf_resource}}"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "SQLite storage: window maximum",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 48,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Maximum observed storage in the selected window; not current storage, an account sum, or GB-month.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(last_over_time(lulu_cf_do_storage_max_bytes{cf_window=\"$window\"}[45m]) and on (cf_dataset, cf_window) (last_over_time(lulu_cf_collection_success{cf_window=\"$window\"}[45m]) == 1)) and on (cf_dataset, cf_window, cf_resource, cf_operation) (last_over_time(lulu_cf_data_present{cf_window=\"$window\"}[45m]) == 1)",
+          "legendFormat": "{{cf_resource}}"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "KV operations",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 56,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Scoped to LULU_MCP. Missing action rows are unknown, not assumed zero.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(last_over_time(lulu_cf_kv_operations{cf_window=\"$window\"}[45m]) and on (cf_dataset, cf_window) (last_over_time(lulu_cf_collection_success{cf_window=\"$window\"}[45m]) == 1)) and on (cf_dataset, cf_window, cf_resource, cf_operation) (last_over_time(lulu_cf_data_present{cf_window=\"$window\"}[45m]) == 1)",
+          "legendFormat": "{{cf_operation}}"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "title": "KV storage: window maximum",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 56,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "The baseline returned 0 bytes despite read traffic. This is the API observation, not proof the namespace is empty.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(last_over_time(lulu_cf_kv_storage_max_bytes{cf_window=\"$window\"}[45m]) and on (cf_dataset, cf_window) (last_over_time(lulu_cf_collection_success{cf_window=\"$window\"}[45m]) == 1)) and on (cf_dataset, cf_window, cf_resource, cf_operation) (last_over_time(lulu_cf_data_present{cf_window=\"$window\"}[45m]) == 1)",
+          "legendFormat": "bytes"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "title": "KV keys: window maximum",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 64,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(last_over_time(lulu_cf_kv_storage_max_keys{cf_window=\"$window\"}[45m]) and on (cf_dataset, cf_window) (last_over_time(lulu_cf_collection_success{cf_window=\"$window\"}[45m]) == 1)) and on (cf_dataset, cf_window, cf_resource, cf_operation) (last_over_time(lulu_cf_data_present{cf_window=\"$window\"}[45m]) == 1)",
+          "legendFormat": "keys"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "title": "Adaptive sample interval",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 64,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "API aggregation is already extrapolated. Never multiply usage by this value. Sample interval is not a confidence interval. Storage datasets do not expose this field.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "last_over_time(lulu_cf_sample_interval{cf_window=\"$window\"}[45m])",
+          "legendFormat": "{{cf_dataset}} / {{cf_resource}} {{cf_operation}}"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "title": "Selected window start",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 72,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dateTimeAsIso",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(last_over_time(lulu_cf_window_start_timestamp{cf_window=\"$window\"}[45m])) * 1000",
+          "legendFormat": "start",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "title": "Selected window end",
+      "type": "stat",
+      "gridPos": {
+        "x": 12,
+        "y": 72,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dateTimeAsIso",
+          "noValue": "Not observed"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(last_over_time(lulu_cf_window_end_timestamp{cf_window=\"$window\"}[45m])) * 1000",
+          "legendFormat": "end",
+          "instant": true
+        }
+      ]
+    }
+  ]
+}
