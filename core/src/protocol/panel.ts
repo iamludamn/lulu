@@ -94,6 +94,7 @@ export const WidgetInput = Type.Object({
 
 export type WidgetInput = Static<typeof WidgetInput>;
 export type Widget = WidgetInput & { updatedAt: number; origin?: string };
-export type PanelState = { order: string[]; widgets: Record<string, Widget> };
+export type SpaceReceipt = { id: string; version: number; action: "add" | "update"; refresh?: "manual" | "open" | "daily" };
+export type PanelState = { order: string[]; widgets: Record<string, Widget>; spaceReceipts?: Record<string, SpaceReceipt> };
 
 export const EMPTY_PANEL: PanelState = { order: [], widgets: {} };

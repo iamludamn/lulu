@@ -52,7 +52,7 @@ export const CATALOG: Record<string, (deps: HarnessDeps) => Extension> = {
   environment: ({ host }) => createEnvironmentExtension(sandboxProvider(host)),
   delegate: ({ host }) => createDelegateExtension(DelegateAgents, sandboxProvider(host)),
   cron: () => CronExtension,
-  panel: ({ host }) => createPanelExtension(artifactCheck(host)),
+  panel: () => createPanelExtension(),
   send: ({ host }) => createSendExtension(artifactCheck(host)),
   chat: () =>
     defineExtension({

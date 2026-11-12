@@ -106,10 +106,56 @@ struct MessageRow: View, Equatable {
                 .contentShape(.rect(cornerRadius: 26, style: .continuous))
             if case .space(let src, _, _) = widget.body {
                 let source = "chat-\(row.id)"
-                kept(destination: .panel, label: "添加 Space", symbol: "square.stack.3d.up") {
-                    Button { ArtifactAddress(src).map { openSpace($0, SpaceOpening(id: widget.id, title: widget.title, preview: true), source) } } label: { face }
-                        .buttonStyle(.plain)
-                        .artifactSource(source, radius: 26)
+                let state = row.spaceOffer ?? .add
+                if state.actionable {
+                    SwipeToKeep(destination: .panel, onLand: {}, onKeep: { store.keep(row.id) }, retainsCard: true, enabled: !row.sending && row.offerAvailable) { send in
+                        VStack(spacing: 8) {
+                            Button { ArtifactAddress(src).map { openSpace($0, SpaceOpening(id: widget.id, title: widget.title, preview: true), source) } } label: { face }
+                                .buttonStyle(.plain)
+                                .artifactSource(source, radius: 26)
+                                .contextMenu {
+                                    Button(state == .update ? "更新视图" : "加入视图", systemImage: "square.stack.3d.up", action: send)
+                                        .disabled(row.sending || !row.offerAvailable)
+                                }
+                                .accessibilityAction(named: state == .update ? "更新视图" : "加入视图") {
+                                    if !row.sending && row.offerAvailable { send() }
+                                }
+                            HStack(spacing: 5) {
+                                if row.sending { ProgressView().controlSize(.mini) }
+                                else { Image(systemName: "arrow.left") }
+                                Text(row.sending ? "正在提交…" : row.offerAvailable ? state.caption : "连接后可滑动")
+                            }
+                            .font(.caption).foregroundStyle(.secondary)
+                            if let error = row.offerError {
+                                Text("\(error) · 滑动重试")
+                                    .font(.caption).foregroundStyle(.red)
+                            }
+                        }
+                        .padding(.vertical, 10)
+                    }
+                    .frame(maxWidth: .infinity)
+                } else {
+                    HStack(spacing: 10) {
+                        Image(systemName: state == .superseded ? "clock.arrow.circlepath" : "checkmark.circle")
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(widget.title).font(.subheadline)
+                            Text(state.caption).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if state != .superseded {
+                            Button("打开当前视图") {
+                                guard let current = store.snapshot.panel.widgets[widget.id],
+                                      case .space(let ref, _, let refresh) = current.body,
+                                      let address = ArtifactAddress(ref) else { return }
+                                openSpace(address, SpaceOpening(id: current.id, title: current.title, refresh: refresh), source)
+                            }
+                            .font(.caption)
+                        }
+                    }
+                    .padding(14).frame(maxWidth: 360).frosted(18)
+                    .artifactSource(source, radius: 18)
+                    .padding(.vertical, 8)
                 }
             } else {
                 kept(destination: .panel, label: "放入视图", symbol: "square.grid.2x2") { face }
@@ -128,11 +174,16 @@ struct MessageRow: View, Equatable {
     private func kept<Content: View>(destination: Page, label: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
         let card = content()
         return SwipeToKeep(destination: destination, onLand: { onKept(destination) }, onKeep: { store.keep(row.id) }) { send in
-            card
-                .contextMenu {
+            VStack(spacing: 8) {
+                card.contextMenu {
                     Button(label, systemImage: symbol, action: send)
                 }
-                .padding(.vertical, 10)
+                if destination == .panel {
+                    Label("滑动加入视图", systemImage: "arrow.left")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 10)
         }
         .frame(maxWidth: .infinity)
     }

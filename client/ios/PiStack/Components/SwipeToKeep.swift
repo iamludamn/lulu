@@ -18,6 +18,8 @@ struct SwipeToKeep<Content: View>: View {
     let destination: Page
     let onLand: () -> Void
     let onKeep: () -> Void
+    var retainsCard = false
+    var enabled = true
     @ViewBuilder let content: (_ send: @escaping () -> Void) -> Content
     @Environment(\.keepTargets) private var targets
     @Environment(\.keepPull) private var pull
@@ -56,7 +58,7 @@ struct SwipeToKeep<Content: View>: View {
                 let frame = proxy.frame(in: .global)
                 return CGPoint(x: frame.midX, y: frame.midY)
             } action: { center = $0 }
-            .gesture(KeepPan(direction: direction, enabled: phase == .resting, changed: change, ended: end))
+            .gesture(KeepPan(direction: direction, enabled: enabled && phase == .resting, changed: change, ended: end, cancelled: reset))
             .sensoryFeedback(.impact(weight: .medium), trigger: armed) { _, now in now }
     }
 
@@ -65,10 +67,20 @@ struct SwipeToKeep<Content: View>: View {
         pull(destination, progress)
     }
 
+    private func reset() {
+        pull(destination, 0)
+        withAnimation(.spring(duration: 0.35, bounce: 0.3)) { drag = 0 }
+    }
+
     private func end(_ velocity: CGFloat) {
         guard armed || velocity * direction > 900 else {
             pull(destination, 0)
             withAnimation(.spring(duration: 0.35, bounce: 0.3)) { drag = 0 }
+            return
+        }
+        if retainsCard {
+            reset()
+            onKeep()
             return
         }
         let target = targets[destination] ?? CGPoint(x: center.x + direction * 200, y: 0)
@@ -86,6 +98,7 @@ struct SwipeToKeep<Content: View>: View {
 
     private func sendInPlace() {
         guard phase == .resting else { return }
+        if retainsCard { onKeep(); return }
         withAnimation(.easeOut(duration: 0.28)) { phase = .fading }
         Task {
             try? await Task.sleep(for: .milliseconds(280))
@@ -109,6 +122,7 @@ private struct KeepPan: UIGestureRecognizerRepresentable {
     let enabled: Bool
     let changed: (CGFloat) -> Void
     let ended: (CGFloat) -> Void
+    let cancelled: () -> Void
 
     func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
         Coordinator(direction: direction, enabled: enabled)
@@ -128,7 +142,8 @@ private struct KeepPan: UIGestureRecognizerRepresentable {
     func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
         switch recognizer.state {
         case .changed: changed(recognizer.translation(in: recognizer.view).x)
-        case .ended, .cancelled, .failed: ended(recognizer.velocity(in: recognizer.view).x)
+        case .ended: ended(recognizer.velocity(in: recognizer.view).x)
+        case .cancelled, .failed: cancelled()
         default: break
         }
     }

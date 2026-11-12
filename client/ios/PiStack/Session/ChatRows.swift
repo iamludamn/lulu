@@ -15,6 +15,9 @@ struct ChatRow: Identifiable, Equatable {
     var text: String
     var body: String?
     var card: SentCard?
+    var spaceOffer: SpaceOfferState?
+    var offerError: String?
+    var offerAvailable = true
     var footer: Footer?
     var sending = false
     var read = false
@@ -67,6 +70,7 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
         return origin
     })
     let entries = chatEntries(snapshot.view, hidden: snapshot.progress?.hiddenEntries ?? [])
+    let spaceStates = spaceOfferStates(entries, panel: snapshot.panel)
     let messages = snapshot.progress?.messages ?? []
     let submitted = Set(messages.compactMap(\.requestId))
     func stamp(_ time: Date?, before id: String) {
@@ -79,11 +83,21 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
     for item in timeline(entries, messages) {
         switch item {
         case .entry(let entry):
-            if entry.card != nil && kept.contains(entry.id) { continue }
+            if entry.card != nil && spaceStates[entry.id] == nil && kept.contains(entry.id) { continue }
             stamp(entry.time, before: entry.id)
             var row = ChatRow(id: entry.id, role: entry.role == .user ? .user : .assistant, text: entry.text)
             row.body = entry.body
             row.card = entry.card
+            row.spaceOffer = spaceStates[entry.id]
+            if row.spaceOffer != nil {
+                row.offerAvailable = snapshot.link == .online
+                let requests = snapshot.requests.filter { request in
+                    if case .keep(let origin) = request.command.kind { return origin == entry.id }
+                    return false
+                }
+                row.sending = requests.contains { $0.state == .sending }
+                row.offerError = requests.last(where: { $0.state == .failed })?.error
+            }
             row.read = entry.role == .user
             if making.contains(entry.id) { row.footer = .generating }
             rows.append(row)
@@ -109,7 +123,8 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
             rows.append(row)
         case .abort: rows.append(notice(request, "abort"))
         case .selectModel: rows.append(notice(request, "model"))
-        case .keep: rows.append(notice(request, "keep"))
+        case .keep(let origin):
+            if spaceStates[origin] == nil { rows.append(notice(request, "keep")) }
         case .drop: rows.append(notice(request, "drop"))
         case .makeWidget: rows.append(notice(request, "makeWidget"))
         case .order: rows.append(notice(request, "order"))
