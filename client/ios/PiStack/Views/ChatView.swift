@@ -8,13 +8,16 @@ struct ChatView: View {
     @Binding var draft: String
     var composing: FocusState<Bool>.Binding
     let onKept: (Page) -> Void
+    let bottomInset: CGFloat
+    @State private var composerHeight: CGFloat = 0
+    @Binding var reading: ChatRow?
+    let onReaderFrame: (ReaderFrame) -> Void
     @State private var pinned = true
     @State private var dragging = false
     @State private var sent = 0
     @State private var floor: String?
     @State private var position = ScrollPosition()
     @State private var metrics = Metrics()
-    @State private var reading: ChatRow?
     @Environment(\.topInset) private var topInset
     @Environment(\.openArtifact) private var openArtifact
 
@@ -47,7 +50,7 @@ struct ChatView: View {
                             .padding(.bottom, row.tail ? 12 : 0)
                             .transition(.opacity.animation(.easeOut(duration: 0.2)))
                     }
-                    Color.clear.frame(height: 1).id(Self.bottom)
+                    Color.clear.frame(height: composing.wrappedValue ? 1 : composerHeight + bottomInset + 1).id(Self.bottom)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -117,16 +120,23 @@ struct ChatView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if snapshot.halt == nil {
                 Composer(draft: $draft, busy: busy, placeholder: placeholder, focused: composing, onSend: send)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
             }
         }
         .overlayPreferenceValue(LongBubbleBounds.self) { bounds in
             GeometryReader { proxy in
-                if let row = reading, let text = row.body, let anchor = bounds[row.id] {
-                    LongReader(summary: row.text, text: text, origin: proxy[anchor], canvas: proxy.size) { reading = nil }
-                        .id(row.id)
+                if let row = reading, row.body != nil, let anchor = bounds[row.id] {
+                    Color.clear
+                        .onGeometryChange(for: ReaderFrame.self) { _ in
+                            let offset = proxy.frame(in: .global).origin
+                            return ReaderFrame(id: row.id,
+                                               origin: proxy[anchor].offsetBy(dx: offset.x, dy: offset.y),
+                                               canvas: proxy.size)
+                        } action: { onReaderFrame($0) }
                 }
             }
             .ignoresSafeArea()
+            .allowsHitTesting(false)
         }
         .sensoryFeedback(.impact(weight: .light), trigger: sent)
         .sensoryFeedback(.impact(weight: .light), trigger: reading?.id) { _, new in new != nil }
