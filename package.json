@@ -18,5 +18,15 @@
     "oxlint": "^1.93.0",
     "oxlint-tsgolint": "^7.0.2006"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "overrides": {
+    "undici@^7.0.0": "^7.30.1",
+    "undici@^8.0.0": "^8.12.3",
+    "@earendil-works/pi-coding-agent": {
+      "minimatch": "^11.0.8"
+    },
+    "workbox-build": {
+      "glob": "^14.0.5"
+    }
+  }
 }

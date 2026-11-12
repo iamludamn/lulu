@@ -19,7 +19,7 @@ Features that depend on external services require your own credentials and may i
 
 ## Start here
 
-Prerequisites: Node.js 22, npm, and Go matching `client/desktop/go.mod` (currently 1.27.3). The root build includes the desktop client. iOS development additionally needs macOS, Xcode with the iOS 26 SDK, and Swift 6.2.
+Prerequisites: Node.js 22.19 or newer, npm, and Go matching `client/desktop/go.mod` (currently 1.27.3). The root build includes the desktop client. iOS development additionally needs macOS, Xcode with the iOS 26 SDK, and Swift 6.2.
 
 ```sh
 git clone https://github.com/iamludamn/lulu.git

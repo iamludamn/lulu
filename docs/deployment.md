@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-Install Node.js 22, npm, and the Go version in `client/desktop/go.mod`. Run all npm install and build commands from the repository root. A Cloudflare deployment also needs your own account, Workers/Durable Objects access, a KV namespace, and Wrangler authentication.
+Install Node.js 22.19 or newer, npm, and the Go version in `client/desktop/go.mod`. Run all npm install and build commands from the repository root. A Cloudflare deployment also needs your own account, Workers/Durable Objects access, a KV namespace, and Wrangler authentication.
 
 The checked-in `apps/cf/wrangler.jsonc` describes the maintainer's deployment. Do not deploy it unchanged to another account. Worker names, KV IDs, and telemetry destinations are deployment-specific; none grants access by itself.
 
