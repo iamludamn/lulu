@@ -28,6 +28,7 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run build
+      - run: npm run check:bundle
       - run: npm exec -- wrangler deploy
         working-directory: apps/cf
         env:

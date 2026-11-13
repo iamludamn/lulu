@@ -9,11 +9,13 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present && npm run build --prefix client/desktop",
-    "check": "grep -rnE '(from|import)[^[:alnum:]_]*(node|cloudflare):' core/src; test $? -eq 1 && npm run build -w @lulu/core && npm run check -w @lulu/cf -w @lulu/client",
+    "check": "node scripts/check-runtime-imports.mjs && npm run build -w @lulu/core && npm run check -w @lulu/cf -w @lulu/client && npm run lint",
     "test": "npm run test --workspaces --if-present",
-    "lint": "oxlint --type-aware core/src apps/cf/src client/web/src"
+    "lint": "oxlint --type-aware core/src apps/cf/src client/web/src",
+    "check:bundle": "npm run build -w @lulu/core -w @lulu/client && npm run check:bundle -w @lulu/cf"
   },
   "devDependencies": {
+    "@babel/parser": "^7.29.9",
     "@types/node": "^22.15.0",
     "oxlint": "^1.93.0",
     "oxlint-tsgolint": "^7.0.2006"

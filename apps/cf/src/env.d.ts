@@ -1,7 +1,4 @@
 interface Env {
-  readonly BOTS: DurableObjectNamespace<import("./objects.js").Bot>;
-  readonly MEMORY: DurableObjectNamespace<import("./objects.js").Memory>;
-  readonly ARTIFACTS: DurableObjectNamespace<import("./objects.js").Artifact>;
   readonly S3_ENDPOINT?: string;
   readonly S3_BUCKET?: string;
   readonly S3_REGION?: string;
@@ -22,10 +19,7 @@ interface Env {
   readonly TAVILY_API_KEY?: string;
   readonly EXA_API_KEY?: string;
   readonly DOUBAO_API_KEY?: string;
-  readonly LULU_MCP: KVNamespace;
   readonly MCP_ENCRYPTION_KEY?: string;
   readonly MCP_ADMIN_TOKEN?: string;
-  readonly OTEL_EXPORTER_OTLP_ENDPOINT?: string;
   readonly OTEL_EXPORTER_OTLP_HEADERS?: string;
-  readonly OTEL_SERVICE_NAME?: string;
 }

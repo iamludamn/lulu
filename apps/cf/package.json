@@ -4,8 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "tsc --noEmit -p tsconfig.json",
-    "dev": "wrangler dev"
+    "check": "npm run types -- --check && tsc --noEmit -p tsconfig.json",
+    "dev": "wrangler dev",
+    "types": "CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID:-de4897a194002b8815e728d7240c4218} wrangler types --strict-vars false",
+    "check:bundle": "CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID:-de4897a194002b8815e728d7240c4218} wrangler deploy --dry-run"
   },
   "dependencies": {
     "@cloudflare/computer": "0.8.0",
@@ -15,7 +17,6 @@
     "@platformatic/vfs": "0.5.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20261013.1",
     "typescript": "7.0.2",
     "wrangler": "4.160.1"
   },
