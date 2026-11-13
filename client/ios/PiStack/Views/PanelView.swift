@@ -49,6 +49,7 @@ struct PanelView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 18)
                 .padding(.vertical, 13)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .composerChrome()
@@ -111,11 +112,11 @@ struct WidgetFace: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            header
+            if !widget.isSpace { header }
             WidgetBody(widget: widget, botId: botId, api: api, interactive: interactive, onPrompt: onPrompt, onCheck: onCheck)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .padding(14)
+        .padding(widget.isSpace ? 0 : 14)
         .frame(maxWidth: .infinity, minHeight: widget.isSpace ? Self.spaceHeight : widget.size == .l ? 300 : nil, maxHeight: height, alignment: .topLeading)
         .clipShape(.rect(cornerRadius: 26, style: .continuous))
     }
