@@ -71,7 +71,8 @@ export async function openSandbox(api: ToolExecutionApi, provider: SandboxProvid
       binding.users = [...binding.users.filter((user) => user.taskId !== api.taskId), { taskId: api.taskId, expiresAt: now + SANDBOX_LEASE_MS }];
       binding.lastUsedAt = now;
       binding.revision += 1;
-      return { epoch: binding.epoch, request: { backend: binding.backend, profile: binding.profile, key, requestId, ref: binding.ref, cwd: binding.cwd } };
+      const ref = binding.ref === null ? null : JSON.parse(JSON.stringify(binding.ref)) as SandboxBinding["ref"];
+      return { epoch: binding.epoch, request: { backend: binding.backend, profile: binding.profile, key, requestId, ref, cwd: binding.cwd } };
     }, context);
     if ("wait" in reserved) {
       await waitForSandbox(api, holder, (binding) => !binding?.operation || binding.operation.taskId !== reserved.wait || binding.error !== null, context);
