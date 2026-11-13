@@ -22,7 +22,6 @@ struct SpacePreview: View {
             if let page {
                 HTMLPage(html: page.html, bridge: page.bridge, interactive: false)
                     .id(ObjectIdentifier(page.bridge))
-                    .mask(LinearGradient(stops: [.init(color: .black, location: 0.78), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom))
             } else if failed {
                 Label("页面无法加载", systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.secondary)
             } else {
@@ -31,16 +30,19 @@ struct SpacePreview: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.ultraThinMaterial)
-        .clipShape(.rect(cornerRadius: 18, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.35), lineWidth: 1) }
-        .overlay(alignment: .bottomLeading) {
-            Label(summary ?? "打开 Space", systemImage: "arrow.up.forward.app")
-                .font(.caption.weight(.semibold))
-                .lineLimit(1)
+        .overlay {
+            Rectangle().fill(.ultraThinMaterial).opacity(0.55)
+                .allowsHitTesting(false)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            Label("打开 Space", systemImage: "arrow.up.right")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.primary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .glassEffect(.regular, in: .capsule)
-                .padding(8)
+                .background(.regularMaterial, in: Capsule())
+                .padding(12)
+                .allowsHitTesting(false)
         }
         .task(id: "\(src)#\(refreshes)") { await load() }
         .onReceive(NotificationCenter.default.publisher(for: .spaceRefresh)) { if $0.object as? String == id { refreshes += 1 } }

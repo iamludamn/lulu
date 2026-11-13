@@ -147,13 +147,7 @@ struct HomeView: View {
     }
 
     private func fadeToChat() {
-        Task {
-            withAnimation(.easeOut(duration: 0.15)) { veiled = true }
-            try? await Task.sleep(for: .milliseconds(150))
-            withTransaction(Transaction(animation: nil)) { page = .chat }
-            composing = true
-            withAnimation(.easeIn(duration: 0.25)) { veiled = false }
-        }
+        withAnimation(.snappy) { page = .chat }
     }
 
     private func send(_ text: String) {
