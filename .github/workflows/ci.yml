@@ -25,5 +25,10 @@ jobs:
       - run: npm run check
       - run: npm run lint
       - run: npm test
+      - name: Check live sandbox
+        if: github.event_name == 'push'
+        run: LULU_SANDBOX_LIVE=1 node --test core/tests/sandbox-agent.test.mjs
+        env:
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
       - run: npm run build
       - run: npm run build:cross --prefix client/desktop
