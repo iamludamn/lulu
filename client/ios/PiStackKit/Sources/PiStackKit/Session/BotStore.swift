@@ -18,6 +18,7 @@ public final class BotStore {
     }
 
     public struct Snapshot {
+        public var hasReceivedState = false
         public var link: Link = .connecting
         public var view: ConversationView?
         public var progress: SessionProgress?
@@ -188,6 +189,7 @@ public final class BotStore {
             snapshot.mcp = mcp
             snapshot.panel = panel
             snapshot.assets = assets
+            snapshot.hasReceivedState = true
             persist()
         case .models(let config): snapshot.models = config
         case .voice: break

@@ -82,6 +82,14 @@ struct HomeView: View {
                 .ignoresSafeArea()
             }
         }
+        .overlay {
+            if !store.snapshot.hasReceivedState && store.snapshot.link != .offline && store.snapshot.halt == nil {
+                LoadingScreen()
+                    .transition(.opacity)
+                    .zIndex(1)
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: store.snapshot.hasReceivedState)
         .artifactViewer(botId: bot.id, api: api)
         .sheet(isPresented: $inspector) { InspectorView(store: store, botId: bot.id, api: api) }
         .sensoryFeedback(.selection, trigger: page)
@@ -159,6 +167,34 @@ struct HomeView: View {
         withAnimation(.snappy) { page = .chat }
         if draft.isEmpty { draft = text }
         composing = true
+    }
+}
+
+private struct LoadingScreen: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var breathing = false
+
+    var body: some View {
+        ZStack {
+            Wallpaper()
+            ZStack {
+                ForEach(0..<5) { index in
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(.white.opacity(0.9 - Double(index) * 0.13), lineWidth: 2)
+                        .frame(width: 66 + CGFloat(index) * 13, height: 66 + CGFloat(index) * 13)
+                        .rotationEffect(.degrees(Double(index) * 12))
+                }
+                Circle().fill(.white.opacity(0.8)).frame(width: 40, height: 40)
+            }
+            .scaleEffect(breathing && !reduceMotion ? 1.06 : (reduceMotion ? 1 : 0.94))
+            .opacity(breathing || reduceMotion ? 1 : 0.7)
+        }
+        .ignoresSafeArea()
+        .accessibilityElement(children: .combine)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { breathing = true }
+        }
     }
 }
 
