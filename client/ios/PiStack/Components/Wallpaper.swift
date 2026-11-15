@@ -110,39 +110,22 @@ private struct CloudSky: View {
     let cover: Double
     @Environment(\.colorScheme) private var scheme
 
-    private func color(_ hex: UInt32) -> Color {
-        Color(red: Double(hex >> 16 & 255) / 255, green: Double(hex >> 8 & 255) / 255, blue: Double(hex & 255) / 255)
+    private var moodValue: Float {
+        switch mood {
+        case .day: 0
+        case .dusk: 1
+        case .rain: 2
+        case .night: 3
+        }
     }
 
     var body: some View {
         GeometryReader { proxy in
-            let night = mood == .night
-            let rain = mood == .rain
-            let base: [UInt32] = night ? [0x172941, 0x28496C, 0x446887] :
-                rain ? [0x71899F, 0x9CB2C5, 0xC2CFDA] :
-                mood == .dusk ? [0x526D8A, 0xA798AF, 0xC2B6BF] : [0x5D8DB9, 0x91B9DD, 0xBDCEDB]
-            ZStack {
-                LinearGradient(colors: base.map(color), startPoint: .top, endPoint: .bottom)
-                ForEach(0..<4) { i in
-                    Ellipse()
-                        .fill(color(night ? 0x759BBA : 0xE2EDF3).opacity(night ? 0.22 : 0.48 + min(100, max(0, cover)) / 700))
-                        .frame(width: proxy.size.width * [1.5, 1.1, 1.4, 1.2][i], height: proxy.size.height * 0.18)
-                        .rotationEffect(.degrees(-32))
-                        .position(x: proxy.size.width * [0.9, 0.05, 0.9, 0.15][i],
-                                  y: proxy.size.height * [0.23, 0.5, 0.72, 1.0][i])
-                        .blur(radius: proxy.size.width * 0.13)
-                }
-                if mood == .dusk {
-                    Ellipse().fill(color(0xFFAB9A).opacity(0.7))
-                        .frame(width: proxy.size.width * 1.5, height: proxy.size.height * 0.15)
-                        .rotationEffect(.degrees(-25))
-                        .position(x: proxy.size.width * 0.58, y: proxy.size.height * 0.61)
-                        .blur(radius: 38)
-                }
-                if scheme == .dark { Color.black.opacity(night ? 0.12 : 0.55) }
-                if scheme == .light && night { Color.white.opacity(0.55) }
-            }
-            .clipped()
+            Rectangle().fill(.white)
+                .colorEffect(ShaderLibrary.skyClouds(
+                    .float2(proxy.size), .float(moodValue),
+                    .float(Float(min(100, max(0, cover)))), .float(scheme == .dark ? 1 : 0)
+                ))
         }
     }
 }
