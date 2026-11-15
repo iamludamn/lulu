@@ -1,4 +1,5 @@
 import SwiftUI
+import PiStackKit
 
 enum WallpaperTheme: String, CaseIterable, Identifiable {
     case sky, dusk, mint, peach, graphite, aurora
@@ -60,73 +61,71 @@ struct WallpaperMesh: View {
 
 struct Wallpaper: View {
     @AppStorage("pistack.wallpaper") private var theme = WallpaperTheme.sky
-    @Environment(\.colorScheme) private var scheme
+    @AppStorage("lulu.sky.city") private var city = ""
+    @State private var weather: SkyWeather?
+    @Environment(\.scenePhase) private var phase
 
     var body: some View {
-        ZStack {
-            WallpaperMesh(theme: theme)
-            if scheme == .dark && theme.hasStars { Starfield() }
-        }
-        .ignoresSafeArea()
-    }
-}
-
-private struct Star {
-    let x: Double
-    let y: Double
-    let radius: Double
-    let alpha: Double
-    let phase: Double
-    let speed: Double
-    let glow: Bool
-
-    static let field: [Star] = {
-        var rng = SplitMix64(state: 7)
-        return (0..<240).map { index in
-            let bright = index % 12 == 0
-            return Star(
-                x: .random(in: 0...1, using: &rng),
-                y: .random(in: 0...1, using: &rng),
-                radius: bright ? .random(in: 1.3...2.0, using: &rng) : .random(in: 0.5...1.2, using: &rng),
-                alpha: bright ? .random(in: 0.85...1, using: &rng) : .random(in: 0.45...0.9, using: &rng),
-                phase: .random(in: 0...(2 * .pi), using: &rng),
-                speed: .random(in: 0.4...1.6, using: &rng),
-                glow: bright
-            )
-        }
-    }()
-}
-
-private struct SplitMix64: RandomNumberGenerator {
-    var state: UInt64
-
-    mutating func next() -> UInt64 {
-        state &+= 0x9E37_79B9_7F4A_7C15
-        var z = state
-        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
-        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
-        return z ^ (z >> 31)
-    }
-}
-
-struct Starfield: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 12, paused: reduceMotion)) { timeline in
-            Canvas { context, size in
-                let t = timeline.date.timeIntervalSinceReferenceDate
-                for star in Star.field {
-                    let twinkle = 0.65 + 0.35 * sin(t * star.speed + star.phase)
-                    let alpha = star.alpha * twinkle * (1 - 0.45 * star.y)
-                    let dot = CGRect(x: star.x * size.width - star.radius, y: star.y * size.height - star.radius, width: star.radius * 2, height: star.radius * 2)
-                    context.fill(Path(ellipseIn: dot), with: .color(.white.opacity(alpha)))
-                    if star.glow {
-                        context.fill(Path(ellipseIn: dot.insetBy(dx: -star.radius * 2.5, dy: -star.radius * 2.5)), with: .color(.white.opacity(alpha * 0.18)))
-                    }
-                }
+        TimelineView(.periodic(from: .now, by: 60)) { tick in
+            if theme == .sky {
+                let current = weather.flatMap { $0.usable(at: tick.date) ? $0 : nil }
+                CloudSky(mood: previewMood ?? current?.mood(at: tick.date) ?? fallback(tick.date),
+                         cover: current?.cloudCover ?? 35)
+            } else {
+                WallpaperMesh(theme: theme)
             }
         }
+        .ignoresSafeArea()
+        .accessibilityHidden(true)
         .allowsHitTesting(false)
+        .task(id: "\(city)-\(phase == .active)-\(theme.rawValue)") {
+            weather = nil
+            guard phase == .active, theme == .sky, !city.isEmpty else { return }
+            do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            while !Task.isCancelled {
+                let next = await SkyWeather.load(city: city)
+                guard !Task.isCancelled else { return }
+                weather = next
+                do { try await Task.sleep(for: .seconds(1200)) } catch { return }
+            }
+        }
+    }
+
+    private var previewMood: SkyWeather.Mood? {
+        #if DEBUG
+        SkyWeather.Mood(rawValue: UserDefaults.standard.string(forKey: "lulu.sky.preview") ?? "")
+        #else
+        nil
+        #endif
+    }
+
+    private func fallback(_ date: Date) -> SkyWeather.Mood {
+        let hour = Calendar.current.component(.hour, from: date)
+        return (7..<18).contains(hour) ? .day : .night
+    }
+}
+
+private struct CloudSky: View {
+    let mood: SkyWeather.Mood
+    let cover: Double
+    @Environment(\.colorScheme) private var scheme
+
+    private var moodValue: Float {
+        switch mood {
+        case .day: 0
+        case .dusk: 1
+        case .rain: 2
+        case .night: 3
+        }
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            Rectangle().fill(.white)
+                .colorEffect(ShaderLibrary.skyClouds(
+                    .float2(proxy.size), .float(moodValue),
+                    .float(Float(min(100, max(0, cover)))), .float(scheme == .dark ? 1 : 0)
+                ))
+        }
     }
 }
