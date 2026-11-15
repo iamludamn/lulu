@@ -32,7 +32,7 @@ import { memoryTelemetry } from "../memory/telemetry.js";
 import { createMemoryUpdate, recoverMemoryUpdates, MEMORY_UPDATE } from "../memory/schedule.js";
 import { RecallDoc } from "../memory/doc.js";
 import { judgeRecall } from "../memory/recall.js";
-import { createHarnessTelemetry } from "../telemetry/agent.js";
+import { createHarnessTelemetry, observeDelegateTiming } from "../telemetry/agent.js";
 import { SOCKET_OPEN, type DurableHost, type Socket } from "../host/types.js";
 
 const MEMORY_SOURCE_ENTRIES = 200;
@@ -128,6 +128,7 @@ export class BotSession {
       BACKGROUND_CONTEXT,
     );
     this.#harness = harness;
+    observeDelegateTiming(harness, telemetry.context);
     harness.observeCommits({ advance: (publication) => {
       if (publication.changes.some((change) => (change.type === "document" && (change.record.kind === CRON_KIND || change.record.kind === SANDBOX_KIND)) || (change.type === "task" && (change.value.kind === SANDBOX_LIFECYCLE || change.value.kind === MEMORY_UPDATE)))) {
         void this.#refreshAlarm().catch((error: unknown) => reportError("Schedule alarm reconciliation failed", error));

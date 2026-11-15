@@ -49,7 +49,7 @@ const merge = (target: Map<string, AttributeValue>, attributes: SpanAttributes |
 };
 
 type Parent = { traceId: string; spanId: string; attributes: SpanAttributes };
-const SCOPE = ["lulu.bot.id", "lulu.agent", "lulu.conversation.id", "lulu.conversation.kind"] as const;
+const SCOPE = ["lulu.bot.id", "lulu.agent", "lulu.conversation.id", "lulu.conversation.kind", "lulu.delegate.run.id", "lulu.delegate.generation", "lulu.task.id", "lulu.sandbox.id", "lulu.sandbox.backend", "gen_ai.tool.name"] as const;
 
 class OtlpParent implements TelemetryContext {
   constructor(readonly exporter: OtlpExporter, readonly parent: Parent) {}
