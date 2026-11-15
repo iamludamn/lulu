@@ -1,4 +1,4 @@
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { defineExtension, type ToolExecutionApi, type ToolRegistration } from "@earendil-works/pi-durable";
 import { SEND_TOOL } from "../protocol/send.js";
 import { CODING_TOOLS } from "../sandbox/extension.js";

@@ -7,5 +7,6 @@ export const CronJobsDoc = defineDoc<{ jobs: ScheduledJob[] }>({
   kind: CRON_KIND,
   version: 1,
   scope: "session",
+  checkpointWhen: () => false,
   initial: () => ({ jobs: [] }),
 });

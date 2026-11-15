@@ -5,6 +5,7 @@ export const AssetsDoc = defineDoc<{ items: AssetItem[] }>({
   kind: "pistack.assets",
   version: 1,
   scope: "session",
+  checkpointWhen: () => false,
   initial: () => ({ items: [] }),
 });
 
@@ -14,6 +15,7 @@ export const DeliveryDoc = defineDoc<{ since: number | null; nudges: Nudge[] }>(
   kind: "pistack.delivery",
   version: 1,
   scope: "session",
+  checkpointWhen: () => false,
   initial: () => ({ since: null, nudges: [] }),
 });
 
@@ -23,5 +25,6 @@ export const MakeDoc = defineDoc<{ makes: Make[] }>({
   kind: "pistack.make",
   version: 1,
   scope: "session",
+  checkpointWhen: () => false,
   initial: () => ({ makes: [] }),
 });

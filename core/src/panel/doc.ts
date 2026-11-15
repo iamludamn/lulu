@@ -5,5 +5,6 @@ export const PanelDoc = defineDoc<PanelState>({
   kind: "pistack.panel",
   version: 1,
   scope: "session",
+  checkpointWhen: () => false,
   initial: () => ({ order: [], widgets: {} }),
 });

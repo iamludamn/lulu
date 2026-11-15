@@ -1,4 +1,4 @@
-import type { AttachedReplicatedState } from "@earendil-works/chord";
+import { observeView } from "./view.js";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { type Conversation, type ConversationView, type EntryId, CompactionEntry, Harness, type Registry, type Storage } from "@earendil-works/pi-durable";
@@ -32,7 +32,7 @@ import { memoryTelemetry } from "../memory/telemetry.js";
 import { createMemoryUpdate, recoverMemoryUpdates, MEMORY_UPDATE } from "../memory/schedule.js";
 import { RecallDoc } from "../memory/doc.js";
 import { judgeRecall } from "../memory/recall.js";
-import { traceHarness } from "../telemetry/agent.js";
+import { createHarnessTelemetry } from "../telemetry/agent.js";
 import { SOCKET_OPEN, type DurableHost, type Socket } from "../host/types.js";
 
 const MEMORY_SOURCE_ENTRIES = 200;
@@ -57,7 +57,7 @@ export class BotSession {
   readonly #host: DurableHost;
   #harness!: Harness;
   #root!: Conversation;
-  #view!: AttachedReplicatedState<ConversationView>;
+  #view!: { readonly value: ConversationView };
   #models!: Models;
   #selected: ModelRef | undefined;
   #registry: Registry | undefined = undefined;
@@ -116,48 +116,45 @@ export class BotSession {
     this.#mcp = mcp;
     this.#mcpHost = host;
     this.#registry = registry;
+    const telemetry = createHarnessTelemetry(this.#host.telemetry, { "lulu.bot.id": this.#host.name, "lulu.agent": "chat" }, () => this.#root?.id);
+    registry.install(telemetry.extension);
     const harness = await Harness.open(
       storage,
       {
         ...options,
+        telemetry: telemetry.context,
         onReport: (error) => reportError("Harness background task failed", error),
       },
       BACKGROUND_CONTEXT,
     );
     this.#harness = harness;
-    const trace = traceHarness(harness, this.#host.telemetry, { "lulu.bot.id": this.#host.name });
-    harness.subscribeCommits((publication) => {
+    harness.observeCommits({ advance: (publication) => {
       if (publication.changes.some((change) => (change.type === "document" && (change.record.kind === CRON_KIND || change.record.kind === SANDBOX_KIND)) || (change.type === "task" && (change.value.kind === SANDBOX_LIFECYCLE || change.value.kind === MEMORY_UPDATE)))) {
         void this.#refreshAlarm().catch((error: unknown) => reportError("Schedule alarm reconciliation failed", error));
       }
-    });
+    }, end: () => {} });
 
     void harness.closed.then((end) => {
-      if (end.reason === "failed") this.#host.abort("Harness failed");
+      if (end.kind === "failed") this.#host.abort("Harness failed");
     });
-    harness.resume();
-
     this.#selected = await this.#host.storage.get<ModelRef>(MODEL_KEY);
     const model = chatModelRef(this.#host.env, this.#selected);
     const root = await harness.root(BACKGROUND_CONTEXT, { agent: { model, thinkingLevel: "off" } });
     await root.configure({ model, tools: null }, BACKGROUND_CONTEXT);
     this.#root = root;
+    harness.resume();
     const update = createMemoryUpdate(this.#host);
-    harness.subscribeCommits((publication) => {
+    harness.observeCommits({ advance: (publication) => {
       if (publication.changes.some((change) => change.type === "entry" && change.value.conversationId === root.id && CompactionEntry.is(change.value))) {
         void recoverMemoryUpdates(harness, root, update).catch((error: unknown) => reportError("Memory compaction scheduling failed", error));
       }
-    });
+    }, end: () => {} });
     await recoverMemoryUpdates(harness, root, update);
     await recoverSandboxLifecycle(harness, root.id, createSandboxProvider(this.#host.env, this.#host.name, this.#host.telemetry), BACKGROUND_CONTEXT);
-    trace(root.id);
 
-    this.#view = await root.viewState(BACKGROUND_CONTEXT);
-    this.#view.subscribe((_value, _context, delivery) => {
-      if (delivery.kind === "update") {
-        void this.#settleMakes();
-        this.#broadcastState();
-      }
+    this.#view = await observeView(harness, root, () => {
+      void this.#settleMakes();
+      this.#broadcastState();
     });
     trackProgress(
       harness,

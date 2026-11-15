@@ -1,4 +1,4 @@
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { type CommitPublication, type ConversationView, defineDoc, type Harness, type SubmissionId } from "@earendil-works/pi-durable";
 import type { MessageProgress, MessageState, SessionProgress, SubtaskProgress } from "../protocol/contract.js";
@@ -20,6 +20,7 @@ export const ChatDoc = defineDoc<ChatState>({
   kind: "pistack.chat.messages",
   version: 1,
   scope: "session",
+  checkpointWhen: () => false,
   initial: () => ({ messages: [] }),
 });
 
@@ -150,13 +151,13 @@ export function trackSnapshot<T>(
     sink.pending?.();
     if (!running && timer === undefined) timer = setTimeout(() => void run());
   };
-  const unsubscribe = harness.subscribeCommits((publication) => {
+  const unsubscribe = harness.observeCommits({ advance: (publication) => {
     if (relevant(publication)) refresh();
-  });
+  }, end: () => {} });
   const stop = (): void => {
     stopped = true;
     clearTimeout(timer);
-    unsubscribe();
+    unsubscribe.detach();
     unsubscribeClose();
   };
   const unsubscribeClose = harness.subscribeClose(stop);

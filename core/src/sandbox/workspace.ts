@@ -1,4 +1,4 @@
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { awaitWithContext, withoutAbortSignal } from "@earendil-works/chord/context";
 import type { ConversationId, DocumentObserver, TaskId, ToolExecutionApi, Tx } from "@earendil-works/pi-durable";
 import { toError } from "@earendil-works/pi-durable/env";
@@ -12,7 +12,7 @@ export async function waitForSandbox(read: DocumentObserver, holder: Conversatio
   try {
     if (ready(watch.value)) return;
     await awaitWithContext(Promise.race([
-      new Promise<void>((resolve) => watch.start(async (value) => { if (ready(value)) resolve(); })),
+      new Promise<void>((resolve) => watch.start(async (call) => { if (call.kind === "value" && ready(call.retired ? null : call.value)) resolve(); })),
       watch.closed.then(() => { throw new Error("Sandbox workspace watch closed"); }),
     ]), context);
   } finally {

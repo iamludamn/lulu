@@ -37,6 +37,7 @@ export const SandboxDoc = defineDoc<SandboxBinding>({
     return { ...initial(), ...state, backend: id ? "e2b" : null, ref: id ? { backend: "e2b", resource: { id } } : null, lastUsedAt: Date.now() } as SandboxBinding;
   },
   scope: "conversation",
+  checkpointWhen: () => false,
   history: "latest",
   fork: "initial",
   initial,

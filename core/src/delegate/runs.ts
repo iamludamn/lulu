@@ -48,6 +48,7 @@ export const RunFamily = defineDocFamily<RunDoc, RunSeed>({
   version: 2,
   migrate: (value) => value as unknown as RunDoc,
   scope: "session",
+  checkpointWhen: () => false,
   family: true,
   initial: (seed) => ({
     id: seed.id,
@@ -78,6 +79,7 @@ export const DelegateIndex = defineDoc<{ ids: string[] }>({
   kind: "pistack.delegate.index",
   version: 1,
   scope: "session",
+  checkpointWhen: () => false,
   initial: () => ({ ids: [] }),
 });
 

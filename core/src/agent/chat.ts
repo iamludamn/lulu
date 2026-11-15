@@ -67,7 +67,16 @@ export async function createChatHarnessOptions(
       registry,
       settings: {
         retry: { enabled: true, maxRetries: 6, baseDelayMs: 2000 },
-        compaction: { enabled: true, reserveTokens: 16384, keepRecentTokens: 20000 },
+        compaction: {
+          enabled: true,
+          reserveTokens: 16384,
+          keepRecentTokens: 20000,
+          backgroundTokens: 0,
+          modelOverrides: Object.fromEntries(models.getModels().map((model) => [
+            `${model.provider}/${model.id}`,
+            { backgroundTokens: Math.max(0, model.contextWindow - 16384 - 400000) },
+          ])),
+        },
         steeringMode: "one-at-a-time",
         followUpMode: "one-at-a-time",
         documentRetentionMs: 0,

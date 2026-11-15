@@ -1,9 +1,9 @@
-import { withCancel } from "@earendil-works/chord/context";
+import { awaitWithContext, withCancel } from "@earendil-works/chord/context";
 import { defineTask, type ConversationId, type Harness, type Task } from "@earendil-works/pi-durable";
 import { SandboxDoc, SANDBOX_IDLE_MS, SANDBOX_RENEW_MS, SANDBOX_LEASE_MS, SANDBOX_RETENTION_MS } from "./doc.js";
 import { WorkspaceLost, type SandboxProvider, type SandboxRef } from "./provider.js";
 import { toError } from "@earendil-works/pi-durable/env";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { ensureSandboxLifecycle, resetSandbox, waitForSandbox } from "./workspace.js";
 
 export const SANDBOX_LIFECYCLE = "pistack.sandbox.lifecycle";
@@ -64,12 +64,14 @@ export function createSandboxLifecycle(provider: SandboxProvider | undefined): S
       },
       wait: async (task, runtime, context) => {
         const child = withCancel(context);
+        let stopTimer = (): void => {};
         try {
           await Promise.race([
-            runtime.sleep(task.state.checkpoint.until, child.context),
+            awaitWithContext(new Promise<void>((resolve) => { stopTimer = runtime.setTimer(resolve, Math.max(0, task.state.checkpoint.until - runtime.now())); }), child.context),
             waitForSandbox(runtime, task.input.holder, (binding) => !binding || binding.revision !== task.state.checkpoint.revision, child.context),
           ]);
         } finally {
+          stopTimer();
           child.cancel();
         }
         await runtime.commit(() => ({ status: "running", checkpoint: { phase: "check" } }), context);

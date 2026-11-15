@@ -1,6 +1,6 @@
+import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { defineTool, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
-import { StringEnum } from "@earendil-works/pi-ai";
+import type { Context } from "@earendil-works/chord/context";
 import { Type, type Static } from "typebox";
 import { runIdOf, shortId } from "../delegate/runs.js";
 import type { Schedule } from "../protocol/contract.js";
@@ -8,12 +8,12 @@ import { CronJobsDoc } from "./doc.js";
 import { nextRunAfter, validTime, validTimeZone, type ScheduledJob } from "./schedule.js";
 
 const ScheduleParams = Type.Object({
-  action: StringEnum(["create", "list", "pause", "resume", "delete"], {
+  action: Type.Union([Type.Literal("create"), Type.Literal("list"), Type.Literal("pause"), Type.Literal("resume"), Type.Literal("delete")], {
     description: "create | list | pause | resume | delete",
   }),
   name: Type.Optional(Type.String({ description: "Short label for create" })),
   prompt: Type.Optional(Type.String({ description: "Self-contained task the scheduled run executes, for create" })),
-  kind: Type.Optional(StringEnum(["once", "daily"], { description: "once (one absolute time) or daily (time of day)" })),
+  kind: Type.Optional(Type.Union([Type.Literal("once"), Type.Literal("daily")], { description: "once (one absolute time) or daily (time of day)" })),
   at: Type.Optional(Type.String({ description: "ISO 8601 timestamp with offset, for kind=once" })),
   time: Type.Optional(Type.String({ description: "HH:MM in 24h, for kind=daily" })),
   tz: Type.Optional(Type.String({ description: "IANA time zone, for kind=daily, e.g. Asia/Shanghai" })),
@@ -107,7 +107,7 @@ async function update(api: ToolExecutionApi<ScheduleDetails>, args: ScheduleArgs
   return ok(updated, args.action, target.id);
 }
 
-export const ScheduleTool = defineTool({
+export const ScheduleTool: ToolRegistration = defineTool({
   name: "schedule",
   description: [
     "Manage scheduled jobs that run a self-contained task later, or every day at a fixed time, and report the result back to this conversation.",

@@ -10,6 +10,7 @@ const MemoryTriggerDoc = defineDoc<{ scanned: number }>({
   kind: "lulu.memory.trigger",
   version: 1,
   scope: "conversation",
+  checkpointWhen: () => false,
   history: "latest",
   fork: "initial",
   initial: () => ({ scanned: 0 }),
@@ -32,8 +33,7 @@ export function createMemoryUpdate(host: DurableHost) {
         await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: { processed: true } } }), context);
       },
       wait: async (task, runtime, context) => {
-        await runtime.sleep(task.state.checkpoint.until, context);
-        await runtime.commit(() => ({ status: "running", checkpoint: { phase: "send" } }), context);
+        await runtime.sleepUntil(task.state.checkpoint.until, { phase: "send" }, context);
       },
     },
     abort: async (_task, runtime, context) => {

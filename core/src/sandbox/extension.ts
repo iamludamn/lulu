@@ -1,4 +1,4 @@
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { defineExtension, section, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
 import { SandboxDoc } from "./doc.js";
 import { createSandboxLifecycle, type SandboxLifecycleTask } from "./lifecycle.js";

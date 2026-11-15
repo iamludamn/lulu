@@ -22,5 +22,6 @@ export const RecallDoc = defineDoc<Recall>({
   kind: "lulu.memory.recall",
   version: 1,
   scope: "session",
+  checkpointWhen: () => false,
   initial: () => ({ requestId: "", inject: false }),
 });

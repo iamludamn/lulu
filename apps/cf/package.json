@@ -9,8 +9,8 @@
   },
   "dependencies": {
     "@cloudflare/computer": "0.8.0",
-    "@earendil-works/pi-codemode": "1.3.0",
-    "@earendil-works/pi-durable": "1.3.0",
+    "@earendil-works/pi-codemode": "1.5.2",
+    "@earendil-works/pi-durable": "1.5.2",
     "@lulu/core": "*",
     "@platformatic/vfs": "0.5.0"
   },

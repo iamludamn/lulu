@@ -1,5 +1,5 @@
 import type { TelemetryContext } from "@earendil-works/pi-telemetry";
-import { traceHarness } from "../telemetry/agent.js";
+import { createHarnessTelemetry } from "../telemetry/agent.js";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai/models";
 import {
@@ -92,21 +92,23 @@ export class MemoryAgent {
         sections: [section("rules", () => MEMORY_RULES, { tag: false }), section("memory", () => getContext(this.#files, this.#telemetry), { tag: false })],
       }),
     );
+    const telemetry = createHarnessTelemetry(this.#telemetry, { "lulu.agent": "memory", "lulu.bot.id": this.#botId }, () => this.#root?.id);
+    registry.install(telemetry.extension);
     const harness = await Harness.open(
       storage,
       {
         models: this.#models,
         registry,
+        telemetry: telemetry.context,
         onReport: () => console.error(JSON.stringify({ message: "Memory agent background task failed", sessionId: this.#sessionId, category: "background_task" })),
       },
       BACKGROUND_CONTEXT,
     );
     const root = await harness.root(BACKGROUND_CONTEXT, { agent: { model: this.#model, thinkingLevel: "off" } });
     await root.configure({ model: this.#model }, BACKGROUND_CONTEXT);
-    traceHarness(harness, this.#telemetry, { "lulu.agent": "memory", "lulu.bot.id": this.#botId })(root.id);
-    harness.resume();
     this.#harness = harness;
     this.#root = root;
+    harness.resume();
   }
 
   remember(requestId: string, episodes: readonly Episode[], through: number): Promise<MemoryRun> {

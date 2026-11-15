@@ -1,6 +1,6 @@
+import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { defineTool, LiveDoc } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
-import { StringEnum } from "@earendil-works/pi-ai";
+import type { Context } from "@earendil-works/chord/context";
 import type { ConversationId, ToolExecutionApi, ToolExecutionResult } from "@earendil-works/pi-durable";
 import { Type, type Static } from "typebox";
 import { DefaultDelegateAgent, type DelegatePresets } from "./agents.js";
@@ -10,14 +10,14 @@ import { createRun, entryBeforeCall } from "./spawn.js";
 import { DelegateWait } from "./wait.js";
 
 const delegateParams = (presets: DelegatePresets) => Type.Object({
-  action: StringEnum(["spawn", "list", "send", "resume", "close"], {
+  action: Type.Union([Type.Literal("spawn"), Type.Literal("list"), Type.Literal("send"), Type.Literal("resume"), Type.Literal("close")], {
     description: "spawn | list | send | resume | close",
   }),
   task: Type.Optional(Type.String({ description: "Task for spawn. The child sees this conversation up to now, then this task" })),
   description: Type.Optional(Type.String({ description: "Short display label for spawn, shown in the UI" })),
   id: Type.Optional(Type.String({ description: "Child handle for list/send/resume/close" })),
   message: Type.Optional(Type.String({ description: "Instruction for send, or optional prompt for resume" })),
-  agent: Type.Optional(StringEnum(Object.keys(presets), { description: "Preset for spawn. Default worker." })),
+  agent: Type.Optional(Type.String({ enum: Object.keys(presets), description: "Preset for spawn. Default worker." })),
   token: Type.Optional(Type.String({ description: "Owner tag for spawn; echoed on settle" })),
 });
 
@@ -155,7 +155,7 @@ async function mustRun(api: ToolExecutionApi<DelegateDetails>, input: string, co
   return run ?? undefined;
 }
 
-export const createDelegateTool = (presets: DelegatePresets, sandboxes: SandboxProvider | undefined) => defineTool({
+export const createDelegateTool = (presets: DelegatePresets, sandboxes: SandboxProvider | undefined): ToolRegistration => defineTool({
   name: "delegate",
   description: [
     "Launch a background child agent to handle a complex, multi-step task autonomously, and get its result back automatically.",
