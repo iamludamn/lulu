@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import assert from 'node:assert/strict';
 import { createSession, MemoryStorage } from '@earendil-works/pi-durable';
 import { createBashTool } from '@earendil-works/pi-durable/tools';
@@ -7,7 +8,7 @@ import { SandboxDoc } from '../dist/sandbox/doc.js';
 import { createEnvironmentExtension } from '../dist/sandbox/extension.js';
 import { createE2bProvider } from '../dist/sandbox/e2b/provider.js';
 
-const context = {};
+const context = BACKGROUND_CONTEXT;
 
 async function exerciseBash(provider) {
   const session = createSession(new MemoryStorage());
