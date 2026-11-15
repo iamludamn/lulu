@@ -35,7 +35,10 @@ export function createHarnessTelemetry(telemetry: TelemetryContext, attributes: 
           if (message.stopReason === "pending" || message.stopReason === "deferred") return;
           await context.telemetry.startSpan({ name: "chat.usage", attributes: { ...scope(api.conversationId), "lulu.task.id": String(api.taskId), "gen_ai.operation.name": "chat" } }, async (span) => {
             recordModelUsage(span, message);
-            if (message.stopReason === "error") span.setStatus({ status: "error", error: { name: "ModelError", message: "model request failed" } });
+            if (message.stopReason === "error") {
+              console.error("Model request failed", { provider: message.provider, model: message.model });
+              span.setStatus({ status: "error", error: { name: "ModelError", message: "model request failed" } });
+            }
           });
         },
       })],

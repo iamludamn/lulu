@@ -6,6 +6,7 @@ export function serviceUsage<T>(telemetry: TelemetryContext, provider: string, o
       const result = await run(span);
       return result;
     } catch (error) {
+      console.error("External service request failed", { provider, operation });
       span.setAttributes({ "lulu.service.outcome": "error" });
       span.setStatus({ status: "error", error: { name: "Error", message: "external service request failed" } });
       throw error;
@@ -13,12 +14,13 @@ export function serviceUsage<T>(telemetry: TelemetryContext, provider: string, o
   });
 }
 
-export function serviceFetch(telemetry: TelemetryContext, provider: string, operation: string, request: () => Promise<Response>, bytes?: number): Promise<Response> {
+export function serviceFetch(telemetry: TelemetryContext, provider: string, operation: string, request: () => Promise<Response>, bytes?: number, expectedStatuses: readonly number[] = []): Promise<Response> {
   return serviceUsage(telemetry, provider, operation, async (span) => {
     const response = await request();
     span.setAttributes({ "http.response.status_code": response.status });
-    if (response.ok) span.setAttributes({ "lulu.service.upload_bytes": bytes });
+    if (response.ok || expectedStatuses.includes(response.status)) span.setAttributes({ "lulu.service.upload_bytes": bytes });
     else {
+      console.error("External service HTTP failure", { provider, operation, status: response.status });
       span.setAttributes({ "lulu.service.outcome": "error" });
       span.setStatus({ status: "error", error: { name: "Error", message: "external service HTTP failure" } });
     }

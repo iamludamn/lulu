@@ -28,7 +28,7 @@ export function objectStore(env: Environment, telemetry: TelemetryContext): Obje
       return { url: signed.url, method, expiresInSeconds: PRESIGN_SECONDS };
     },
     async size(key) {
-      const response = await serviceFetch(telemetry, "s3", "head", () => aws.fetch(urlOf(key), { method: "HEAD" }));
+      const response = await serviceFetch(telemetry, "s3", "head", () => aws.fetch(urlOf(key), { method: "HEAD" }), undefined, [404]);
       if (response.status === 404) return undefined;
       if (!response.ok) throw new Error(`object store head failed (${response.status})`);
       return Number(response.headers.get("content-length") ?? 0);
@@ -36,7 +36,7 @@ export function objectStore(env: Environment, telemetry: TelemetryContext): Obje
     async remove(keys) {
       await Promise.all(
         keys.map(async (key) => {
-          const response = await serviceFetch(telemetry, "s3", "delete", () => aws.fetch(urlOf(key), { method: "DELETE" }));
+          const response = await serviceFetch(telemetry, "s3", "delete", () => aws.fetch(urlOf(key), { method: "DELETE" }), undefined, [404]);
           if (!response.ok && response.status !== 404) throw new Error(`object store delete failed (${response.status})`);
         }),
       );
