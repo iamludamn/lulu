@@ -35,7 +35,11 @@ export function acceptSpace(panel: PanelState, widget: WidgetInput, origin: stri
   if (previewProblem !== undefined) throw new Error(previewProblem);
   const previous = panel.widgets[widget.id];
   const receipts = Object.values(panel.spaceReceipts ?? {}).filter((receipt) => receipt.id === widget.id);
-  if (previous !== undefined && spaceVersion(previous) === undefined) throw new Error("不能将其他组件替换为 Space，请使用新的 ID");
+  // Early Spaces used spaces/<id>.html. Migrating that exact namespace starts
+  // a new index.html version sequence, while retaining widget identity/state.
+  const previousBody = spaceBody(previous);
+  const legacyPath = previousBody !== undefined && ARTIFACT_REF.exec(previousBody.src)?.[1] === `spaces/${widget.id}.html`;
+  if (previous !== undefined && spaceVersion(previous) === undefined && !legacyPath) throw new Error("不能将其他组件替换为 Space，请使用新的 ID");
   // A retry after a successful acceptance must never replace a subsequent revision.
   if (previous !== undefined && panel.spaceReceipts?.[origin] !== undefined) return;
   const latest = offers.reduce<{ origin: string; version: number } | undefined>((latest, offer) => {

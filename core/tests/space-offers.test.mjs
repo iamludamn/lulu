@@ -7,6 +7,26 @@ const widget = (version, extra = {}) => ({ id: 'trip', size: 'm', title: '旅行
 const offer = (id, version, extra) => ({ id, entry: version, input: { type: 'widget', widget: { kind: 'panel', panel: widget(version, extra) } } });
 const empty = () => ({ order: ['trip'], widgets: {} });
 
+test('legacy flat-path web Space migrates to a covered Space without changing identity or order', () => {
+  const panel = empty(), next = offer('covered', 1);
+  panel.widgets.trip = { id: 'trip', title: '旅行计划', size: 'l', origin: 'legacy', body: { kind: 'web', src: 'artifact://spaces/trip.html@2', refresh: 'daily' } };
+  acceptSpace(panel, next.input.widget.panel, 'covered', [next], 10);
+  assert.deepEqual(panel.order, ['trip']);
+  assert.equal(panel.widgets.trip.id, 'trip');
+  assert.equal(panel.widgets.trip.body.src, widget(1).body.src);
+  assert.equal(panel.widgets.trip.body.preview, widget(1).body.preview);
+  assert.equal(panel.widgets.trip.body.refresh, 'daily');
+  assert.equal(panel.spaceReceipts.covered.action, 'update');
+  acceptSpace(panel, next.input.widget.panel, 'covered', [next], 11);
+  assert.equal(panel.widgets.trip.updatedAt, 10);
+});
+
+test('legacy migration does not admit another Space namespace', () => {
+  const panel = empty(), next = offer('covered', 1);
+  panel.widgets.trip = { ...widget(1), body: { kind: 'web', src: 'artifact://spaces/other.html@2' } };
+  assert.throws(() => acceptSpace(panel, next.input.widget.panel, 'covered', [next], 10), /其他组件/);
+});
+
 // Original keep implementation overwrote the canonical widget and origin with
 // any card. This is the exact A -> B -> stale A regression, not a UI-only check.
 test('newer acceptance preserves state namespace, position and omitted refresh; stale offer never rolls back', () => {
