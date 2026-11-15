@@ -17,7 +17,7 @@ public enum SpaceOfferState: Equatable, Sendable {
 
 extension PanelWidget {
     public var spaceVersion: Int? {
-        guard case .space(let src, _, _) = body,
+        guard case .space(let src, _, _, _) = body,
               let address = ArtifactAddress(src), address.name == "spaces/\(id)/index.html" else { return nil }
         return address.version
     }

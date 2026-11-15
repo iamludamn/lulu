@@ -1,27 +1,20 @@
 import PiStackKit
 import SwiftUI
 
-/// The card face of a space: the live page itself, shown as a still window. Opening the card opens the page full screen.
 struct SpacePreview: View {
-    let src: String
+    let preview: String
     let id: String
-    let summary: String?
     let botId: String
     let api: Api
-    @State private var page: Page?
+    @State private var html: String?
     @State private var refreshes = 0
     @State private var failed = false
 
-    private struct Page {
-        let html: String
-        let bridge: SpaceBridge
-    }
-
     var body: some View {
         ZStack {
-            if let page {
-                HTMLPage(html: page.html, bridge: page.bridge, interactive: false)
-                    .id(ObjectIdentifier(page.bridge))
+            if let html {
+                HTMLPage(html: html, bridge: nil, interactive: false)
+                    .id("\(preview)#\(refreshes)")
             } else if failed {
                 Label("页面无法加载", systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.secondary)
             } else {
@@ -30,10 +23,6 @@ struct SpacePreview: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.ultraThinMaterial)
-        .overlay {
-            Rectangle().fill(.ultraThinMaterial).opacity(0.55)
-                .allowsHitTesting(false)
-        }
         .overlay(alignment: .bottomTrailing) {
             Label("打开 Space", systemImage: "arrow.up.right")
                 .font(.caption2.weight(.semibold))
@@ -44,18 +33,19 @@ struct SpacePreview: View {
                 .padding(12)
                 .allowsHitTesting(false)
         }
-        .task(id: "\(src)#\(refreshes)") { await load() }
+        .task(id: "\(preview)#\(refreshes)") { await load() }
         .onReceive(NotificationCenter.default.publisher(for: .spaceRefresh)) { if $0.object as? String == id { refreshes += 1 } }
     }
 
     private func load() async {
-        guard let address = ArtifactAddress(src) else {
+        html = nil
+        failed = false
+        guard let address = ArtifactAddress(preview) else {
             failed = true
             return
         }
         do {
-            let html = try await api.artifactText(botId, name: address.name, version: address.version)
-            page = Page(html: html, bridge: SpaceBridge(botId: botId, space: id, refresh: refreshes > 0 ? .open : nil, preview: true, api: api))
+            html = try await api.artifactText(botId, name: address.name, version: address.version)
             failed = false
         } catch {
             failed = true

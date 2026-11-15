@@ -73,12 +73,12 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
         case timeline([Event])
         case note(String)
         case media(src: String, caption: String?)
-        case space(src: String, summary: String?, refresh: SpaceRefresh)
+        case space(src: String, summary: String?, refresh: SpaceRefresh, preview: String)
         case weather(city: String)
         case actions([Button])
         case unknown
 
-        private enum Keys: String, CodingKey { case kind, value, unit, at, delta, spark, items, mark, x, series, events, markdown, src, caption, buttons, summary, refresh, city }
+        private enum Keys: String, CodingKey { case kind, value, unit, at, delta, spark, items, mark, x, series, events, markdown, src, caption, buttons, summary, refresh, city, preview }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Keys.self)
@@ -106,7 +106,8 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
             case "space", "web": self = .space(
                     src: try c.decode(String.self, forKey: .src),
                     summary: try c.decodeIfPresent(String.self, forKey: .summary),
-                    refresh: (try? c.decodeIfPresent(SpaceRefresh.self, forKey: .refresh)).flatMap { $0 } ?? .manual
+                    refresh: (try? c.decodeIfPresent(SpaceRefresh.self, forKey: .refresh)).flatMap { $0 } ?? .manual,
+                    preview: try c.decode(String.self, forKey: .preview)
                 )
             case "weather": self = .weather(city: try c.decode(String.self, forKey: .city))
             case "actions": self = .actions(try c.decode([Button].self, forKey: .buttons))

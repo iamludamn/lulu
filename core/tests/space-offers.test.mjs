@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { acceptSpace, rememberSpace } from '../dist/send/space-offers.js';
 import { deliveredSentIn } from '../dist/send/sent.js';
 
-const widget = (version, extra = {}) => ({ id: 'trip', size: 'm', title: '旅行计划', body: { kind: 'space', src: `artifact://spaces/trip/index.html@${version}`, ...extra } });
+const widget = (version, extra = {}) => ({ id: 'trip', size: 'm', title: '旅行计划', body: { kind: 'space', src: `artifact://spaces/trip/index.html@${version}`, preview: `artifact://spaces/trip/cover.html@${version}`, ...extra } });
 const offer = (id, version, extra) => ({ id, entry: version, input: { type: 'widget', widget: { kind: 'panel', panel: widget(version, extra) } } });
 const empty = () => ({ order: ['trip'], widgets: {} });
 

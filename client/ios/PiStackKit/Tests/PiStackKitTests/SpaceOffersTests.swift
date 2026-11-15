@@ -3,7 +3,7 @@ import Testing
 @testable import PiStackKit
 
 private func widget(_ version: Int, origin: String? = nil) throws -> PanelWidget {
-    var json: [String: Any] = ["id": "trip", "size": "m", "title": "旅行计划", "body": ["kind": "space", "src": "artifact://spaces/trip/index.html@\(version)"]]
+    var json: [String: Any] = ["id": "trip", "size": "m", "title": "旅行计划", "body": ["kind": "space", "src": "artifact://spaces/trip/index.html@\(version)", "preview": "artifact://spaces/trip/cover.html@\(version)"]]
     json["origin"] = origin
     return try JSONDecoder().decode(PanelWidget.self, from: JSONSerialization.data(withJSONObject: json))
 }
@@ -33,7 +33,7 @@ private func panel(_ json: String) throws -> PanelState {
 
 @Test func acceptedOffersBecomeDurableReceiptsNotResurrectedCards() throws {
     let state = try panel("""
-    {"order":["trip"],"widgets":{"trip":{"id":"trip","size":"m","title":"旅行计划","origin":"b","body":{"kind":"space","src":"artifact://spaces/trip/index.html@2"}}},"spaceReceipts":{"a":{"id":"trip","version":1,"action":"add"},"b":{"id":"trip","version":2,"action":"update"}}}
+    {"order":["trip"],"widgets":{"trip":{"id":"trip","size":"m","title":"旅行计划","origin":"b","body":{"kind":"space","src":"artifact://spaces/trip/index.html@2","preview":"artifact://spaces/trip/cover.html@2"}}},"spaceReceipts":{"a":{"id":"trip","version":1,"action":"add"},"b":{"id":"trip","version":2,"action":"update"}}}
     """)
     let states = spaceOfferStates(try [entry("a", version: 1), entry("b", version: 2)], panel: state)
     #expect(states["a"] == .accepted(.add))
