@@ -63,7 +63,10 @@ export class VoiceSession {
       {
         agentName: VOICE_DEFAULT_NAMES.agent,
         userName: VOICE_DEFAULT_NAMES.user,
-        send: (event) => this.#deps.send(socket, { type: "voice", event }),
+        send: (event) => {
+          if (event.type === "error") console.error("Voice session failed", { provider: "doubao" });
+          this.#deps.send(socket, { type: "voice", event });
+        },
         ask: async (request) => {
           const askId = "voice-" + crypto.randomUUID();
           await this.#deps.submit(socket, { type: "prompt.submit", requestId: askId, content: request, whenBusy: "followUp" });
@@ -163,7 +166,10 @@ export class VoiceSession {
         { sessionId: host.id },
       );
       recordModelUsage(span, reply);
-      if (reply.stopReason === "error") span.setStatus({ status: "error", error: { name: "Error", message: "voice writer model failed" } });
+      if (reply.stopReason === "error") {
+        console.error("Voice writer model failed", { provider: reply.provider, model: reply.model });
+        span.setStatus({ status: "error", error: { name: "Error", message: "voice writer model failed" } });
+      }
       return reply;
     });
     return reply.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");

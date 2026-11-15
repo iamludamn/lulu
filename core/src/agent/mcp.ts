@@ -118,6 +118,7 @@ function toolFor(server: string, client: McpClient, tool: Tool, host: McpHostSer
       const result = external ? await serviceUsage(host.telemetry, server, tool.name, async (span) => {
         const result = await call();
         if (result.isError) {
+          console.error("External MCP tool failed", { server, tool: tool.name });
           span.setAttributes({ "lulu.service.outcome": "error" });
           span.setStatus({ status: "error", error: { name: "Error", message: "external MCP tool failed" } });
         }

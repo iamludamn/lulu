@@ -44,6 +44,7 @@ export function meteredVoiceConnect(connect: DurableHost["connect"], telemetry: 
         },
       });
       if (!result.socket) {
+        console.error("Voice upstream connection refused", { status: result.status });
         span.setAttributes({ "lulu.service.outcome": "error" });
         span.setStatus({ status: "error", error: { name: "Error", message: "voice connection refused" } });
       }

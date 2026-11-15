@@ -56,7 +56,7 @@ async function mcpRegistry(request: Request, host: ApiHost, rest: string): Promi
     const given = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "";
     if (!(await tokensMatch(given, token))) return json({ error: "Unauthorized" }, 401, { "WWW-Authenticate": "Bearer" });
   }
-  if (rest === "/mcp/catalog") return mcpCatalog(request, host.kv);
+  if (rest === "/mcp/catalog") return mcpCatalog(request, host.kv, host.telemetry);
   const url = new URL(request.url);
   url.pathname = rest;
   const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.text();

@@ -1,5 +1,7 @@
 import type { KeyValue } from "../host/types.js";
+import type { TelemetryContext } from "@earendil-works/pi-telemetry";
 import type { McpCatalogHeader, McpCatalogPage, McpCatalogRemote, McpCatalogServer, McpCatalogValue } from "../protocol/mcp.js";
+import { serviceFetch, serviceUsage } from "../telemetry/service.js";
 
 const REGISTRY = "https://registry.modelcontextprotocol.io/v0.1/servers";
 const MAX_AGE = 60 * 60 * 1000;
@@ -53,7 +55,7 @@ function serverOf(raw: unknown): McpCatalogServer | undefined {
   };
 }
 
-export async function mcpCatalog(request: Request, kv: KeyValue): Promise<Response> {
+export async function mcpCatalog(request: Request, kv: KeyValue, telemetry: TelemetryContext): Promise<Response> {
   if (request.method !== "GET") return Response.json({ error: "Method not allowed" }, { status: 405, headers: { Allow: "GET" } });
   const params = new URL(request.url).searchParams;
   const search = (params.get("search") ?? "").trim();
@@ -66,7 +68,7 @@ export async function mcpCatalog(request: Request, kv: KeyValue): Promise<Respon
   if (cursor !== "") query.set("cursor", cursor);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(query.toString()));
   const key = `mcp:catalog:v1:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
-  const stored = await kv.get(key).catch(() => null);
+  const stored = await serviceUsage(telemetry, "cloudflare-kv", "get", () => kv.get(key)).catch(() => null);
   let cached: McpCatalogPage | undefined;
   try {
     const parsed = object(stored === null ? undefined : JSON.parse(stored));
@@ -74,7 +76,7 @@ export async function mcpCatalog(request: Request, kv: KeyValue): Promise<Respon
   } catch { cached = undefined; }
   if (cached !== undefined && Date.now() - cached.fetchedAt < MAX_AGE) return Response.json(cached);
   try {
-    const response = await fetch(`${REGISTRY}?${query}`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(8000) });
+    const response = await serviceFetch(telemetry, "mcp-registry", "list", () => fetch(`${REGISTRY}?${query}`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(8000) }));
     if (!response.ok) throw new Error(`Registry HTTP ${response.status}`);
     const data = object(await response.json());
     if (!Array.isArray(data.servers)) throw new Error("Invalid registry response");
@@ -83,7 +85,7 @@ export async function mcpCatalog(request: Request, kv: KeyValue): Promise<Respon
       servers: data.servers.map(serverOf).filter((server): server is McpCatalogServer => server !== undefined),
       ...(nextCursor === undefined || nextCursor === "" ? {} : { nextCursor }), fetchedAt: Date.now(), stale: false,
     };
-    await kv.put(key, JSON.stringify(page)).catch(() => undefined);
+    await serviceUsage(telemetry, "cloudflare-kv", "put", () => kv.put(key, JSON.stringify(page))).catch(() => undefined);
     return Response.json(page);
   } catch {
     return cached === undefined
