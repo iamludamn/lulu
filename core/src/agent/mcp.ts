@@ -1,6 +1,6 @@
 import { serviceUsage } from "../telemetry/service.js";
 import type { CodemodeToolOptions } from "@earendil-works/pi-durable/codemode";
-import type { TSchema } from "@earendil-works/pi-ai";
+import type { TSchema } from "typebox";
 import { defineExtension, defineTool, section } from "@earendil-works/pi-durable";
 import type { Extension, ToolRegistration } from "@earendil-works/pi-durable";
 import { McpAuthRequiredError, McpClient, StreamableHttpTransport, toLlmContent, type AuthProvider, type McpFetch, type Tool } from "@earendil-works/pi-mcp";

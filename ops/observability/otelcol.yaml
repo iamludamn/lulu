@@ -372,6 +372,6 @@ service:
       processors: [transform/memory_metric_scope, batch]
       exporters: [span_metrics, signal_to_metrics]
     metrics:
-      receivers: [span_metrics, signal_to_metrics]
+      receivers: [otlp, span_metrics, signal_to_metrics]
       processors: [batch]
       exporters: [otlp_http/lgtm]

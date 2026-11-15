@@ -1,4 +1,4 @@
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Harness, SubmissionId, SubmissionRecord } from "@earendil-works/pi-durable";
 
 export type SubmissionReader = (id: SubmissionId, context: Context) => Promise<SubmissionRecord | undefined>;
@@ -11,17 +11,17 @@ export async function readSubmission(harness: Harness, id: SubmissionId, context
 export function trackSubmissions(harness: Harness): { read: SubmissionReader; stop(): void } {
   const records = new Map<SubmissionId, Promise<SubmissionRecord | undefined>>();
   let stopped = false;
-  const unsubscribe = harness.subscribeCommits((publication) => {
+  const unsubscribe = harness.observeCommits({ advance: (publication) => {
     if (stopped) return;
     for (const change of publication.changes) {
       if (change.type === "submission" && records.has(change.value.id)) {
         records.set(change.value.id, Promise.resolve(change.value));
       }
     }
-  });
+  }, end: () => {} });
   const stop = (): void => {
     stopped = true;
-    unsubscribe();
+    unsubscribe.detach();
     unsubscribeClose();
     records.clear();
   };

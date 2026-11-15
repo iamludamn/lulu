@@ -1,5 +1,5 @@
 import { AssistantEntry, defineTask } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import type { ConversationId, EntryId, TaskRuntime } from "@earendil-works/pi-durable";
 import { RunFamily, oneLine, readRunStatus, shortId, updateRun, type RunUsage } from "./runs.js";

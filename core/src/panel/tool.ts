@@ -1,13 +1,13 @@
+import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { defineTool, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
-import { StringEnum } from "@earendil-works/pi-ai";
+import type { Context } from "@earendil-works/chord/context";
 import { Type, type Static } from "typebox";
 import { WidgetInput } from "../protocol/panel.js";
 import { rememberSpace } from "../send/space-offers.js";
 import { PanelDoc } from "./doc.js";
 
 const PanelParams = Type.Object({
-  action: StringEnum(["update", "remove", "list"], { description: "update | remove | list" }),
+  action: Type.Union([Type.Literal("update"), Type.Literal("remove"), Type.Literal("list")], { description: "update | remove | list" }),
   widget: Type.Optional(WidgetInput),
   id: Type.Optional(Type.String({ description: "Widget id for remove" })),
 });
@@ -64,7 +64,7 @@ async function list(api: ToolExecutionApi<PanelDetails>, context: Context): Prom
   return ok(widgets.length === 0 ? "Panel is empty." : JSON.stringify(widgets), "list", null);
 }
 
-export const createPanelTool = () =>
+export const createPanelTool = (): ToolRegistration =>
   defineTool({
     name: "panel",
     description: [

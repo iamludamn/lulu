@@ -1,5 +1,5 @@
 import { serviceUsage } from "../../telemetry/service.js";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { TelemetryContext } from "@earendil-works/pi-telemetry";
 import { NotFoundError, Sandbox } from "e2b";
 import type { Environment } from "../../host/types.js";

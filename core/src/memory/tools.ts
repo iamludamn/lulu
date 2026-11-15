@@ -1,3 +1,4 @@
+import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { NOOP_TELEMETRY_CONTEXT, type TelemetryContext } from "@earendil-works/pi-telemetry";
 import { memorySpan } from "./telemetry.js";
 import { defineTool, type ToolExecutionResult } from "@earendil-works/pi-durable";
@@ -48,7 +49,7 @@ const occurrences = (text: string, part: string): number => text.split(part).len
 
 const alreadyApplied = (text: string, old: string, next: string): boolean => next !== "" && text.includes(next) && !text.split(next).join("\u0000").includes(old);
 
-export function createReadTools(files: ReadableFiles, telemetry: TelemetryContext = NOOP_TELEMETRY_CONTEXT) {
+export function createReadTools(files: ReadableFiles, telemetry: TelemetryContext = NOOP_TELEMETRY_CONTEXT): ToolRegistration[] {
   const read = defineTool({
     name: "memory_read",
     description: "读取一个长期记忆文件的全文。",
@@ -103,7 +104,7 @@ export function createReadTools(files: ReadableFiles, telemetry: TelemetryContex
   return [read, ls, grep];
 }
 
-export function createWriteTools(files: MemoryFiles) {
+export function createWriteTools(files: MemoryFiles): ToolRegistration[] {
   const write = defineTool({
     name: "memory_write",
     description: "整文件写入一个长期记忆文件（新建或整体重写）。内容必须以含 description 的 frontmatter 开头。",
