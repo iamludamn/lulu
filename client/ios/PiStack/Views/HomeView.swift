@@ -33,7 +33,7 @@ struct HomeView: View {
     @State private var bottomInset: CGFloat = 0
     @State private var voiceOpen = false
     @State private var voice = VoiceCall()
-    @Namespace private var voicePanel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var composing: Bool
     @Environment(\.scenePhase) private var phase
 
@@ -47,7 +47,6 @@ struct HomeView: View {
     var body: some View {
         ZStack {
             Wallpaper()
-            if !voiceOpen {
             TabView(selection: $page) {
                 ForEach(Page.allCases) { item in
                     content(item).safeAreaPadding(.bottom, composing ? 0 : bottomInset).tag(item)
@@ -64,7 +63,9 @@ struct HomeView: View {
             }
             // Only the controls draw glass; suppress the bar's full-width scroll edge layer.
             .scrollEdgeEffectHidden(true, for: [.top, .bottom])
-            }
+            .scaleEffect(voiceOpen && !reduceMotion ? 0.98 : 1)
+            .allowsHitTesting(!voiceOpen)
+            .accessibilityHidden(voiceOpen)
             if voiceOpen {
                 voiceTranscript
                     .transition(.opacity)
@@ -122,7 +123,7 @@ struct HomeView: View {
         case .chat:
             ChatView(bot: bot, store: store, api: api, draft: $draft, composing: $composing, onKept: land, onVoiceConversation: {
                 composing = false
-                withAnimation(.spring(duration: 0.55, bounce: 0.08)) { voiceOpen = true }
+                withAnimation(voiceTransition) { voiceOpen = true }
             },
                      reading: $reading, onReaderFrame: { readerFrame = $0 })
         case .assets:
@@ -143,12 +144,8 @@ struct HomeView: View {
             .disabled(page != .panel)
             .accessibilityLabel("添加组件")
             Spacer()
-            if !voiceOpen {
-                PageSwitcher(page: page, landed: landed, pull: pull, panel: voicePanel, onTarget: { targets[$0] = $1 }) { next in
-                    withAnimation(.snappy) { page = next }
-                }
-            } else {
-                Color.clear.frame(width: 200, height: 44)
+            PageSwitcher(page: page, landed: landed, pull: pull, onTarget: { targets[$0] = $1 }) { next in
+                withAnimation(.snappy) { page = next }
             }
             Spacer()
             Button { inspector = true } label: {
@@ -163,11 +160,14 @@ struct HomeView: View {
         .padding(.bottom, 8)
     }
 
+    private var voiceTransition: Animation {
+        .easeInOut(duration: reduceMotion ? 0.2 : 0.55)
+    }
+
     private var voiceTranscript: some View {
         ZStack {
             VoiceAtmosphere(muted: voice.muted)
                 .ignoresSafeArea()
-                .matchedGeometryEffect(id: "voicePanel", in: voicePanel)
                 .allowsHitTesting(false)
             GeometryReader { proxy in
                 VStack {
@@ -214,7 +214,7 @@ struct HomeView: View {
                         }
                         .accessibilityLabel(voice.muted ? "取消静音" : "静音")
                         .disabled(!voice.ready)
-                        Button { voice.stop(); withAnimation(.spring(duration: 0.5, bounce: 0.05)) { voiceOpen = false } } label: {
+                        Button { voice.stop(); withAnimation(voiceTransition) { voiceOpen = false } } label: {
                             Image(systemName: "xmark")
                                 .font(.system(size: 25, weight: .light))
                                 .frame(width: 72, height: 72)
@@ -291,7 +291,6 @@ private struct PageSwitcher: View {
     let page: Page
     let landed: Page?
     let pull: (page: Page, progress: CGFloat)?
-    let panel: Namespace.ID
     let onTarget: (Page, CGPoint) -> Void
     let select: (Page) -> Void
     @Namespace private var pill
@@ -329,7 +328,7 @@ private struct PageSwitcher: View {
             }
         }
         .padding(4)
-        .background { Capsule().fill(.clear).glassEffect(.regular, in: .capsule).matchedGeometryEffect(id: "voicePanel", in: panel) }
+        .background { Capsule().fill(.clear).glassEffect(.regular, in: .capsule) }
         .animation(.snappy(duration: 0.3), value: page)
     }
 }
