@@ -38,7 +38,7 @@ export function createE2bProvider(env: Environment, scope: string, telemetry: Te
     backend,
     profile,
     open(request, context) {
-      return telemetry.startSpan({ name: "sandbox.open", attributes: { "lulu.bot.id": scope, "lulu.sandbox.backend": backend, "lulu.sandbox.key": request.key } }, async (span) => {
+      return context.telemetry.startSpan({ name: "sandbox.open", attributes: { "lulu.bot.id": scope, "lulu.sandbox.backend": backend, "lulu.sandbox.key": request.key } }, async (span) => {
         let sandbox;
         if (request.ref) {
           const id = idOf(request.ref);
@@ -52,7 +52,7 @@ export function createE2bProvider(env: Environment, scope: string, telemetry: Te
         const cwd = request.cwd || (await sandbox.commands.run("pwd", { signal: context.abortSignal })).stdout.trim();
         const ref: SandboxRef = { backend, resource: { id: sandbox.sandboxId } };
         span.setAttributes({ "lulu.sandbox.id": sandbox.sandboxId });
-        return { ref, cwd, env: new E2bExecutionEnv(sandbox, cwd, telemetry, scope, backend) };
+        return { ref, cwd, env: new E2bExecutionEnv(sandbox, cwd, scope, backend) };
       });
     },
     renew: (ref, context) => existing(() => measured("renew", () => Sandbox.setTimeout(idOf(ref), SANDBOX_LEASE_MS, options(context)))),

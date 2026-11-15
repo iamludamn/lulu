@@ -1,4 +1,6 @@
-import { defineExtension, GenerationTask, hook, type ConversationId } from "@earendil-works/pi-durable";
+import { RunFamily, type RunDoc } from "../delegate/runs.js";
+import { SandboxDoc } from "../sandbox/doc.js";
+import { defineExtension, GenerationTask, hook, type Harness, type ConversationId } from "@earendil-works/pi-durable";
 import type { SpanAttributes, TelemetryContext } from "@earendil-works/pi-telemetry";
 import { recordModelUsage } from "./model.js";
 
@@ -24,8 +26,10 @@ export function createHarnessTelemetry(telemetry: TelemetryContext, attributes: 
     extension: defineExtension({
       name: "lulu.telemetry",
       hooks: [hook(GenerationTask, {
-        beforeRequest: (_request, api, context) => {
-          context.telemetry.setAttributes(scope(api.conversationId));
+        beforeRequest: async (_request, api, context) => {
+          const binding = await api.snapshot(SandboxDoc, api.conversationId, context);
+          const run = binding?.key ? await api.snapshot(RunFamily, binding.key, context) : undefined;
+          context.telemetry.setAttributes({ ...scope(api.conversationId), "lulu.delegate.run.id": run?.id, "lulu.delegate.generation": run?.generation });
         },
         afterResponse: async (message, api, context) => {
           if (message.stopReason === "pending" || message.stopReason === "deferred") return;
@@ -37,4 +41,27 @@ export function createHarnessTelemetry(telemetry: TelemetryContext, attributes: 
       })],
     }),
   };
+}
+
+export function observeDelegateTiming(harness: Harness, telemetry: TelemetryContext): void {
+  harness.observeCommits({
+    advance: (publication) => {
+      for (const change of publication.changes) {
+        if (change.type !== "document" || change.kind !== "change" || change.record.kind !== RunFamily.definition.kind) continue;
+        const run = change.value as unknown as RunDoc;
+        if (run.endedAt === null || run.status === "running") continue;
+        void telemetry.startSpan({ name: "delegate.run", attributes: {
+          "lulu.delegate.run.id": run.id,
+          "lulu.delegate.generation": run.generation,
+          "lulu.conversation.id": String(run.conversationId),
+          "lulu.conversation.kind": "delegate",
+          "lulu.delegate.status": run.status,
+          "lulu.delegate.started_at": run.startedAt,
+          "lulu.delegate.ended_at": run.endedAt,
+          "lulu.delegate.duration_ms": Math.max(0, run.endedAt - run.startedAt),
+        } }, async () => undefined).catch(() => undefined);
+      }
+    },
+    end: () => {},
+  });
 }
