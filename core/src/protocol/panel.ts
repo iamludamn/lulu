@@ -59,6 +59,7 @@ const Media = Type.Object({
 const Space = Type.Object({
   kind: Type.Literal("space"),
   src: Type.String({ description: "artifact://spaces/<widget id>/index.html@version of the page; the widget id is the page's saved-state key" }),
+  preview: Type.String({ description: "artifact://spaces/<widget id>/cover.html@version of the separate static cover" }),
   summary: Type.Optional(Type.String({ description: "One line on what the space shows, displayed on its card" })),
   refresh: Type.Optional(
     enumOf(

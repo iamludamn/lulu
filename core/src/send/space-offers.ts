@@ -1,6 +1,6 @@
 import type { PanelState, Widget, WidgetInput } from "../protocol/panel.js";
 import { ARTIFACT_REF } from "../protocol/send.js";
-import { spaceRefProblem } from "../artifact/space.js";
+import { spaceRefProblem, spacePreviewProblem } from "../artifact/space.js";
 import type { Sent } from "./sent.js";
 
 type SpaceBody = Extract<WidgetInput["body"], { kind: "space" }>;
@@ -31,6 +31,8 @@ export function acceptSpace(panel: PanelState, widget: WidgetInput, origin: stri
   const version = spaceVersion(widget);
   const body = spaceBody(widget);
   if (version === undefined || body === undefined) throw new Error("Space 版本无效，请重新生成预览");
+  const previewProblem = spacePreviewProblem(widget.id, body.preview);
+  if (previewProblem !== undefined) throw new Error(previewProblem);
   const previous = panel.widgets[widget.id];
   const receipts = Object.values(panel.spaceReceipts ?? {}).filter((receipt) => receipt.id === widget.id);
   if (previous !== undefined && spaceVersion(previous) === undefined) throw new Error("不能将其他组件替换为 Space，请使用新的 ID");

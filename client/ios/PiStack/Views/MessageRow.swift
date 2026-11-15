@@ -104,7 +104,7 @@ struct MessageRow: View, Equatable {
                 .frame(maxWidth: widget.size == .s && !widget.isSpace ? 176 : 360)
                 .frosted(26)
                 .contentShape(.rect(cornerRadius: 26, style: .continuous))
-            if case .space(let src, _, _) = widget.body {
+            if case .space(let src, _, _, _) = widget.body {
                 let source = "chat-\(row.id)"
                 let state = row.spaceOffer ?? .add
                 if state.actionable {
@@ -146,7 +146,7 @@ struct MessageRow: View, Equatable {
                         if state != .superseded {
                             Button("打开当前视图") {
                                 guard let current = store.snapshot.panel.widgets[widget.id],
-                                      case .space(let ref, _, let refresh) = current.body,
+                                      case .space(let ref, _, let refresh, _) = current.body,
                                       let address = ArtifactAddress(ref) else { return }
                                 openSpace(address, SpaceOpening(id: current.id, title: current.title, refresh: refresh), source)
                             }

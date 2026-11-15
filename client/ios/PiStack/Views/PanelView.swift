@@ -178,7 +178,7 @@ private struct WidgetCard: View {
     }
 
     private var space: (ArtifactAddress, SpaceRefresh)? {
-        guard case .space(let src, _, let refresh) = widget.body, let page = ArtifactAddress(src) else { return nil }
+        guard case .space(let src, _, let refresh, _) = widget.body, let page = ArtifactAddress(src) else { return nil }
         return (page, refresh)
     }
 }
