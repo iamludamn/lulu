@@ -6,6 +6,9 @@ struct InspectorView: View {
     let botId: String
     let api: Api
     @Environment(\.dismiss) private var dismiss
+    @State private var skyWeather: SkyWeather?
+    @State private var skyLoading = false
+    @AppStorage("lulu.sky.city") private var skyCity = ""
     @AppStorage("pistack.wallpaper") private var wallpaper = WallpaperTheme.sky
 
     private var snapshot: BotStore.Snapshot { store.snapshot }
@@ -35,6 +38,18 @@ struct InspectorView: View {
                 }
                 Section("背景") { wallpaperPicker }
                 Section {
+                    TextField("天气城市（如 Hangzhou）", text: $skyCity)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+                    Text(skyCity.isEmpty ? "未设置城市：天空仅随设备时间变化，无天气数据。" : "天空使用所填城市的天气与日出日落。城市名将发送至 Open-Meteo；同名城市取首个结果，请使用明确的城市名。离线最多沿用 3 小时，之后仅按设备时间显示。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    if !skyCity.isEmpty {
+                        Text(skyLoading ? "正在查询城市…" : skyWeather.map { "\($0.city) · \($0.timezone) · 更新于 \($0.fetchedAt.formatted(date: .omitted, time: .shortened))" } ?? "天气不可用：仅随设备时间变化")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    Link("天气数据：Open-Meteo", destination: URL(string: "https://open-meteo.com/")!)
+                } header: { Text("天空天气 · 仅晴空背景") }
+                Section {
                     NavigationLink { SettingsView() } label: { Label("服务器", systemImage: "server.rack") }
                 }
             }
@@ -45,6 +60,15 @@ struct InspectorView: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .task(id: skyCity) {
+            skyWeather = nil
+            skyLoading = !skyCity.isEmpty
+            do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            let next = await SkyWeather.load(city: skyCity)
+            guard !Task.isCancelled else { return }
+            skyWeather = next
+            skyLoading = false
+        }
     }
 
     private var wallpaperPicker: some View {

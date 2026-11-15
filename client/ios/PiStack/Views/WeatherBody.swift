@@ -42,7 +42,6 @@ struct WeatherBody: View {
                     }
                 }
                 Spacer(minLength: 4)
-                Image(systemName: look.symbol).symbolRenderingMode(.multicolor).font(.system(size: compact ? 30 : 42))
             }
             if size == .l {
                 VStack(spacing: 0) {
