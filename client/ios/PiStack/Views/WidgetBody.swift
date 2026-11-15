@@ -32,8 +32,8 @@ struct WidgetBody: View {
                 .mask(LinearGradient(stops: [.init(color: .black, location: 0.75), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom))
         case .media(let src, let caption):
             media(src, caption: caption)
-        case .space(_, _, _, let preview):
-            SpacePreview(preview: preview, id: widget.id, botId: botId, api: api)
+        case .space(let src, _, _, let preview):
+            SpacePreview(src: src, preview: preview, id: widget.id, botId: botId, api: api)
         case .weather(let city):
             WeatherBody(city: city, size: widget.size)
         case .actions(let buttons):

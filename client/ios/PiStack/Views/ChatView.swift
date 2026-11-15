@@ -8,8 +8,7 @@ struct ChatView: View {
     @Binding var draft: String
     var composing: FocusState<Bool>.Binding
     let onKept: (Page) -> Void
-    let bottomInset: CGFloat
-    @State private var composerHeight: CGFloat = 0
+    let onVoiceConversation: () -> Void
     @Binding var reading: ChatRow?
     let onReaderFrame: (ReaderFrame) -> Void
     @State private var pinned = true
@@ -50,7 +49,7 @@ struct ChatView: View {
                             .padding(.bottom, row.tail ? 12 : 0)
                             .transition(.opacity.animation(.easeOut(duration: 0.2)))
                     }
-                    Color.clear.frame(height: composing.wrappedValue ? 1 : composerHeight + bottomInset + 1).id(Self.bottom)
+                    Color.clear.frame(height: 1).id(Self.bottom)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -119,8 +118,7 @@ struct ChatView: View {
         .animation(.snappy, value: reconnecting)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if snapshot.halt == nil {
-                Composer(draft: $draft, busy: busy, placeholder: placeholder, focused: composing, onSend: send)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
+                Composer(draft: $draft, busy: busy, placeholder: placeholder, focused: composing, onSend: send, onVoiceConversation: onVoiceConversation)
             }
         }
         .overlayPreferenceValue(LongBubbleBounds.self) { bounds in

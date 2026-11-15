@@ -44,6 +44,7 @@ export class VoiceRelay {
       {
         ready: () => host.send({ type: "voice.state", state: "ready" }),
         caller: (transcript) => host.send({ type: "conversation.item.input_audio_transcription.completed", transcript }),
+        agent: (transcript) => host.send({ type: "response.output_audio_transcription.delta", transcript }),
         failed: (message) => host.send({ type: "error", error: { message } }),
         closed: () => host.send({ type: "voice.state", state: "closed", ...(this.#reason === undefined ? {} : { reason: this.#reason }) }),
       },

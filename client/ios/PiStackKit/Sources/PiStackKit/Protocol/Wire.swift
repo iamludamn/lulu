@@ -48,10 +48,10 @@ public struct ViewFrame: Decodable, Sendable {
 public enum ServerMessage: Decodable, Sendable {
     case state(view: ViewFrame, progress: SessionProgress, mcp: [McpStatus], panel: PanelState, assets: [AssetItem])
     case models(ModelConfig)
-    case voice
+    case voice(JSONValue)
     case result(requestId: String, error: String?)
 
-    private enum Keys: String, CodingKey { case type, view, progress, mcp, panel, assets, config, requestId, ok, error }
+    private enum Keys: String, CodingKey { case type, view, progress, mcp, panel, assets, config, requestId, ok, error, event }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: Keys.self)
@@ -65,10 +65,11 @@ public enum ServerMessage: Decodable, Sendable {
                 assets: (try? container.decodeIfPresent([AssetItem].self, forKey: .assets)) ?? []
             )
         case "models": self = .models(try container.decode(ModelConfig.self, forKey: .config))
+        case "voice": self = .voice(try container.decode(JSONValue.self, forKey: .event))
         case "result":
             let ok = try container.decode(Bool.self, forKey: .ok)
             self = .result(requestId: try container.decode(String.self, forKey: .requestId), error: ok ? nil : (try container.decodeIfPresent(String.self, forKey: .error) ?? "Command failed"))
-        default: self = .voice
+        default: self = .voice(.null)
         }
     }
 }

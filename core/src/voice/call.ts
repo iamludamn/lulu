@@ -16,6 +16,7 @@ export interface Channel {
 export interface CallEnds {
   ready(): void;
   caller(text: string): void;
+  agent?(text: string): void;
   failed(message: string): void;
   closed(): void;
 }
@@ -93,8 +94,9 @@ export class Call implements LineEvents {
     this.#ends.caller(text);
   }
 
-  agent(): void {
+  agent(text: string): void {
     this.#lastSpokenAt = this.#now();
+    this.#ends.agent?.(text);
   }
 
   cut(cut: Cut): void {

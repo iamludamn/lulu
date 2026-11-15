@@ -73,7 +73,7 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
         case timeline([Event])
         case note(String)
         case media(src: String, caption: String?)
-        case space(src: String, summary: String?, refresh: SpaceRefresh, preview: String)
+        case space(src: String, summary: String?, refresh: SpaceRefresh, preview: String?)
         case weather(city: String)
         case actions([Button])
         case unknown
@@ -107,7 +107,8 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
                     src: try c.decode(String.self, forKey: .src),
                     summary: try c.decodeIfPresent(String.self, forKey: .summary),
                     refresh: (try? c.decodeIfPresent(SpaceRefresh.self, forKey: .refresh)).flatMap { $0 } ?? .manual,
-                    preview: try c.decode(String.self, forKey: .preview)
+                    // Historical panel documents predate dedicated covers.
+                    preview: try c.decodeIfPresent(String.self, forKey: .preview)
                 )
             case "weather": self = .weather(city: try c.decode(String.self, forKey: .city))
             case "actions": self = .actions(try c.decode([Button].self, forKey: .buttons))

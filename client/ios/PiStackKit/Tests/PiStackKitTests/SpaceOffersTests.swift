@@ -57,3 +57,26 @@ private func panel(_ json: String) throws -> PanelState {
     #expect(SpaceOfferState.update.caption == "滑动更新视图")
     #expect(SpaceOfferState.accepted(.update).caption == "已更新")
 }
+
+@Test(arguments: ["space", "web"])
+func spacesSavedBeforeCoversRemainOnPanel(kind: String) throws {
+    let state = try panel("""
+    {"order":["trip","weather"],"widgets":{
+      "trip":{"id":"trip","size":"m","title":"旅行计划","body":{"kind":"\(kind)","src":"artifact://spaces/trip/index.html@1"}},
+      "weather":{"id":"weather","size":"m","title":"天气","body":{"kind":"weather","city":"杭州"}}
+    }}
+    """)
+    #expect(state.list.map(\.id) == ["trip", "weather"])
+    #expect(state.widgets["trip"]?.isSpace == true)
+    #expect(state.widgets["trip"]?.spaceVersion == 1)
+}
+
+@Test func dedicatedSpaceCoverSurvivesDecoding() throws {
+    let value = try widget(2)
+    guard case .space(let src, _, _, let preview) = value.body else {
+        Issue.record("Space with a dedicated cover did not decode")
+        return
+    }
+    #expect(src == "artifact://spaces/trip/index.html@2")
+    #expect(preview == "artifact://spaces/trip/cover.html@2")
+}

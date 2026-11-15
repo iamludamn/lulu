@@ -31,6 +31,9 @@ public final class BotStore {
     }
 
     public private(set) var snapshot = Snapshot()
+    public var onVoiceEvent: ((JSONValue) -> Void)?
+    public var onVoiceError: ((String) -> Void)?
+    private var voiceRequestId: String?
 
     private let socketURL: URL
     private let cacheURL: URL
@@ -55,6 +58,7 @@ public final class BotStore {
     }
 
     public func stop() {
+        onVoiceError?("连接已关闭，语音通话已结束")
         running = false
         timer?.cancel()
         timer = nil
@@ -64,6 +68,21 @@ public final class BotStore {
     }
 
     public func submit(_ content: String) { dispatch(Command(.submit(content))) }
+    public func startVoice() {
+        let id = newId()
+        voiceRequestId = id
+        transmit(["type": "voice.start", "requestId": id])
+    }
+    public func sendVoiceAudio(_ data: Data) {
+        transmit(["type": "voice.audio", "requestId": newId(), "audio": data.base64EncodedString()])
+    }
+    public func muteVoice(_ muted: Bool) {
+        transmit(["type": "voice.mute", "requestId": newId(), "muted": muted])
+    }
+    public func stopVoice() {
+        voiceRequestId = nil
+        transmit(["type": "voice.stop", "requestId": newId()])
+    }
     public func abort() { dispatch(Command(.abort)) }
     public func selectModel(_ model: ModelRef) { dispatch(Command(.selectModel(model))) }
     public func keep(_ origin: String) {
@@ -164,6 +183,7 @@ public final class BotStore {
         guard self.task === task else { return }
         self.task = nil
         snapshot.link = .offline
+        if onVoiceEvent != nil { onVoiceError?("连接已断开，语音通话已结束") }
         switch task.closeCode.rawValue {
         case 4404: snapshot.halt = .notFound
         default:
@@ -192,8 +212,13 @@ public final class BotStore {
             snapshot.hasReceivedState = true
             persist()
         case .models(let config): snapshot.models = config
-        case .voice: break
+        case .voice(let event): onVoiceEvent?(event)
         case .result(let requestId, let error):
+            if requestId == voiceRequestId {
+                voiceRequestId = nil
+                if let error { onVoiceError?(error) }
+                return
+            }
             guard let index = snapshot.requests.firstIndex(where: { $0.id == requestId }) else { return }
             if let error {
                 snapshot.requests[index].state = .failed

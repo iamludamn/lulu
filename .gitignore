@@ -19,3 +19,10 @@ AGENTS.md
 apps/cf/wrangler.local.jsonc
 *.pem
 *.key
+/.env
+/.env.local
+/age-key.txt
+
+# Local previews, recordings, test evidence and experiment runtime databases.
+/output/
+/experiments/**/data/

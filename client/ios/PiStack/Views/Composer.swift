@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct Composer: View {
     @Binding var draft: String
@@ -6,19 +7,41 @@ struct Composer: View {
     let placeholder: String
     var focused: FocusState<Bool>.Binding
     let onSend: () -> Void
+    let onVoiceConversation: () -> Void
+    @State private var listening = false
+    private enum VoiceTarget { case send, text, cancel, conversation }
+    private let voiceRadius: CGFloat = 104
+    private var diagonal: CGFloat { voiceRadius / sqrt(2) }
+    @State private var voiceTarget: VoiceTarget = .send
+    @GestureState private var voiceGestureActive = false
+    @State private var notice: String?
+    @State private var noticeTask: Task<Void, Never>?
 
     private var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-
-    private var showSend: Bool { canSend && focused.wrappedValue }
+    private var showSend: Bool { canSend && focused.wrappedValue && !listening }
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
             HStack(alignment: .bottom, spacing: 6) {
-                TextField(placeholder, text: $draft, axis: .vertical)
+                TextField("", text: $draft, axis: .vertical)
+                    .font(.body)
                     .lineLimit(1...6)
                     .focused(focused)
                     .padding(.leading, 18)
                     .padding(.vertical, 13)
+                    .opacity(listening ? 0 : 1)
+                    .overlay(alignment: .leading) {
+                        if listening || draft.isEmpty {
+                            HStack(spacing: 6) {
+                                Text(listening ? (voiceTarget == .text ? "松手放入输入框" : "滑动转文字") : placeholder)
+                                if listening { Image(systemName: "arrow.left") }
+                            }
+                                .font(.body)
+                                .foregroundStyle(.tertiary)
+                                .padding(.leading, 18)
+                                .allowsHitTesting(false)
+                        }
+                    }
                 if showSend {
                     Button(action: onSend) {
                         Image(systemName: "arrow.up")
@@ -34,18 +57,137 @@ struct Composer: View {
                 }
             }
             .padding(.trailing, showSend ? 0 : 14)
-            .frame(minHeight: 48)
+            .frame(minHeight: 48, maxHeight: listening ? 48 : nil)
             .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 24, style: .continuous))
+            .scaleEffect(x: 1, y: voiceTarget == .text ? 1.05 : 1, anchor: .center)
             .animation(.snappy(duration: 0.2), value: showSend)
-            Image(systemName: "mic.fill")
-                .font(.system(size: 19, weight: .medium))
-                .foregroundStyle(.primary)
-                .frame(width: 48, height: 48)
-                .glassEffect(.regular.interactive(), in: .circle)
-                .accessibilityLabel("语音，功能即将推出")
+            if listening { Color.clear.frame(width: 52, height: 1) }
+            microphone
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
+        .overlay(alignment: .top) {
+            if listening {
+                Text(voiceTarget == .text ? "转文字" : voiceTarget == .cancel ? "松手取消" : voiceTarget == .conversation ? "松手进入语音对话" : "松开发送")
+                .font(.caption)
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .glassEffect(.regular, in: .capsule)
+                .offset(y: -48)
+                .allowsHitTesting(false)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            } else if let notice {
+                Text(notice)
+                    .font(.caption)
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .glassEffect(.regular, in: .capsule)
+                    .offset(y: -48)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if listening {
+                ZStack(alignment: .bottomTrailing) {
+                    voiceOption("取消", icon: "xmark", selected: voiceTarget == .cancel)
+                        .offset(x: -diagonal, y: voiceRadius - diagonal)
+                    voiceOption("语音对话", icon: "phone.fill", selected: voiceTarget == .conversation)
+                }.frame(width: 122, height: 96, alignment: .bottomTrailing)
+                .padding(.trailing, 16)
+                .offset(y: -(voiceRadius + 8))
+                .allowsHitTesting(false)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+        }
+        .animation(.snappy(duration: 0.2), value: listening)
+        .animation(.snappy(duration: 0.2), value: voiceTarget)
+        .animation(.snappy(duration: 0.2), value: notice)
+        .onChange(of: voiceGestureActive) { _, active in
+            if !active {
+                listening = false
+                voiceTarget = .send
+            }
+        }
+    }
+
+    private var microphone: some View {
+        ZStack {
+            if listening {
+                TimelineView(.animation(minimumInterval: 0.12)) { context in
+                    let time = context.date.timeIntervalSinceReferenceDate
+                    HStack(spacing: 3) {
+                        ForEach(0..<4) { index in
+                            Capsule().frame(width: 3, height: 6 + 12 * abs(sin(time * 4 + Double(index))))
+                        }
+                    }
+                }
+                .frame(width: 26, height: 26)
+            } else {
+                Image(systemName: "mic.fill").font(.system(size: 19, weight: .medium))
+            }
+        }
+        .foregroundStyle(listening ? .primary : .secondary)
+        .frame(width: 48, height: 48)
+        .glassEffect(.regular, in: .circle)
+        .scaleEffect(listening ? 1.08 : 1)
+        .contentShape(Circle())
+        .gesture(LongPressGesture(minimumDuration: 0.35).sequenced(before: DragGesture(minimumDistance: 0))
+            .updating($voiceGestureActive) { value, active, _ in
+                if case .second(true, _) = value { active = true }
+            }
+            .onChanged { value in
+                guard case .second(true, let drag) = value else { return }
+                if !listening {
+                    noticeTask?.cancel()
+                    notice = nil
+                    listening = true
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }
+                let next = target(for: drag?.translation ?? .zero)
+                if next != voiceTarget {
+                    voiceTarget = next
+                    UISelectionFeedbackGenerator().selectionChanged()
+                }
+            }
+            .onEnded { value in
+                guard case .second(true, let drag) = value else { return }
+                switch target(for: drag?.translation ?? .zero) {
+                case .send: notice = "语音发送尚未接入"
+                case .text: notice = "语音转文字尚未接入"
+                case .cancel: notice = "已取消"
+                case .conversation: notice = nil; onVoiceConversation()
+                }
+                listening = false
+                voiceTarget = .send
+                noticeTask?.cancel()
+                noticeTask = Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(2))
+                    if !Task.isCancelled { notice = nil }
+                }
+            })
+        .onTapGesture { onVoiceConversation() }
+        .accessibilityLabel("语音对话")
+        .accessibilityHint("轻点开始通话，长按展开语音选项")
+    }
+
+    private func target(for translation: CGSize) -> VoiceTarget {
+        let x = translation.width, y = translation.height
+        let cancelDistance = hypot(x + diagonal, y + diagonal)
+        let phoneDistance = hypot(x, y + voiceRadius)
+        if min(cancelDistance, phoneDistance) < 32 && hypot(x, y) > 30 {
+            return cancelDistance < phoneDistance ? .cancel : .conversation
+        }
+        if x < -77 && abs(y) < 30 { return .text }
+        return .send
+    }
+
+    private func voiceOption(_ title: String, icon: String, selected: Bool) -> some View {
+        Image(systemName: icon)
+            .font(.system(size: 19, weight: .medium))
+            .foregroundStyle(.secondary)
+            .frame(width: 48, height: 48)
+            .glassEffect(.regular, in: .circle)
+            .scaleEffect(selected ? 1.1 : 1)
+            .accessibilityLabel(title)
     }
 }
 

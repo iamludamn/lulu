@@ -2,19 +2,27 @@ import PiStackKit
 import SwiftUI
 
 struct SpacePreview: View {
-    let preview: String
+    let src: String
+    let preview: String?
     let id: String
     let botId: String
     let api: Api
-    @State private var html: String?
+    @State private var page: Page?
+
+    private struct Page {
+        let html: String
+        let bridge: SpaceBridge?
+    }
+
+    private var reference: String { preview ?? src }
     @State private var refreshes = 0
     @State private var failed = false
 
     var body: some View {
         ZStack {
-            if let html {
-                HTMLPage(html: html, bridge: nil, interactive: false)
-                    .id("\(preview)#\(refreshes)")
+            if let page {
+                HTMLPage(html: page.html, bridge: page.bridge, interactive: false)
+                    .id("\(reference)#\(refreshes)")
             } else if failed {
                 Label("页面无法加载", systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.secondary)
             } else {
@@ -33,19 +41,25 @@ struct SpacePreview: View {
                 .padding(12)
                 .allowsHitTesting(false)
         }
-        .task(id: "\(preview)#\(refreshes)") { await load() }
+        .task(id: "\(reference)#\(refreshes)") { await load() }
         .onReceive(NotificationCenter.default.publisher(for: .spaceRefresh)) { if $0.object as? String == id { refreshes += 1 } }
     }
 
     private func load() async {
-        html = nil
+        page = nil
         failed = false
-        guard let address = ArtifactAddress(preview) else {
+        guard let address = ArtifactAddress(reference) else {
             failed = true
             return
         }
         do {
-            html = try await api.artifactText(botId, name: address.name, version: address.version)
+            let html = try await api.artifactText(botId, name: address.name, version: address.version)
+            // Legacy pages need the same read-only preview bridge as before covers
+            // existed. Dedicated static covers deliberately have no bridge.
+            let bridge = preview == nil
+                ? SpaceBridge(botId: botId, space: id, refresh: refreshes > 0 ? .open : nil, preview: true, api: api)
+                : nil
+            page = Page(html: html, bridge: bridge)
             failed = false
         } catch {
             failed = true
