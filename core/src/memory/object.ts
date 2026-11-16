@@ -1,3 +1,5 @@
+import { retrieveMemory, type RetrievalInput } from "./retrieval.js";
+import { memoryResources } from "./resources.js";
 import type { TelemetrySpan } from "@earendil-works/pi-telemetry";
 import type { Models } from "@earendil-works/pi-ai/models";
 import type { Storage } from "@earendil-works/pi-durable";
@@ -5,7 +7,7 @@ import { createChatModels } from "../agent/models.js";
 import type { DurableHost } from "../host/types.js";
 import { MemoryAgent } from "./agent.js";
 import { getContext } from "./context.js";
-import type { EpisodeSource } from "./doc.js";
+import type { EpisodeSource, MemorySource } from "./doc.js";
 import type { MemoryFiles } from "./files.js";
 import { legacySource } from "./legacy.js";
 import { migrateLegacy } from "./migrate.js";
@@ -25,7 +27,10 @@ export class MemoryObject {
   readonly #files: MemoryFiles;
   readonly #models: Models;
   #storage!: Storage;
+  #retrievalStorage!: Storage;
+  #retrieval: Promise<unknown> = Promise.resolve();
   #chain: Promise<unknown> = Promise.resolve();
+  #announcements: Promise<void> = Promise.resolve();
 
   constructor(host: DurableHost, files: MemoryFiles) {
     this.#host = host;
@@ -33,8 +38,9 @@ export class MemoryObject {
     this.#models = createChatModels(host.env);
   }
 
-  async start(storage: Storage): Promise<void> {
+  async start(storage: Storage, retrievalStorage: Storage): Promise<void> {
     this.#storage = storage;
+    this.#retrievalStorage = retrievalStorage;
     if ((await this.#files.commits(1)).length > 0) return;
     await migrateLegacy(legacySource(this.#host.storage), this.#files);
     await this.#files.commit("初始化记忆\n\nrequestId: migrate");
@@ -42,13 +48,46 @@ export class MemoryObject {
 
   async fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
-    if (pathname === "/context") return new Response(await getContext(this.#files, this.#host.telemetry));
+    if (pathname === "/retrieve" && request.method === "POST") {
+      const input = await request.json() as RetrievalInput;
+      if (!input.requestId || !Array.isArray(input.catalog) || !Array.isArray(input.turns) || !input.model?.provider || !input.model.modelId) return new Response(null, { status: 400 });
+      const run = this.#retrieval.then(() => retrieveMemory(this.#retrievalStorage, this.#models, this.#files, input, this.#host.telemetry));
+      this.#retrieval = run.catch(() => undefined);
+      return Response.json(await run);
+    }
+    if (pathname === "/catalog") return Response.json(memoryResources(await this.#files.published()));
+    if (pathname === "/context") {
+      const snapshot = await this.#files.published();
+      return new Response(await getContext({ files: async () => Object.keys(snapshot.files), read: async (path) => snapshot.files[path] }, this.#host.telemetry));
+    }
     if (pathname === "/status") {
       const status = await this.#status();
       return Response.json({ ...status, overdueMs: status.due === undefined ? 0 : Math.max(0, Date.now() - status.due), cursor: (await this.#host.storage.get<number>(CURSOR_KEY)) ?? 0 });
     }
     if (pathname === "/listing") return this.#listing();
     if (pathname === "/file") return this.#file(request);
+    if (pathname === "/dream" && request.method === "POST") {
+      const input = await request.json() as { sources: MemorySource[]; revision: string; sequence: number; model: import("@earendil-works/pi-durable").ModelRef };
+      if (!Array.isArray(input.sources) || !Number.isSafeInteger(input.sequence) || input.sequence < 1 || typeof input.revision !== "string" || !input.model?.provider || !input.model.modelId) return new Response(null, { status: 400 });
+      const announcement = this.#announcements.then(async () => {
+        const seen = await this.#host.storage.get<number>("dreaming.seen") ?? 0;
+        if (input.sequence > seen) await this.#host.storage.put({ "dreaming.seen": input.sequence });
+      });
+      this.#announcements = announcement.catch(() => undefined);
+      await announcement;
+      return this.#serial(async () => {
+        const processed = await this.#host.storage.get<number>("dreaming.sequence") ?? 0;
+        const seen = await this.#host.storage.get<number>("dreaming.seen") ?? 0;
+        if (input.sequence <= processed || input.sequence < seen) return new Response(null, { status: 204 });
+        const agent = new MemoryAgent({ files: this.#files, sources: input.sources, host: this.#host, models: this.#models, model: input.model, sessionId: this.#host.id, botId: this.#host.name, telemetry: this.#host.telemetry });
+        try {
+          await agent.start(this.#storage);
+          await agent.dreamSources(`sources:${input.sequence}:${input.revision}`);
+          await this.#host.storage.put({ "dreaming.sequence": input.sequence });
+          return new Response(null, { status: 204 });
+        } finally { await agent.close(); }
+      });
+    }
     if (pathname === "/remember" && request.method === "POST") {
       const through = Number(new URL(request.url).searchParams.get("through"));
       if (!Number.isSafeInteger(through) || through <= 0) return new Response(null, { status: 400 });
@@ -62,13 +101,14 @@ export class MemoryObject {
   }
 
   async #listing(): Promise<Response> {
-    const [files, commits] = await Promise.all([this.#files.files(), this.#files.commits(LISTING_COMMITS)]);
-    return Response.json({ files: files.filter(isMemoryFile), commits });
+    const [snapshot, commits] = await Promise.all([this.#files.published(), this.#files.commits(LISTING_COMMITS)]);
+    return Response.json({ files: Object.keys(snapshot.files).filter(isMemoryFile), commits });
   }
 
   async #file(request: Request): Promise<Response> {
     const path = new URL(request.url).searchParams.get("path") ?? "";
-    const text = isMemoryFile(path) ? await this.#files.read(path) : undefined;
+    const version = new URL(request.url).searchParams.get("version");
+    const text = !isMemoryFile(path) ? undefined : version === null ? (await this.#files.published()).files[path] : await this.#files.readVersion(path, version);
     return text === undefined ? new Response(null, { status: 404 }) : new Response(text);
   }
 
@@ -114,11 +154,12 @@ export class MemoryObject {
     let batches = 0;
     const date = new Date().toISOString().slice(0, 10);
     const consolidate = (await this.#host.storage.get<string>(CONSOLIDATED_KEY)) !== date;
+
     if (since === through && !consolidate) return "empty";
     const openAgent = async (source: EpisodeSource): Promise<MemoryAgent> => {
       if (agent === undefined) {
         stage("agent_start");
-        const opened = new MemoryAgent({ files: this.#files, models: this.#models, model: source.model, sessionId: this.#host.id, botId: this.#host.name, telemetry: span });
+        const opened = new MemoryAgent({ sources: [], conversationId: source.conversationId, host: this.#host, files: this.#files, models: this.#models, model: source.model, sessionId: this.#host.id, botId: this.#host.name, telemetry: span });
         await opened.start(this.#storage);
         agent = opened;
       }
@@ -137,6 +178,7 @@ export class MemoryObject {
         }
         stage("checkpoint");
         await this.#host.storage.put({ [CURSOR_KEY]: source.through });
+        await this.#host.storage.delete(`memory.source:${since}:${through}`).catch(() => console.error("Memory source checkpoint cleanup failed"));
         since = source.through;
         episodes += source.episodes.length;
         batches += 1;
@@ -155,8 +197,13 @@ export class MemoryObject {
   }
 
   async #source(after: number, through: number): Promise<EpisodeSource> {
+    const key = `memory.source:${after}:${through}`;
+    const cached = await this.#host.storage.get<EpisodeSource>(key);
+    if (cached) return cached;
     const response = await this.#host.objects.BOTS.getByName(this.#host.name).fetch(`https://bot/memory/source?after=${after}&through=${through}`);
     if (!response.ok) throw new Error(`bot source failed (${response.status})`);
-    return (await response.json()) as EpisodeSource;
+    const source = await response.json() as EpisodeSource;
+    await this.#host.storage.put({ [key]: source });
+    return source;
   }
 }

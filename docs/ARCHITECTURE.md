@@ -24,7 +24,7 @@ Pi Durable tasks can replay. Recoverable extension state belongs in a Doc commit
 
 ## Conversations and delivery progress
 
-The WebSocket command `prompt.submit` carries a client-generated `requestId`, content, and a busy mode (`steer` or `followUp`). `BotSession` orders prompt submissions, records the recall decision, records the request in `ChatDoc`, submits it to the root conversation, and links the returned submission ID back to that record. These steps have separate commits; the stable request ID lets a retry find the same logical submission rather than depending on the in-memory prompt queue.
+The WebSocket command `prompt.submit` carries a client-generated `requestId`, content, and a busy mode (`steer` or `followUp`). `BotSession` orders prompt submissions and prepares request-scoped memory through the decision gate and read-only Memory Agent retrieval. It atomically submits the prompt with its memory delivery, submission binding, `ChatDoc` record and deadline index. The stable request ID lets a retry find the same logical submission and delivery.
 
 The important identities are different:
 
@@ -41,30 +41,23 @@ On object initialization, lulu opens the stored Harness, installs its extension 
 
 Sources: [BotSession](../core/src/conversation/bot.ts), [progress records](../core/src/conversation/progress.ts), [submission reads](../core/src/conversation/submissions.ts), and [harness installation](../core/src/agent/catalog.ts).
 
-## Memory: extraction, storage, and injection
+## Memory: sources, dreaming, resources, injection, and retrieval
 
-Memory writing and memory injection are separate paths. The chat harness exposes read tools; a background memory agent owns updates.
+[Memory concepts and boundaries](memory.md) defines the vocabulary, persisted state, and implementation details.
 
-1. A committed compaction in the main conversation triggers discovery of memory work. `recoverMemoryUpdates` scans the durable transcript and atomically advances `MemoryTriggerDoc` with creation of background update tasks. Repeated discovery does not enqueue the same compaction twice; failed or delegate compactions do not trigger this path.
-2. Each update task sends its fixed compaction boundary to the Memory object. The object reads transcript pages after its persisted cursor until that boundary is reached. Later entries wait for a later compaction. `episodesOf` extracts user text and user-facing `send_to_user` text, excluding refused sends; tool traces and private assistant scratch text are not assistant memory episodes.
-3. `MemoryAgent` uses a separate Harness to update versioned memory files. `guardChanges` checks resulting changes before a file commit. Commit trailers record the logical request ID and processed transcript position when changes are committed.
-4. After each successful batch, the Memory object checkpoints its cursor. Consolidation is checked during triggered processing and recorded by date; it is not a daily cron. A failed consolidation can be retried even when the episode cursor has already reached the boundary.
+Dialogue compactions schedule durable update tasks. The Memory Object reads fixed transcript ranges, runs a separate Memory Agent, commits file changes with request IDs, and advances its cursor. Source dreaming is a separate durable task over a versioned snapshot of accepted Spaces, assets, and saved Space state. Collection changes, state writes, and startup reconciliation discover source revisions. Processing retries retain their source manifest; sequence checks reject obsolete source work.
 
-The trigger scan position, extraction cursor, versioned file commits, and memory-agent Harness have different responsibilities. File commits and cursor updates are separate operations. Replay handling consults request-ID trailers in recent file history and existing durable submissions; an in-memory serial queue alone cannot prevent duplicate work after a restart.
+The background agent owns memory writes and receives source-reading tools bound to its own durable submission. The main agent registers no memory read, search, resource-listing, or source-reading tools; it only receives the request-bound memory section delivered by read-only Memory Agent. Delegates inherit this passive boundary. Dreaming, retrieval, and the main agent have separate Harness registries.
 
-A failed update remains a durable task with a retry checkpoint. Its wait deadline participates in the Bot recovery alarm. User messages no longer schedule memory processing, and legacy Memory object alarms are cleared when delivered. Diagnostic `/status` fields describe processing attempts; they are not the authoritative trigger queue or idempotency record.
+Published resources are derived from one committed Markdown snapshot and expose identity, type, summary, provenance, commit version, and content reference. Clef gates whether retrieval is needed. Read-only Memory Agent reads exact versions and calls `inject_memory` to deliver organized context and provenance. The preparation snapshot and gate decision are persisted before retrieval, and final delivery is bound atomically with prompt admission. The memory section resolves this request binding, including delegate origins and related delivery notices. Empty or failed decisions clear the active section; old `RecallDoc` booleans and unconditional collection injection are no longer used.
 
-For injection, `judgeRecall` examines recent turns and the new prompt, then saves `{ requestId, inject }` in `RecallDoc`. Missing classifier configuration or a failed classification falls back to injection. The memory `section` refreshes context when requested; otherwise it can reuse the previously shown section. An `inject: false` decision therefore does not guarantee the model sees no memory.
-
-`getContext` includes clipped system-file content and a path/description catalog for other Markdown files. Read/grep tools retrieve additional content on demand. Keep extraction checkpoints, stored memory content, and model-visible context distinct when modifying this module.
-
-Sources: [compaction discovery and update task](../core/src/memory/schedule.ts), [Memory object](../core/src/memory/object.ts), [agent and commit handling](../core/src/memory/agent.ts), [episode extraction](../core/src/memory/episodes.ts), [recall](../core/src/memory/recall.ts), [context construction](../core/src/memory/context.ts), and [injection extension](../core/src/memory/extension.ts).
+The classifier uses `@cf/cloudflare/clef-flash` through the Workers AI `AI` binding; a missing binding or classification failure records an empty selection rather than injecting all memories. Current selection limits, source-reading limits, unbound scheduled-work behavior, and compatibility details are documented in [memory.md](memory.md).
 
 ## Delegated work and execution environments
 
 `RunFamily` holds each delegate's status, child conversation, origin submissions, generation, durable wait task, output/error, and parent notice. `DelegateIndex` lists the run IDs. Spawning derives a stable run ID from the invoking tool task, then creates the run, ownership anchor, child conversation, and wait task in a transaction. An existing child ID prevents replay from creating another child for that run.
 
-`DelegateWait` submits to the child using a repeatable request ID and waits for settlement. It sends a result notice to the parent with a separate repeatable notice request ID, then commits the run outcome. It rechecks whether the run is still active so a late result does not overwrite a cancellation. Aborting the wait aborts the child and marks the run `closed`; completed or failed runs can be resumed with a new generation, while closed runs cannot. Parent progress follows both child execution and the resulting notice.
+`DelegateWait` submits to the child using a repeatable request ID and waits for settlement. It atomically sends a result notice to the parent with a repeatable notice request ID, binds its memory context, and commits the run outcome. It rechecks whether the run is still active so a late result does not overwrite a cancellation. Aborting the wait aborts the child and marks the run `closed`; completed or failed runs can be resumed with a new generation, while closed runs cannot. Parent progress follows both child execution and the resulting notice.
 
 The main agent delegates file/command work. Child tool wrappers enforce preset permissions and prevent children from delegating again or sending directly to the user. A child returns its answer to the parent, which owns user delivery.
 

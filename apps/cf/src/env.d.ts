@@ -1,4 +1,5 @@
 interface Env {
+  readonly AI?: Ai;
   readonly BOTS: DurableObjectNamespace<import("./objects.js").Bot>;
   readonly MEMORY: DurableObjectNamespace<import("./objects.js").Memory>;
   readonly ARTIFACTS: DurableObjectNamespace<import("./objects.js").Artifact>;
@@ -10,7 +11,6 @@ interface Env {
   readonly OPENAI_API_KEY?: string;
   readonly OPENCODE_API_KEY?: string;
   readonly DEEPSEEK_API_KEY?: string;
-  readonly TYPESAFE_API_KEY?: string;
   readonly LULU_MODEL?: string;
   readonly E2B_API_KEY?: string;
   readonly E2B_TEMPLATE?: string;

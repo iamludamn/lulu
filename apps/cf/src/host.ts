@@ -54,6 +54,10 @@ export function durableHost(ctx: DurableObjectState, env: Env): DurableHost {
   return {
     env: environment,
     telemetry,
+    decisionModel: env.AI === undefined ? undefined : {
+      name: "@cf/cloudflare/clef-flash",
+      run: (state, questions, signal) => env.AI!.run("@cf/cloudflare/clef-flash", { model: "clef-flash", state, questions }, { signal }),
+    },
     readMcpAuth: () => mcp.readAuth(),
     writeMcpAuth: (content) => mcp.writeAuth(content),
     name,
@@ -76,6 +80,7 @@ export function durableHost(ctx: DurableObjectState, env: Env): DurableHost {
 export function workerHost(env: Env, ctx: ExecutionContext): ApiHost {
   const environment = stringsOf(env);
   return {
+    waitUntil: (task) => ctx.waitUntil(task),
     env: environment,
     kv: kvOf(env.LULU_MCP),
     telemetry: createTelemetry(environment, (task) => ctx.waitUntil(task)),

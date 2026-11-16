@@ -94,7 +94,7 @@ export class ArtifactObject {
       case "/stat":
         return this.stat(name, pinned).then((found) => Response.json(found), (error: unknown) => failure(error, 404));
       case "/read":
-        return this.read(name, undefined).then(
+        return this.read(name, pinned).then(
           (found) => new Response(found.text, { headers: { "content-type": found.contentType } }),
           (error: unknown) => failure(error, 502),
         );

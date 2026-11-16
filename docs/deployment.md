@@ -29,7 +29,7 @@ npm exec -- wrangler kv namespace create LULU_MCP --config wrangler.local.jsonc
 | MCP registry | `MCP_ADMIN_TOKEN` and `MCP_ENCRYPTION_KEY`. The latter is a base64-encoded AES key; use 32 random bytes, generated and stored securely. Back it up with encrypted state. |
 | Sandboxes | `E2B_API_KEY`; optional `E2B_TEMPLATE`, `E2B_DOMAIN`, `E2B_API_URL`, `E2B_SANDBOX_URL`. `SANDBOX_BACKEND` and `SANDBOX_BACKENDS` select/configure E2B backends. |
 | Artifacts | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`; optional `S3_REGION`. |
-| Memory recall classifier | Optional `TYPESAFE_API_KEY`; missing credentials fall back to supplying memory context. |
+| Memory decision model | Workers AI `AI` binding, configured in Wrangler; uses `@cf/cloudflare/clef-flash` without a separate provider key. Missing binding or failed decisions yield an empty selection. |
 | Search integrations | `TAVILY_API_KEY`, `EXA_API_KEY` where used. |
 | Hold-to-talk ASR | `VOLC_SPEECH_ASR_API_KEY` with `volc.seedasr.sauc.duration` access. Streams mono 16 kHz PCM16 through the bot socket; cancel discards the recording, release sends only the final transcript, and slide-left places it in the composer. Recordings are limited to 60 seconds. |
 | Voice | `DOUBAO_API_KEY`; optional `DOUBAO_WS_URL` and `DOUBAO_REPORT` control the transport and reporting mode. |

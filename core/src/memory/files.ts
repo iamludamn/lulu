@@ -4,7 +4,11 @@ export interface MemoryCommit {
   readonly at: number;
 }
 
+export type PublishedMemory = { version: string; files: Record<string, string> };
+
 export interface MemoryFiles {
+  published(): Promise<PublishedMemory>;
+  readVersion(path: string, version: string): Promise<string | undefined>;
   files(): Promise<string[]>;
   read(path: string): Promise<string | undefined>;
   write(path: string, content: string): Promise<void>;
@@ -15,4 +19,4 @@ export interface MemoryFiles {
   commits(depth: number): Promise<MemoryCommit[]>;
 }
 
-export type ReadableFiles = Pick<MemoryFiles, "files" | "read">;
+export type ReadableFiles = { files(): Promise<string[]>; read(path: string, version?: string): Promise<string | undefined> };
