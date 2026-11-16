@@ -198,7 +198,7 @@ class OtlpExporter implements TelemetryContext {
   #schedule(): void {
     if (this.#scheduled) return;
     this.#scheduled = true;
-    this.#config.waitUntil(Promise.resolve().then(() => this.#flush()));
+    this.#config.waitUntil(new Promise<void>((resolve) => setTimeout(resolve, 1000)).then(() => this.#flush()));
   }
 
   async #flush(): Promise<void> {
