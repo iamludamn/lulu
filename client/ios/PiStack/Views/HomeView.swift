@@ -21,7 +21,7 @@ struct HomeView: View {
     let api: Api
     @State private var store: BotStore
     @State private var page = Page.panel
-    @State private var draft: String
+    @State private var draft: ChatDraft
     @State private var inspector = false
     @State private var landed: Page?
     @State private var targets: [Page: CGPoint] = [:]
@@ -42,7 +42,7 @@ struct HomeView: View {
         self.bot = bot
         self.api = api
         _store = State(initialValue: BotStore(botId: bot.id, server: api.base))
-        _draft = State(initialValue: UserDefaults.standard.string(forKey: "pistack.draft.\(bot.id)") ?? "")
+        _draft = State(initialValue: ChatDraft(botId: bot.id))
     }
 
     var body: some View {
@@ -110,13 +110,9 @@ struct HomeView: View {
         .sheet(isPresented: $inspector) { InspectorView(store: store, botId: bot.id, api: api) }
         .sensoryFeedback(.selection, trigger: page)
         .task { store.start() }
-        .onDisappear { transcription.cancel(); voice.stop(); store.stop() }
+        .onDisappear { draft.flush(); transcription.cancel(); voice.stop(); store.stop() }
         .onChange(of: phase) { _, next in
-            if next == .active { store.start() } else if next == .background { voice.stop(); voiceOpen = false; store.stop() }
-        }
-        .onChange(of: draft) { _, text in
-            let key = "pistack.draft.\(bot.id)"
-            if text.isEmpty { UserDefaults.standard.removeObject(forKey: key) } else { UserDefaults.standard.set(text, forKey: key) }
+            if next == .active { store.start() } else if next == .background { draft.flush(); voice.stop(); voiceOpen = false; store.stop() }
         }
     }
 
@@ -126,7 +122,7 @@ struct HomeView: View {
         case .panel:
             PanelView(widgets: store.snapshot.panel.list, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onCheck: store.check, onCompose: fadeToChat)
         case .chat:
-            ChatView(bot: bot, store: store, transcription: transcription, api: api, draft: $draft, composing: $composing, onKept: land, onVoiceConversation: {
+            ChatView(bot: bot, store: store, transcription: transcription, api: api, draft: Binding(get: { draft.text }, set: { draft.text = $0 }), composing: $composing, onKept: land, onVoiceConversation: {
                 composing = false
                 withAnimation(voiceTransition) { voiceOpen = true }
             },
@@ -267,7 +263,7 @@ struct HomeView: View {
 
     private func compose(_ text: String) {
         withAnimation(.snappy) { page = .chat }
-        if draft.isEmpty { draft = text }
+        if draft.text.isEmpty { draft.text = text }
         composing = true
     }
 }
@@ -278,7 +274,6 @@ private struct LoadingScreen: View {
 
     var body: some View {
         ZStack {
-            Wallpaper()
             ZStack {
                 ForEach(0..<5) { index in
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -291,6 +286,7 @@ private struct LoadingScreen: View {
             .scaleEffect(breathing && !reduceMotion ? 1.06 : (reduceMotion ? 1 : 0.94))
             .opacity(breathing || reduceMotion ? 1 : 0.7)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea()
         .accessibilityElement(children: .combine)
         .onAppear {

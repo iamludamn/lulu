@@ -221,7 +221,7 @@ public final class BotStore {
 
     private func receive(_ message: ServerMessage) {
         attempts = 0
-        snapshot.link = .online
+        if snapshot.link != .online { snapshot.link = .online }
         switch message {
         case .state(let view, let progress, let mcp, let panel, let assets):
             guard let applied = view.applied(to: snapshot.view) else { return }

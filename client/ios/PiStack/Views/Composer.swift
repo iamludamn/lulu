@@ -12,6 +12,7 @@ struct Composer: View {
     var focused: FocusState<Bool>.Binding
     let onSend: () -> Void
     let onVoiceConversation: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var listening = false
     private enum VoiceTarget { case send, text, cancel, conversation }
     private let voiceRadius: CGFloat = 104
@@ -22,7 +23,7 @@ struct Composer: View {
     @State private var noticeTask: Task<Void, Never>?
 
     private var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    private var showSend: Bool { canSend && focused.wrappedValue && !listening }
+    private var showSend: Bool { canSend && !listening }
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
@@ -31,6 +32,7 @@ struct Composer: View {
                     .font(.body)
                     .lineLimit(1...6)
                     .focused(focused)
+                    .accessibilityLabel(placeholder)
                     .padding(.leading, 18)
                     .padding(.vertical, 13)
                     .opacity(listening ? 0 : 1)
@@ -56,7 +58,7 @@ struct Composer: View {
                     }
                     .buttonStyle(.plain)
                     .padding(7)
-                    .transition(.scale.combined(with: .opacity))
+                    .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
                     .accessibilityLabel(busy ? "追加" : "发送")
                 }
             }
@@ -64,7 +66,7 @@ struct Composer: View {
             .frame(minHeight: 48, maxHeight: listening ? 48 : nil)
             .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 24, style: .continuous))
             .scaleEffect(x: 1, y: voiceTarget == .text ? 1.05 : 1, anchor: .center)
-            .animation(.snappy(duration: 0.2), value: showSend)
+            .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: showSend)
             if listening { Color.clear.frame(width: 52, height: 1) }
             microphone
         }
@@ -183,6 +185,7 @@ struct Composer: View {
             })
         .onTapGesture { onVoiceConversation() }
         .accessibilityLabel("语音对话")
+        .accessibilityAddTraits(.isButton)
         .accessibilityHint("轻点开始通话，长按展开语音选项")
     }
 

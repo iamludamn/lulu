@@ -31,6 +31,10 @@ public func spaceOfferStates(_ entries: [ChatEntry], panel: PanelState) -> [Stri
         guard case .panel(let widget) = entry.card, let version = widget.spaceVersion else { continue }
         if version >= (latest[widget.id]?.version ?? -1) { latest[widget.id] = (entry.id, version) }
     }
+    var acceptedVersions: [String: Int] = [:]
+    for receipt in panel.spaceReceipts.values {
+        acceptedVersions[receipt.id] = max(acceptedVersions[receipt.id] ?? receipt.version, receipt.version)
+    }
     return Dictionary(uniqueKeysWithValues: entries.compactMap { entry in
         guard case .panel(let widget) = entry.card, let version = widget.spaceVersion else { return nil }
         let current = panel.widgets[widget.id]
@@ -38,8 +42,7 @@ public func spaceOfferStates(_ entries: [ChatEntry], panel: PanelState) -> [Stri
             return (entry.id, .accepted(receipt.action))
         }
         if current?.origin == entry.id { return (entry.id, .accepted(.add)) }
-        let accepted = panel.spaceReceipts.values.filter { $0.id == widget.id }.map(\.version).max() ?? 0
-        let floor = max(accepted, current?.spaceVersion ?? 0)
+        let floor = max(acceptedVersions[widget.id] ?? 0, current?.spaceVersion ?? 0)
         guard latest[widget.id]?.origin == entry.id, version >= floor,
               current == nil || version > floor else { return (entry.id, .superseded) }
         return (entry.id, current == nil ? .add : .update)

@@ -46,6 +46,7 @@ struct SpacePreview: View {
     }
 
     private func load() async {
+        guard !Task.isCancelled else { return }
         page = nil
         failed = false
         guard let address = ArtifactAddress(reference) else {
@@ -54,6 +55,7 @@ struct SpacePreview: View {
         }
         do {
             let html = try await api.artifactText(botId, name: address.name, version: address.version)
+            guard !Task.isCancelled else { return }
             // Legacy pages need the same read-only preview bridge as before covers
             // existed. Dedicated static covers deliberately have no bridge.
             let bridge = preview == nil
@@ -62,6 +64,7 @@ struct SpacePreview: View {
             page = Page(html: html, bridge: bridge)
             failed = false
         } catch {
+            guard !Task.isCancelled else { return }
             failed = true
         }
     }

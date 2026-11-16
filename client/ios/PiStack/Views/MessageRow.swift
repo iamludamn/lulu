@@ -11,6 +11,7 @@ struct MessageRow: View, Equatable {
     let onOpen: (ArtifactAddress, String) -> Void
     let onKept: (Page) -> Void
     @Environment(\.openSpace) private var openSpace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.row == rhs.row && lhs.expanded == rhs.expanded && lhs.botId == rhs.botId && lhs.api.base == rhs.api.base }
 
@@ -44,9 +45,29 @@ struct MessageRow: View, Equatable {
                 bubble(mine: mine)
                 if !mine { Spacer(minLength: 56) }
             }
-            footer
+            if mine {
+                userFooter
+            } else {
+                footer
+            }
         }
         .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
+    }
+
+    private var userFooter: some View {
+        let isRead = row.footer == .read
+        return ZStack(alignment: .trailing) {
+            Text("已读")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .offset(y: isRead || reduceMotion ? 0 : 10)
+                .opacity(isRead ? 1 : 0)
+                .clipped()
+                .accessibilityHidden(!isRead)
+                .animation(.easeOut(duration: reduceMotion ? 0.15 : 0.45), value: isRead)
+            if case .failed = row.footer { status }
+        }
     }
 
     @ViewBuilder
@@ -67,7 +88,6 @@ struct MessageRow: View, Equatable {
         .lineSpacing(3)
         .padding(.horizontal, 15)
         .padding(.vertical, 10)
-        .opacity(row.sending ? 0.55 : 1)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(mine ? "我" : "助手")：\(row.text)\(row.body == nil ? "" : "。含全文")")
         .accessibilityAddTraits(row.body == nil ? [] : .isButton)

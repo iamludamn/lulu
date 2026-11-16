@@ -108,11 +108,12 @@ private func inline(_ text: String) -> AttributedString {
     return linkified(result)
 }
 
+private let linkDetector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
 func linkified(_ text: AttributedString) -> AttributedString {
     var result = text
     let plain = String(text.characters)
-    let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
-    for match in detector?.matches(in: plain, range: NSRange(plain.startIndex..., in: plain)) ?? [] {
+    for match in linkDetector?.matches(in: plain, range: NSRange(plain.startIndex..., in: plain)) ?? [] {
         guard
             let url = match.url,
             let range = Range(match.range, in: plain),

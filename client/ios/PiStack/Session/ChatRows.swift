@@ -50,14 +50,14 @@ private func awaiting(_ snapshot: BotStore.Snapshot, entries: [ChatEntry]) -> Bo
         return true
     }
     if sending { return true }
-    let finals = entries.filter(\.final).map(\.position)
+    let latestFinal = entries.lazy.filter(\.final).map(\.position).filter { !$0.isNaN }.max()
     let messages = snapshot.progress?.messages ?? []
     let busy = live(of: snapshot.view).busy
     return messages.contains { message in
         let latest = message.id == messages.last?.id
         guard message.error == nil, message.state != .done || (busy && latest) else { return false }
         guard let placed = message.entry.flatMap({ Double($0) }) else { return true }
-        return !finals.contains { $0 > placed }
+        return latestFinal.map { !($0 > placed) } ?? true
     }
 }
 
@@ -69,6 +69,14 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
         guard request.state == .sending, case .makeWidget(let origin) = request.command.kind else { return nil }
         return origin
     })
+    var keepRequests: [String: (sending: Bool, error: String?)] = [:]
+    for request in snapshot.requests {
+        guard case .keep(let origin) = request.command.kind else { continue }
+        var status = keepRequests[origin] ?? (sending: false, error: nil)
+        if request.state == .sending { status.sending = true }
+        if request.state == .failed { status.error = request.error }
+        keepRequests[origin] = status
+    }
     let entries = chatEntries(snapshot.view, hidden: snapshot.progress?.hiddenEntries ?? [])
     let spaceStates = spaceOfferStates(entries, panel: snapshot.panel)
     let messages = snapshot.progress?.messages ?? []
@@ -91,12 +99,8 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
             row.spaceOffer = spaceStates[entry.id]
             if row.spaceOffer != nil {
                 row.offerAvailable = snapshot.link == .online
-                let requests = snapshot.requests.filter { request in
-                    if case .keep(let origin) = request.command.kind { return origin == entry.id }
-                    return false
-                }
-                row.sending = requests.contains { $0.state == .sending }
-                row.offerError = requests.last(where: { $0.state == .failed })?.error
+                row.sending = keepRequests[entry.id]?.sending ?? false
+                row.offerError = keepRequests[entry.id]?.error
             }
             row.read = entry.role == .user
             if making.contains(entry.id) { row.footer = .generating }

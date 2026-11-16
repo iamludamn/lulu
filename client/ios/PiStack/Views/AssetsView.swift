@@ -121,13 +121,20 @@ struct AssetPage: View {
     }
 
     private func load() async {
+        guard !Task.isCancelled else { return }
+        text = nil
+        thumbnail = nil
         guard let address else { return }
         if address.isMarkdown {
-            text = try? await api.artifactText(botId, name: address.name, version: address.version)
+            let loaded = try? await api.artifactText(botId, name: address.name, version: address.version)
+            guard !Task.isCancelled else { return }
+            text = loaded
             return
         }
-        guard let file = try? await api.download(api.artifactURL(botId, address), as: address.fileName) else { return }
+        guard let file = try? await api.download(api.artifactURL(botId, address), as: address.fileName), !Task.isCancelled else { return }
         let request = QLThumbnailGenerator.Request(fileAt: file, size: CGSize(width: 320, height: 400), scale: 2, representationTypes: .thumbnail)
-        thumbnail = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request).uiImage
+        let image = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request).uiImage
+        guard !Task.isCancelled else { return }
+        thumbnail = image
     }
 }
