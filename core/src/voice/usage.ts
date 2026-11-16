@@ -58,8 +58,10 @@ export function meteredVoiceConnect(connect: DurableHost["connect"], telemetry: 
       send(data) {
         socket.send(data);
         try {
-          const event = JSON.parse(String(data)) as { type?: string; audio?: unknown };
-          if (event.type === "input_audio_buffer.append") input += bytesOf(event.audio);
+          if (typeof data === "string") {
+            const event = JSON.parse(data) as { type?: string; audio?: unknown };
+            if (event.type === "input_audio_buffer.append") input += bytesOf(event.audio);
+          }
         } catch {}
         flush();
       },
