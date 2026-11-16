@@ -120,7 +120,11 @@ struct HomeView: View {
     private func content(_ item: Page) -> some View {
         switch item {
         case .panel:
-            PanelView(widgets: store.snapshot.panel.list, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onCheck: store.check, onCompose: fadeToChat)
+            if !store.snapshot.hasReceivedState && store.snapshot.link == .offline {
+                connectionUnavailable
+            } else {
+                PanelView(widgets: store.snapshot.panel.list, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onCheck: store.check, onCompose: fadeToChat)
+            }
         case .chat:
             ChatView(bot: bot, store: store, transcription: transcription, api: api, draft: Binding(get: { draft.text }, set: { draft.text = $0 }), composing: $composing, onKept: land, onVoiceConversation: {
                 composing = false
@@ -128,8 +132,21 @@ struct HomeView: View {
             },
                      reading: $reading, onReaderFrame: { readerFrame = $0 })
         case .assets:
-            AssetsView(items: store.snapshot.assets, botId: bot.id, api: api, onDrop: store.drop, onOrder: store.reorderAssets)
+            if !store.snapshot.hasReceivedState && store.snapshot.link == .offline {
+                connectionUnavailable
+            } else {
+                AssetsView(items: store.snapshot.assets, botId: bot.id, api: api, onDrop: store.drop, onOrder: store.reorderAssets)
+            }
         }
+    }
+
+    private var connectionUnavailable: some View {
+        ContentUnavailableView {
+            Label("暂时无法连接 lulu", systemImage: "wifi.exclamationmark")
+        } description: {
+            Text("连接恢复后会自动加载你的视图和资产。")
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var topBar: some View {
@@ -274,6 +291,7 @@ private struct LoadingScreen: View {
 
     var body: some View {
         ZStack {
+            Wallpaper()
             ZStack {
                 ForEach(0..<5) { index in
                     RoundedRectangle(cornerRadius: 24, style: .continuous)

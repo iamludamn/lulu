@@ -42,15 +42,24 @@ public final class BotStore {
 
     private let socketURL: URL
     private let cacheURL: URL
+    private let stateTimeout: Duration
+    private let retryTimeout: Duration
+    private var stateTimer: Task<Void, Never>?
     private var saving: Task<Void, Never>?
     private var task: URLSessionWebSocketTask?
     private var timer: Task<Void, Never>?
     private var attempts = 0
     private var running = false
 
-    public init(botId: String, server: URL) {
+    public convenience init(botId: String, server: URL) {
+        self.init(botId: botId, server: server, stateTimeout: .seconds(15), retryTimeout: .seconds(30))
+    }
+
+    init(botId: String, server: URL, stateTimeout: Duration, retryTimeout: Duration = .seconds(30)) {
         socketURL = Api.socketURL(base: server, botId: botId)
         cacheURL = Cache.url(for: socketURL)
+        self.stateTimeout = stateTimeout
+        self.retryTimeout = retryTimeout
     }
 
     public func start() {
@@ -68,6 +77,8 @@ public final class BotStore {
         running = false
         timer?.cancel()
         timer = nil
+        stateTimer?.cancel()
+        stateTimer = nil
         let current = task
         task = nil
         current?.cancel(with: .goingAway, reason: nil)
@@ -185,6 +196,17 @@ public final class BotStore {
         task.maximumMessageSize = 64 << 20
         self.task = task
         task.resume()
+        stateTimer?.cancel()
+        stateTimer = Task { [weak self] in
+            guard let self else { return }
+            do { try await Task.sleep(for: self.stateTimeout) } catch { return }
+            guard self.task === task else { return }
+            self.snapshot.link = .offline
+            do { try await Task.sleep(for: self.retryTimeout) } catch { return }
+            guard self.task === task else { return }
+            self.closed(task)
+            task.cancel(with: .goingAway, reason: nil)
+        }
         transmit(["type": "hello", "incremental": true])
         for request in snapshot.requests where request.state == .sending { transmit(request.command.frame) }
         Task { await listen(task) }
@@ -214,6 +236,8 @@ public final class BotStore {
     private func closed(_ task: URLSessionWebSocketTask) {
         guard self.task === task else { return }
         self.task = nil
+        stateTimer?.cancel()
+        stateTimer = nil
         snapshot.link = .offline
         onASRError?("连接已断开，语音识别已取消")
         if onVoiceEvent != nil { onVoiceError?("连接已断开，语音通话已结束") }
@@ -233,10 +257,13 @@ public final class BotStore {
 
     private func receive(_ message: ServerMessage) {
         attempts = 0
-        if snapshot.link != .online { snapshot.link = .online }
+        if snapshot.hasReceivedState && snapshot.link != .online { snapshot.link = .online }
         switch message {
         case .state(let view, let progress, let mcp, let panel, let assets):
             guard let applied = view.applied(to: snapshot.view) else { return }
+            stateTimer?.cancel()
+            stateTimer = nil
+            if snapshot.link != .online { snapshot.link = .online }
             snapshot.view = applied
             snapshot.progress = progress
             snapshot.mcp = mcp
