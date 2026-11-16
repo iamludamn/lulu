@@ -1,3 +1,4 @@
+import { entryRange } from "../conversation/view.js";
 import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Conversation, Harness, SubmissionId } from "@earendil-works/pi-durable";
@@ -27,6 +28,7 @@ export async function makeOutcome(harness: Harness, make: Make, entries: Entries
   if (record?.entry !== undefined) {
     const from = Number(record.entry);
     const to = record.answer === undefined ? Number.POSITIVE_INFINITY : Number(record.answer);
+    if (entries.length === 0 || Number(entries[0].id) > from) entries = await entryRange(await harness.root(context), from, Number.isFinite(to) ? to : undefined, context);
     const made = sentIn(entries.filter((entry) => Number(entry.id) > from && Number(entry.id) <= to)).some(
       (sent) => sent.input.type === "widget" && sent.input.widget?.kind === "panel",
     );

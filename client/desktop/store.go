@@ -38,16 +38,18 @@ type request struct {
 }
 
 type snapshot struct {
-	link     linkState
-	view     *conversation
-	progress *progress
-	models   *modelConfig
-	mcp      []mcpStatus
-	panel    panelState
-	assets   []assetItem
-	requests []request
-	halted   bool
-	rev      int
+	loadingHistory bool
+	historyRequest string
+	link           linkState
+	view           *conversation
+	progress       *progress
+	models         *modelConfig
+	mcp            []mcpStatus
+	panel          panelState
+	assets         []assetItem
+	requests       []request
+	halted         bool
+	rev            int
 }
 
 type socket struct {
@@ -227,7 +229,9 @@ func (s *store) session(ctx context.Context, client *http.Client) (bool, websock
 	}()
 	s.post(func() {
 		s.sock = sock
-		s.transmit(obj{"type": "hello"})
+		s.snap.loadingHistory = false
+		s.snap.historyRequest = ""
+		s.transmit(obj{"type": "hello", "incremental": true})
 		for _, r := range s.snap.requests {
 			if r.state == requestSending {
 				s.transmit(r.command.frame)
@@ -298,9 +302,22 @@ func (s *store) receive(msg *serverMessage, d decodedState) {
 		s.snap.panel = d.panel
 		s.snap.assets = d.assets
 		s.persist()
+	case "history":
+		s.snap.loadingHistory = false
+		s.snap.historyRequest = ""
+		if s.snap.view != nil {
+			frame := viewFrame{Entries: msg.Entries, Docs: s.snap.view.Docs}
+			s.snap.view = frame.applied(s.snap.view)
+			s.snap.view.Before = msg.Before
+			s.persist()
+		}
 	case "models":
 		s.snap.models = msg.Config
 	case "result":
+		if msg.RequestID == s.snap.historyRequest {
+			s.snap.loadingHistory = false
+			s.snap.historyRequest = ""
+		}
 		for i, r := range s.snap.requests {
 			if r.command.requestID != msg.RequestID {
 				continue
@@ -411,4 +428,13 @@ func (s *store) retry(id string) {
 func (s *store) dismiss(id string) {
 	s.removeRequest(id)
 	s.touch()
+}
+
+func (s *store) loadEarlier() {
+	if s.snap.loadingHistory || s.snap.link != linkOnline || s.snap.view == nil || s.snap.view.Before == nil || len(s.snap.view.Entries) == 0 {
+		return
+	}
+	s.snap.loadingHistory = true
+	s.snap.historyRequest = newID()
+	s.transmit(obj{"type": "history.load", "requestId": s.snap.historyRequest, "before": position(s.snap.view.Entries[0].ID)})
 }

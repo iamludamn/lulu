@@ -1,6 +1,6 @@
 import type { Models } from "@earendil-works/pi-ai/models";
 import { createRegistry, type HarnessOptions, type Registry } from "@earendil-works/pi-durable";
-import { openMcp, type McpHost, type McpServerConfig } from "./mcp.js";
+import { deferredMcp, type McpHost, type McpServerConfig } from "./mcp.js";
 import { artifactConfigured } from "../artifact/s3.js";
 import { mcpStore } from "./mcp-store.js";
 import { DEFAULT_HARNESS, installHarness } from "./catalog.js";
@@ -18,8 +18,9 @@ function platformServers(host: DurableHost): Record<string, McpServerConfig> {
   return servers;
 }
 
-function mcpServices(host: DurableHost): McpHostServices {
+function mcpServices(host: DurableHost): McpHostServices & Pick<DurableHost, "storage"> {
   return {
+    storage: host.storage,
     env: host.env,
     telemetry: host.telemetry,
     readMcpAuth: () => host.readMcpAuth(),
@@ -29,7 +30,7 @@ function mcpServices(host: DurableHost): McpHostServices {
 
 async function openChatMcp(host: DurableHost, botServers: Record<string, McpServerConfig>): Promise<{ host: McpHost; statuses: McpStatus[] }> {
   const platform = platformServers(host);
-  const mcp = await openMcp({ ...botServers, ...platform }, mcpServices(host));
+  const mcp = await deferredMcp({ ...botServers, ...platform }, mcpServices(host));
   const statuses = mcp.statuses.map((status): McpStatus => ({ ...status, source: Object.hasOwn(platform, status.name) ? "platform" : "bot" }));
   return { host: mcp, statuses };
 }

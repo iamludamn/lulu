@@ -1,3 +1,4 @@
+import { reserveDelegate, REQUEST_TIMEOUT_MS } from "./limits.js";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { defineTool, LiveDoc } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord/context";
@@ -118,6 +119,8 @@ async function resume(api: ToolExecutionApi<DelegateDetails>, args: DelegateArgs
   await api.commit(async (tx) => {
     const draft = await tx.doc(RunFamily, run.id, { id: run.id, task: run.task, description: run.description, origin: run.origin, agent: run.agent, cwd: run.cwd });
     if (draft.resumeTaskId === resumeTaskId) return;
+    await reserveDelegate(tx, run.id);
+    draft.deadline = Date.now() + REQUEST_TIMEOUT_MS;
     const generation = draft.generation + 1;
     draft.resumeTaskId = resumeTaskId;
     draft.status = "running";

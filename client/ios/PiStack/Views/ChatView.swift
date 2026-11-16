@@ -14,6 +14,7 @@ struct ChatView: View {
     let onReaderFrame: (ReaderFrame) -> Void
     @State private var bottomState = ChatBottomState()
     @State private var sent = 0
+    @State private var fetchingEarlier = false
     @State private var floor: String?
     @State private var position = ScrollPosition()
     @State private var metrics = Metrics()
@@ -35,8 +36,14 @@ struct ChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 4) {
-                    if start > 0 {
-                        Button { revealEarlier(rows, start) } label: {
+                    if start > 0 || snapshot.view?.before != nil {
+                        Button {
+                            if start > 0 { revealEarlier(rows, start) } else {
+                                floor = rows.first?.id
+                                fetchingEarlier = true
+                                store.loadEarlier()
+                            }
+                        } label: {
                             Text("更早的消息")
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(.secondary)
@@ -45,6 +52,7 @@ struct ChatView: View {
                         }
                         .buttonStyle(.plain)
                         .id("earlier")
+                        .disabled(store.loadingHistory)
                     }
                     ForEach(rows[start...]) { row in
                         MessageRow(row: row, store: store, botId: bot.id, api: api, expanded: row.id == reading?.id, onRead: { id in reading = rows.first { $0.id == id } }, onOpen: openArtifact, onKept: onKept)
@@ -80,6 +88,12 @@ struct ChatView: View {
             }
             .onChange(of: rows.count > Self.page, initial: true) { _, long in
                 if long, floor == nil { floor = rows[rows.count - Self.page].id }
+            }
+            .onChange(of: snapshot.view?.entries.first?.id) {
+                guard fetchingEarlier else { return }
+                fetchingEarlier = false
+                let start = floor.flatMap { id in rows.firstIndex { $0.id == id } } ?? 0
+                if start > 0 { revealEarlier(rows, start) }
             }
             .onChange(of: sent) {
                 Task {

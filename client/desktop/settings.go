@@ -432,7 +432,7 @@ func (a *app) mcpPage(c *ui.Context, p palette) {
 		ui.Text(c, "未配置 MCP 服务器").FontSize(15).TextColor(p.text2).PaddingY(40).TextAlign(ui.Center)
 		return
 	}
-	labels := map[string]string{"connected": "已连接", "failed": "连接失败", "needs-auth": "需要授权"}
+	labels := map[string]string{"idle": "准备连接", "connected": "已连接", "failed": "连接失败", "needs-auth": "需要授权"}
 	groupCard(c, p, func() {
 		for i, m := range servers {
 			ok := m.State == "connected"
