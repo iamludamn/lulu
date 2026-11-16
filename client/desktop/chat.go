@@ -33,6 +33,11 @@ func (a *app) currentRows() []chatRow {
 
 func (a *app) chatPage(c *ui.Context, p palette) {
 	snap := &a.store.snap
+	if snap.view != nil && snap.view.Before != nil {
+		if ghostButton(c, p, "", "更早的消息", 32).Clicked() {
+			a.store.loadEarlier()
+		}
+	}
 	rows := a.currentRows()
 	ui.Box(c).Grow(1).MinHeight(0).Children(func() {
 		a.chat.list.Key = func(i int) any { return rows[i].id }

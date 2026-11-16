@@ -1,3 +1,4 @@
+import { DelegateCapacityError } from "../delegate/limits.js";
 import type { ConversationId, Tx } from "@earendil-works/pi-durable";
 import { RunFamily, runIdOf, updateRun } from "../delegate/runs.js";
 import { CronJobsDoc } from "./doc.js";
@@ -17,7 +18,12 @@ export async function fireDue(tx: Tx, now: number, start: FireStart): Promise<st
       continue;
     }
     const runId = await runIdOf("cron:" + job.id + ":" + scheduledFor);
-    await start(tx, job, runId);
+    try {
+      await start(tx, job, runId);
+    } catch (error) {
+      if (error instanceof DelegateCapacityError) continue;
+      throw error;
+    }
     fired.push(runId);
     job.lastRun = { scheduledFor, runId };
     job.nextRunAt = nextRunAfter(job.schedule, scheduledFor);

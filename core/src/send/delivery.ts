@@ -1,3 +1,4 @@
+import { entryRange } from "../conversation/view.js";
 import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Conversation, Harness, SubmissionId } from "@earendil-works/pi-durable";
@@ -17,11 +18,12 @@ export type Entries = readonly { id?: unknown; kind?: unknown; model?: unknown }
 
 export type Owed = { message: number; requestId: string };
 
-async function silent(read: SubmissionReader, id: number, entries: Entries, context: Context): Promise<boolean> {
+async function silent(harness: Harness, read: SubmissionReader, id: number, entries: Entries, context: Context): Promise<boolean> {
   const record = await read(id as SubmissionId, context);
   if (record?.status !== "done") return false;
   const from = Number(record.entry);
   const to = Number(record.answer);
+  if (entries.length === 0 || Number(entries[0].id) > from) entries = await entryRange(await harness.root(context), from, to, context);
   return sentIn(entries.filter((entry) => Number(entry.id) > from && Number(entry.id) <= to)).length === 0;
 }
 
@@ -35,11 +37,11 @@ export async function owedDeliveries(
   const delivery = await harness.snapshot(DeliveryDoc, context);
   const since = delivery?.since ?? Number.POSITIVE_INFINITY;
   const message = chat?.messages.filter((item) => item.id !== null).at(-1);
-  if (message?.id == null || message.id <= since) return [];
+  if (message?.id == null || message.error || message.id <= since) return [];
   const chain = (delivery?.nudges ?? []).filter((nudge) => nudge.message === message.id);
   const last = chain.at(-1);
   if (last !== undefined && last.id === null) return [{ message: message.id, requestId: last.requestId }];
-  if (chain.length >= MAX_NUDGES || !(await silent(read, last?.id ?? message.id, entries, context))) return [];
+  if (chain.length >= MAX_NUDGES || !(await silent(harness, read, last?.id ?? message.id, entries, context))) return [];
   return [{ message: message.id, requestId: `nudge:${message.id}#${chain.length}` }];
 }
 

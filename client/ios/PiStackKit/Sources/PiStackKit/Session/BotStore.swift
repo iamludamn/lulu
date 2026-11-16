@@ -37,6 +37,8 @@ public final class BotStore {
     public var onASRError: ((String) -> Void)?
     private var asrRequestId: String?
     private var voiceRequestId: String?
+    public private(set) var loadingHistory = false
+    private var historyRequest: String?
 
     private let socketURL: URL
     private let cacheURL: URL
@@ -69,6 +71,14 @@ public final class BotStore {
         let current = task
         task = nil
         current?.cancel(with: .goingAway, reason: nil)
+    }
+
+    public func loadEarlier() {
+        guard !loadingHistory, snapshot.link == .online, let view = snapshot.view, view.before != nil, let first = view.entries.first, let before = Int(first.id) else { return }
+        let requestId = newId()
+        historyRequest = requestId
+        loadingHistory = true
+        transmit(["type": "history.load", "requestId": requestId, "before": before])
     }
 
     public func submit(_ content: String) { dispatch(Command(.submit(content))) }
@@ -169,11 +179,13 @@ public final class BotStore {
     }
 
     private func connect() {
+        loadingHistory = false
+        historyRequest = nil
         let task = URLSession.shared.webSocketTask(with: socketURL)
         task.maximumMessageSize = 64 << 20
         self.task = task
         task.resume()
-        transmit(["type": "hello"])
+        transmit(["type": "hello", "incremental": true])
         for request in snapshot.requests where request.state == .sending { transmit(request.command.frame) }
         Task { await listen(task) }
     }
@@ -232,6 +244,14 @@ public final class BotStore {
             snapshot.assets = assets
             snapshot.hasReceivedState = true
             persist()
+        case .history(let entries, let before):
+            loadingHistory = false
+            historyRequest = nil
+            guard let view = snapshot.view else { return }
+            var known = Dictionary(uniqueKeysWithValues: view.entries.map { ($0.id, $0) })
+            for entry in entries { known[entry.id] = entry }
+            snapshot.view = ConversationView(entries: known.values.sorted { (Int($0.id) ?? 0) < (Int($1.id) ?? 0) }, docs: view.docs, before: before)
+            persist()
         case .models(let config): snapshot.models = config
         case .voice(let event):
             if event["type"]?.string == "voice.state" { NSLog("LuluVoice store state %@ callback=%d", event["state"]?.string ?? "", onVoiceEvent != nil) }
@@ -248,6 +268,7 @@ public final class BotStore {
                 if let error { onVoiceError?(error) }
                 return
             }
+            if requestId == historyRequest { loadingHistory = false; historyRequest = nil }
             guard let index = snapshot.requests.firstIndex(where: { $0.id == requestId }) else { return }
             if let error {
                 snapshot.requests[index].state = .failed

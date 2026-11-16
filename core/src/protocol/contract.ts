@@ -63,7 +63,7 @@ export type ScheduleEntry = {
 export interface McpStatus {
   readonly name: string;
   readonly source: "bot" | "platform";
-  readonly state: "connected" | "failed" | "needs-auth";
+  readonly state: "idle" | "connected" | "failed" | "needs-auth";
   readonly tools: number;
   readonly error?: string;
   readonly checkedAt: number;

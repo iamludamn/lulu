@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -42,19 +43,22 @@ type entry struct {
 }
 
 type viewFrame struct {
+	Reset   bool           `json:"reset"`
+	Before  *int64         `json:"before"`
 	Entries []entry        `json:"entries"`
 	Order   []jsonID       `json:"order"`
 	Docs    map[string]any `json:"docs"`
 }
 
 type conversation struct {
+	Before  *int64         `json:"before,omitempty"`
 	Entries []entry        `json:"entries"`
 	Docs    map[string]any `json:"docs"`
 }
 
 func (f viewFrame) applied(to *conversation) *conversation {
 	known := map[jsonID]entry{}
-	if to != nil {
+	if to != nil && !f.Reset {
 		for _, e := range to.Entries {
 			known[e.ID] = e
 		}
@@ -62,15 +66,21 @@ func (f viewFrame) applied(to *conversation) *conversation {
 	for _, e := range f.Entries {
 		known[e.ID] = e
 	}
-	merged := make([]entry, 0, len(f.Order))
 	for _, id := range f.Order {
-		e, ok := known[id]
-		if !ok {
+		if _, ok := known[id]; !ok {
 			return nil
 		}
+	}
+	merged := make([]entry, 0, len(known))
+	for _, e := range known {
 		merged = append(merged, e)
 	}
-	return &conversation{Entries: merged, Docs: f.Docs}
+	sort.Slice(merged, func(i, j int) bool { return position(merged[i].ID) < position(merged[j].ID) })
+	before := f.Before
+	if !f.Reset && to != nil {
+		before = to.Before
+	}
+	return &conversation{Entries: merged, Docs: f.Docs, Before: before}
 }
 
 func (c *conversation) busy() bool {
@@ -317,6 +327,8 @@ func (p panelState) checking(id string, index int, done bool) panelState {
 }
 
 type serverMessage struct {
+	Entries   []entry         `json:"entries"`
+	Before    *int64          `json:"before"`
 	Type      string          `json:"type"`
 	View      *viewFrame      `json:"view"`
 	Progress  *progress       `json:"progress"`

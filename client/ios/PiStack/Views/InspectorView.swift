@@ -114,6 +114,7 @@ struct InspectorView: View {
     private func mcpRow(_ server: McpStatus) -> some View {
         let label: String
         switch server.state {
+        case .idle: label = "准备连接"
         case .connected: label = "已连接"
         case .failed: label = "连接失败"
         case .needsAuth: label = "需要授权"

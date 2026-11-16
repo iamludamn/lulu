@@ -1,4 +1,6 @@
-import { observeView } from "./view.js";
+import { expireRequests } from "./deadlines.js";
+import { RunFamily } from "../delegate/runs.js";
+import { entryRange, HISTORY_PAGE_SIZE, observeView } from "./view.js";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { type Conversation, type ConversationView, type EntryId, CompactionEntry, Harness, type Registry, type Storage } from "@earendil-works/pi-durable";
@@ -42,7 +44,7 @@ const MODEL_KEY = "model";
 const STATE_INTERVAL_MS = 50;
 const PROGRESS_WAIT_MS = 500;
 
-type ClientAttachment = { readonly role: "client"; readonly ready: boolean };
+type ClientAttachment = { readonly role: "client"; readonly ready: boolean; readonly incremental?: boolean };
 type HelloMessage = Extract<ClientMessage, { type: "hello" }>;
 type Command = Exclude<ClientMessage, HelloMessage>;
 
@@ -65,8 +67,9 @@ export class BotSession {
   #mcpHost: McpHost | undefined = undefined;
   #botServers: Record<string, McpServerConfig> = {};
   #progress: SessionProgress = { messages: [], hiddenEntries: [] };
-  readonly #sentEntries = new Map<string, string>();
+  readonly #sentEntries = new Map<string, ConversationView["entries"][number]>();
   #sentRest = "";
+  #sentOrder: string[] = [];
   #cooling = false;
   #awaiting = false;
   #waitTimer: ReturnType<typeof setTimeout> | undefined = undefined;
@@ -83,6 +86,8 @@ export class BotSession {
   #mcp: McpStatus[] = [];
   #mcpRequests: Promise<unknown> = Promise.resolve();
   #mcpReconnect: Promise<void> = Promise.resolve();
+  #resumeAfterMcp = false;
+  #mcpReady: Promise<void> = Promise.resolve();
 
   readonly #voice: VoiceSession;
   readonly #asr: AsrSessions;
@@ -107,9 +112,13 @@ export class BotSession {
   }
 
   recover(): void {
-    if (this.#mcp.some((server) => server.state !== "connected")) {
-      void this.#reconnectMcp().catch((error: unknown) => reportError("MCP reconnect failed", error));
-    }
+    this.#mcpReady = this.#reconnectMcp().catch((error: unknown) => reportError("MCP reconnect failed", error)).finally(() => {
+      if (this.#resumeAfterMcp) {
+        this.#resumeAfterMcp = false;
+        this.#harness.resume();
+        this.#chase();
+      }
+    });
   }
 
   async #initialize(storage: Storage): Promise<void> {
@@ -133,7 +142,7 @@ export class BotSession {
     this.#harness = harness;
     observeDelegateTiming(harness, telemetry.context);
     harness.observeCommits({ advance: (publication) => {
-      if (publication.changes.some((change) => (change.type === "document" && (change.record.kind === CRON_KIND || change.record.kind === SANDBOX_KIND)) || (change.type === "task" && (change.value.kind === SANDBOX_LIFECYCLE || change.value.kind === MEMORY_UPDATE)))) {
+      if (publication.changes.some((change) => (change.type === "document" && (change.record.kind === CRON_KIND || change.record.kind === SANDBOX_KIND || change.record.kind === RunFamily.definition.kind || change.record.kind === ChatDoc.definition.kind)) || (change.type === "submission") || (change.type === "task" && (change.value.kind === SANDBOX_LIFECYCLE || change.value.kind === MEMORY_UPDATE)))) {
         void this.#refreshAlarm().catch((error: unknown) => reportError("Schedule alarm reconciliation failed", error));
       }
     }, end: () => {} });
@@ -146,7 +155,8 @@ export class BotSession {
     const root = await harness.root(BACKGROUND_CONTEXT, { agent: { model, thinkingLevel: "off" } });
     await root.configure({ model, tools: null }, BACKGROUND_CONTEXT);
     this.#root = root;
-    harness.resume();
+    this.#resumeAfterMcp = !host.catalogReady;
+    if (!this.#resumeAfterMcp) harness.resume();
     const update = createMemoryUpdate(this.#host);
     harness.observeCommits({ advance: (publication) => {
       if (publication.changes.some((change) => change.type === "entry" && change.value.conversationId === root.id && CompactionEntry.is(change.value))) {
@@ -259,7 +269,7 @@ export class BotSession {
     }
 
     if (frame.type === "hello") {
-      const next = this.#hello(socket);
+      const next = this.#hello(socket, frame.incremental === true);
       this.#handshakes.set(socket, next);
       await next;
       return;
@@ -302,11 +312,11 @@ export class BotSession {
     return this.#host.sockets.attachment(socket) as ClientAttachment | null;
   }
 
-  async #hello(socket: Socket): Promise<boolean> {
+  async #hello(socket: Socket, incremental: boolean): Promise<boolean> {
     const config = await this.#config();
-    this.#host.sockets.attach(socket, { role: "client", ready: true } satisfies ClientAttachment);
+    this.#host.sockets.attach(socket, { role: "client", ready: true, incremental } satisfies ClientAttachment);
     this.#send(socket, { type: "models", config });
-    this.#send(socket, this.#stateMessage());
+    this.#send(socket, this.#stateMessage(undefined, true));
     return true;
   }
 
@@ -342,9 +352,18 @@ export class BotSession {
       case "voice.stop":
         this.#voice.stop(socket, command.requestId);
         return;
+      case "history.load": {
+        const page = await this.#root.entries({ maxEntryId: (command.before - 1) as EntryId }, HISTORY_PAGE_SIZE + 1, undefined, BACKGROUND_CONTEXT);
+        const items = [...page.items];
+        const earlier = items.length > HISTORY_PAGE_SIZE ? Number(items.pop()!.id) : null;
+        this.#send(socket, { type: "history", entries: items.reverse(), before: earlier });
+        this.#acknowledge(socket, command.requestId);
+        return;
+      }
       case "prompt.submit":
         return this.#inPromptOrder(() => this.#submitPrompt(socket, command));
       case "prompt.abort":
+        if (this.#resumeAfterMcp) await this.#mcpReady;
         await this.#root.abort(BACKGROUND_CONTEXT);
         this.#broadcastState();
         this.#acknowledge(socket, command.requestId);
@@ -362,7 +381,7 @@ export class BotSession {
       }
       case "widget.keep":
       case "widget.drop":
-        await keepWidget(this.#harness, this.#view.value.entries, command.origin, command.type === "widget.keep");
+        await keepWidget(this.#harness, await entryRange(this.#root, 0, undefined, BACKGROUND_CONTEXT), command.origin, command.type === "widget.keep");
         this.#acknowledge(socket, command.requestId);
         return;
       case "layout.order":
@@ -374,7 +393,8 @@ export class BotSession {
         this.#acknowledge(socket, command.requestId);
         return;
       case "widget.make": {
-        const make = await this.#inPromptOrder(() => startMake(this.#harness, this.#root, this.#view.value.entries, command));
+        if (this.#resumeAfterMcp) await this.#mcpReady;
+        const make = await this.#inPromptOrder(() => entryRange(this.#root, 0, undefined, BACKGROUND_CONTEXT).then((entries) => startMake(this.#harness, this.#root, entries, command)));
         this.#makers.set(command.requestId, { socket, make: make.requestId });
         setTimeout(() => void this.#settleMakes(), Math.max(0, make.at + MAKE_TIMEOUT_MS - Date.now()) + 100);
         await this.#settleMakes();
@@ -387,6 +407,7 @@ export class BotSession {
     const content = command.content;
     await this.#recall(command.requestId, content);
     await recordChatMessage(this.#harness, this.#view, command.requestId, content);
+    if (this.#resumeAfterMcp) await this.#mcpReady;
     const submission = await this.#root.submit(
       {
         type: "input",
@@ -442,6 +463,7 @@ export class BotSession {
   }
 
   #chase(): void {
+    if (this.#resumeAfterMcp) return;
     this.#chasing = this.#chasing
       .then(() => chaseDeliveries(this.#harness, this.#root, this.#view.value.entries))
       .catch((error: unknown) => reportError("Delivery check failed", error));
@@ -472,11 +494,11 @@ export class BotSession {
     return chatModelConfig(this.#models, this.#host.env, this.#selected);
   }
 
-  #stateMessage(entries: ConversationView["entries"] = this.#view.value.entries): ServerMessage {
-    const { conversation, docs, entries: all } = this.#view.value;
+  #stateMessage(entries: ConversationView["entries"] = this.#view.value.entries, reset = false): ServerMessage {
+    const { conversation, docs, before, entries: all } = this.#view.value;
     return {
       type: "state",
-      view: { conversation, docs, order: all.map((entry) => String(entry.id)), entries },
+      view: { conversation, docs, before, ...(reset ? { reset: true } : {}), order: all.map((entry) => String(entry.id)), entries },
       progress: this.#progress,
       mcp: this.#mcp,
       panel: this.#panel,
@@ -528,13 +550,17 @@ export class BotSession {
   }
 
   #diffAndSend(): void {
-    const bodies = new Map(this.#view.value.entries.map((entry) => [String(entry.id), JSON.stringify(entry)]));
-    const changed = this.#view.value.entries.filter((entry) => this.#sentEntries.get(String(entry.id)) !== bodies.get(String(entry.id)));
+    const all = this.#view.value.entries;
+    const changed = all.filter((entry) => this.#sentEntries.get(String(entry.id)) !== entry);
     const { view, ...rest } = this.#stateMessage(changed) as Extract<ServerMessage, { type: "state" }>;
-    const signature = JSON.stringify({ ...rest, view: { ...view, entries: [] } });
-    if (changed.length === 0 && signature === this.#sentRest) return;
+    const order = view.order!;
+    const orderChanged = order.length !== this.#sentOrder.length || order.some((id, index) => id !== this.#sentOrder[index]);
+    const signature = JSON.stringify({ ...rest, view: { ...view, order: undefined, entries: [] } });
+    if (changed.length === 0 && !orderChanged && signature === this.#sentRest) return;
     this.#sentEntries.clear();
-    for (const [id, body] of bodies) this.#sentEntries.set(id, body);
+    for (const entry of all) this.#sentEntries.set(String(entry.id), entry);
+    this.#sentOrder = order;
+    if (!orderChanged) delete view.order;
     this.#sentRest = signature;
     this.#broadcast({ view, ...rest });
   }
@@ -556,6 +582,12 @@ export class BotSession {
       this.#publishState();
     }
     if (socket.readyState !== SOCKET_OPEN) return;
+    if (message.type === "state" && message.view.order === undefined && this.#attachmentOf(socket)?.incremental !== true) {
+      message = { ...message, view: { ...message.view, order: this.#view.value.entries.map((entry) => String(entry.id)) } };
+    }
+    if (message.type === "state" && this.#attachmentOf(socket)?.incremental !== true) {
+      message = { ...message, mcp: message.mcp.map((server) => server.state === "idle" ? { ...server, state: "failed", error: "Preparing tools" } : server) };
+    }
     socket.send(JSON.stringify(message));
   }
 
@@ -564,12 +596,14 @@ export class BotSession {
   }
 
   async #runAlarm(span: TelemetrySpan): Promise<void> {
+    if (this.#resumeAfterMcp) await this.#mcpReady;
     const now = Date.now();
     if (this.#registry === undefined) return this.#refreshAlarm();
     const parentId = this.#root.id;
     const selected = chatModelRef(this.#host.env, this.#selected);
     let outcome: AlarmOutcome;
     try {
+      await expireRequests(this.#harness, this.#root, now);
       await recoverMemoryUpdates(this.#harness, this.#root, createMemoryUpdate(this.#host));
       outcome = await fireSchedules(this.#harness, parentId, selected, now);
     } catch (error) {

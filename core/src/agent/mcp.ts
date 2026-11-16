@@ -5,7 +5,7 @@ import { defineExtension, defineTool, section } from "@earendil-works/pi-durable
 import type { Extension, ToolRegistration } from "@earendil-works/pi-durable";
 import { McpAuthRequiredError, McpClient, StreamableHttpTransport, toLlmContent, type AuthProvider, type McpFetch, type Tool } from "@earendil-works/pi-mcp";
 import type { McpStatus } from "../protocol/contract.js";
-import type { McpHostServices } from "../host/types.js";
+import type { DurableStorage, McpHostServices } from "../host/types.js";
 import { McpFileAuthProvider } from "./mcp-auth.js";
 
 const MAX_SERVER_DESCRIPTION_CHARS = 250;
@@ -47,6 +47,7 @@ export interface RemoteMcpServer {
 }
 
 export interface McpHost {
+  readonly catalogReady: boolean;
   readonly extension: Extension;
   readonly namespaces: NonNullable<CodemodeToolOptions["namespaces"]>;
   readonly statuses: readonly McpConnection[];
@@ -106,7 +107,7 @@ export function mcpToolName(server: string, tool: string): string {
   return "mcp__" + server + "__" + tool;
 }
 
-function toolFor(server: string, client: McpClient, tool: Tool, host: McpHostServices, external: boolean): ToolRegistration {
+function toolFor(server: string, client: () => Promise<McpClient>, tool: Tool, host: McpHostServices, external: boolean): ToolRegistration {
   return defineTool({
     name: mcpToolName(server, tool.name),
     callers: ["tools"],
@@ -114,7 +115,7 @@ function toolFor(server: string, client: McpClient, tool: Tool, host: McpHostSer
     description: tool.description?.trim() || tool.title || `MCP tool ${tool.name} from server ${server}`,
     parameters: parameters(tool.inputSchema),
     execute: async (args, _api, context) => {
-      const call = () => client.callTool(tool.name, (args ?? {}) as Record<string, unknown>, { signal: context.abortSignal });
+      const call = async () => (await client()).callTool(tool.name, (args ?? {}) as Record<string, unknown>, { signal: context.abortSignal });
       const result = external ? await serviceUsage(host.telemetry, server, tool.name, async (span) => {
         const result = await call();
         if (result.isError) {
@@ -133,7 +134,19 @@ function toolFor(server: string, client: McpClient, tool: Tool, host: McpHostSer
   });
 }
 
+type McpServices = McpHostServices & { storage?: DurableStorage };
+type McpCatalog = { tools: readonly Tool[]; instructions: string };
+
+async function catalogKey(server: string, config: McpServerConfig): Promise<string> {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify([server, config.url, config.headers])));
+  return "mcp.catalog:" + Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 interface McpSession {
+  readonly catalogued?: boolean;
+  readonly ready?: () => Promise<McpSession>;
+  readonly dispose?: () => Promise<void>;
+  readonly instructions?: string;
   readonly config: McpServerConfig;
   readonly client: McpClient | undefined;
   readonly tools: readonly Tool[];
@@ -142,7 +155,7 @@ interface McpSession {
   readonly auth: AuthProvider | undefined;
 }
 
-async function connectMcp(server: string, config: McpServerConfig, host: McpHostServices): Promise<McpSession> {
+async function connectMcp(server: string, config: McpServerConfig, host: McpServices): Promise<McpSession> {
   return host.telemetry.startSpan({ name: "mcp.connect", attributes: { "lulu.mcp.server": server } }, async (span) => {
     const checkedAt = Date.now();
     let headers: Record<string, string> | undefined = undefined;
@@ -169,6 +182,7 @@ async function connectMcp(server: string, config: McpServerConfig, host: McpHost
         ...(config.fetch === undefined ? {} : { openGetStream: false }),
       }));
       const tools = await client.listTools({ signal: controller.signal });
+      if (host.storage) await host.storage.put({ [await catalogKey(server, config)]: { tools, instructions: client.instructions ?? "" } });
       span.setAttributes({ "lulu.mcp.state": "connected", "lulu.mcp.tools": tools.length });
       return { config, client, tools, status: { name: server, state: "connected", tools: tools.length, checkedAt }, headers, auth };
     } catch (error) {
@@ -186,15 +200,20 @@ async function connectMcp(server: string, config: McpServerConfig, host: McpHost
   });
 }
 
-function mcpHost(sessions: ReadonlyMap<string, McpSession>, host: McpHostServices): McpHost {
+function mcpHost(sessions: ReadonlyMap<string, McpSession>, host: McpServices): McpHost {
   const owned = new Set(sessions.values());
   const listed = new Map<string, { description: string; count: number }>();
   const tools: ToolRegistration[] = [];
   for (const [server, session] of sessions) {
     const client = session.client;
-    if (client === undefined) continue;
-    for (const tool of session.tools) tools.push(toolFor(server, client, tool, host, session.config.fetch === undefined));
-    if (session.tools.length > 0) listed.set(server, { description: truncate(client.instructions ?? "", MAX_SERVER_DESCRIPTION_CHARS), count: session.tools.length });
+    if (client === undefined && session.ready === undefined) continue;
+    const acquire = async (): Promise<McpClient> => {
+      const connected = session.ready ? await session.ready() : session;
+      if (!connected.client) throw new Error(`MCP server "${server}" is unavailable`);
+      return connected.client;
+    };
+    for (const tool of session.tools) tools.push(toolFor(server, acquire, tool, host, session.config.fetch === undefined));
+    if (session.tools.length > 0) listed.set(server, { description: truncate(client?.instructions ?? session.instructions ?? "", MAX_SERVER_DESCRIPTION_CHARS), count: session.tools.length });
   }
   const namespaces = [...listed].map(([server, entry]) => ({
     name: server,
@@ -203,18 +222,26 @@ function mcpHost(sessions: ReadonlyMap<string, McpSession>, host: McpHostService
   }));
   return {
     namespaces,
+    catalogReady: [...sessions.values()].every((session) => session.catalogued !== false),
     statuses: [...sessions.values()].map((session) => session.status),
     async reconnect(servers, names) {
       const next = new Map(await Promise.all(Object.entries(servers).map(async ([server, config]): Promise<[string, McpSession]> => {
         const previous = sessions.get(server);
         const reuse = names !== undefined && !names.includes(server) && previous !== undefined && previous.config.url === config.url && previous.config.fetch === config.fetch && JSON.stringify(previous.config.headers) === JSON.stringify(config.headers);
+        const deferred = previous?.ready && previous.config.url === config.url && JSON.stringify(previous.config.headers) === JSON.stringify(config.headers) && (names === undefined || !names.includes(server));
+        if (deferred) {
+          const connected = await previous.ready!();
+          owned.delete(previous);
+          return [server, connected];
+        }
         return [server, reuse ? previous : await connectMcp(server, config, host)];
       })));
       for (const session of next.values()) owned.delete(session);
       return mcpHost(next, host);
     },
     async remote() {
-      return Promise.all([...sessions].filter(([, session]) => session.client !== undefined && session.config.fetch === undefined).map(async ([server, session]) => {
+      const connected = await Promise.all([...sessions].filter(([, session]) => session.config.fetch === undefined).map(async ([server, session]) => [server, session.ready ? await session.ready() : session] as const));
+      return Promise.all(connected.filter(([, session]) => session.client !== undefined).map(async ([server, session]) => {
         const token = await session.auth?.token();
         const headers = { ...session.headers, ...(token === undefined ? {} : { Authorization: `Bearer ${token}` }) };
         return { name: server, url: session.config.url, headers: Object.entries(headers).map(([name, value]) => ({ name, value })) };
@@ -224,12 +251,28 @@ function mcpHost(sessions: ReadonlyMap<string, McpSession>, host: McpHostService
     async close() {
       const closing = [...owned];
       owned.clear();
-      await Promise.all(closing.flatMap((session) => session.client === undefined ? [] : [session.client.close()]));
+      await Promise.all(closing.flatMap((session) => session.dispose ? [session.dispose()] : session.client === undefined ? [] : [session.client.close()]));
     },
   };
 }
 
-export async function openMcp(servers: Record<string, McpServerConfig>, host: McpHostServices): Promise<McpHost> {
+export async function openMcp(servers: Record<string, McpServerConfig>, host: McpServices): Promise<McpHost> {
   const sessions = await Promise.all(Object.entries(servers).map(async ([name, config]): Promise<[string, McpSession]> => [name, await connectMcp(name, config, host)]));
+  return mcpHost(new Map(sessions), host);
+}
+
+export async function deferredMcp(servers: Record<string, McpServerConfig>, host: McpServices): Promise<McpHost> {
+  const sessions = await Promise.all(Object.entries(servers).map(async ([name, config]): Promise<[string, McpSession]> => {
+    const catalog = await host.storage?.get<McpCatalog>(await catalogKey(name, config));
+    let pending: Promise<McpSession> | undefined;
+    const ready = () => pending ??= connectMcp(name, config, host);
+    return [name, {
+      config, catalogued: catalog !== undefined, client: undefined, tools: catalog?.tools ?? [], instructions: catalog?.instructions,
+      headers: undefined, auth: undefined,
+      status: { name, state: "idle", tools: catalog?.tools.length ?? 0, checkedAt: 0 },
+      ready,
+      dispose: async () => { if (pending) await (await pending).client?.close(); },
+    }];
+  }));
   return mcpHost(new Map(sessions), host);
 }

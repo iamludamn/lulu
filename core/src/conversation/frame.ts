@@ -11,10 +11,11 @@ export function parseFrame(text: string): ClientMessage {
 
 function parseClientMessage(value: Record<string, unknown>): ClientMessage {
   const { type, requestId, content, whenBusy, model } = value;
-  if (type === "hello") return { type };
+  if (type === "hello") return { type, incremental: value.incremental === true };
   if (type === "prompt.submit" && isString(requestId) && isString(content) && (whenBusy === "steer" || whenBusy === "followUp")) {
     return { type, requestId, content, whenBusy };
   }
+  if (type === "history.load" && isString(requestId) && Number.isSafeInteger(value.before) && Number(value.before) > 0) return { type, requestId, before: Number(value.before) };
   if (type === "prompt.abort" && isString(requestId)) return { type, requestId };
   if (type === "model.select" && isString(requestId) && isRecord(model) && isString(model.provider) && isString(model.id)) {
     return { type, requestId, model: { provider: model.provider, id: model.id } };

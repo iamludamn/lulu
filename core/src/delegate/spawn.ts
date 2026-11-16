@@ -1,3 +1,5 @@
+import { reserveDelegate, REQUEST_TIMEOUT_MS } from "./limits.js";
+import { ChatDoc } from "../conversation/progress.js";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { AssistantEntry, ProviderDoc, type ConversationId, type Cursor, type EntryId, type SubmissionId, type Tx } from "@earendil-works/pi-durable";
 import { SandboxDoc } from "../sandbox/doc.js";
@@ -40,10 +42,13 @@ export async function entryBeforeCall(tx: Tx, conversationId: ConversationId, ca
 }
 
 export async function createRun(tx: Tx, start: RunStart): Promise<{ runId: string; childId: ConversationId }> {
+  const index = await tx.doc(DelegateIndex);
+  if (!index.ids.includes(start.runId)) await reserveDelegate(tx, start.runId);
   const draft = await tx.doc(RunFamily, start.runId, { id: start.runId, task: start.task, description: start.description, origin: start.origin, agent: start.agent, cwd: start.cwd ?? "" });
   if (draft.conversationId !== null) return { runId: start.runId, childId: draft.conversationId };
+  const deadlines = (await tx.doc(ChatDoc)).messages.filter((message) => message.id !== null && start.origin.includes(message.id as SubmissionId)).flatMap((message) => message.deadline === undefined ? [] : [message.deadline]);
+  draft.deadline = Math.min(Date.now() + REQUEST_TIMEOUT_MS, ...deadlines);
   const preset = start.presets[start.agent];
-  const index = await tx.doc(DelegateIndex);
   if (!index.ids.includes(start.runId)) index.ids.push(start.runId);
   const anchor = await tx.createTask(DelegateAnchor, { runId: start.runId }, { ownership: { kind: "conversation" }, conversationId: start.parentId, background: true });
   const ownership = { kind: "task", taskId: anchor } as const;

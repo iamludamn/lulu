@@ -1,3 +1,6 @@
+import { DelegateIndex } from "../delegate/runs.js";
+import { REQUEST_TIMEOUT_MS } from "../delegate/limits.js";
+import { requestDeadlineAt } from "../conversation/deadlines.js";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId, Harness, ModelRef } from "@earendil-works/pi-durable";
 import { DefaultDelegateAgent, DelegateAgents } from "../delegate/agents.js";
@@ -74,7 +77,13 @@ export async function nextAlarmAt(harness: Harness): Promise<number | undefined>
   }
   const jobs = (await harness.snapshot(CronJobsDoc, BACKGROUND_CONTEXT))?.jobs ?? [];
   const scheduled = nextAlarm(jobs);
-  if (scheduled !== undefined) deadlines.push(scheduled);
+  if (scheduled !== undefined) deadlines.push(scheduled > now ? scheduled : now + RECOVERY_ALARM_DELAY_MS);
+  for (const id of (await harness.snapshot(DelegateIndex, BACKGROUND_CONTEXT))?.ids ?? []) {
+    const run = await harness.snapshot(RunFamily, id, BACKGROUND_CONTEXT);
+    if (run?.status === "running") deadlines.push(Math.max(now + 1000, run.deadline ?? run.startedAt + REQUEST_TIMEOUT_MS));
+  }
+  const requestDeadline = await requestDeadlineAt(harness, now);
+  if (requestDeadline !== undefined) deadlines.push(requestDeadline);
   return deadlines.length === 0 ? undefined : Math.min(...deadlines);
 }
 

@@ -17,6 +17,7 @@ export type RunDoc = {
   origin: SubmissionId[];
   status: RunStatus;
   startedAt: number;
+  deadline?: number;
   endedAt: number | null;
   agent: string;
   cwd: string;

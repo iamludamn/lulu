@@ -19,7 +19,7 @@ public struct ModelConfig: Codable, Sendable {
 public struct McpStatus: Codable, Identifiable, Sendable {
     public enum Source: String, Codable, Sendable { case bot, platform }
     public enum State: String, Codable, Sendable {
-        case connected, failed
+        case idle, connected, failed
         case needsAuth = "needs-auth"
     }
 

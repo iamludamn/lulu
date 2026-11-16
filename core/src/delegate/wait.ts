@@ -1,3 +1,5 @@
+import { awaitWithContext, withCancel } from "@earendil-works/chord/context";
+import { REQUEST_TIMEOUT_MS } from "./limits.js";
 import { AssistantEntry, defineTask } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord/context";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
@@ -115,8 +117,32 @@ export const DelegateWait = defineTask<WaitInput, WaitCheckpoint, WaitResult, ob
         await settle(task.input, runtime, context, "failed", "child conversation is gone", null);
         return;
       }
+      const deadline = run.deadline ?? run.startedAt + REQUEST_TIMEOUT_MS;
+      if (deadline <= runtime.now()) {
+        await child.abort(context, { background: true });
+        await settle(input, runtime, context, "failed", "Request exceeded its 15 minute deadline", null);
+        return;
+      }
       const submission = await child.submit({ type: "input", content: input.prompt ?? input.task, requestId: input.requestId }, context);
-      const settled = await submission.wait(context);
+      const waiting = withCancel(context);
+      let stopTimer = (): void => {};
+      let settled;
+      try {
+        settled = await Promise.race([
+          submission.wait(waiting.context),
+          awaitWithContext(new Promise<undefined>((resolve) => {
+            stopTimer = runtime.setTimer(() => resolve(undefined), Math.max(0, deadline - runtime.now()));
+          }), waiting.context),
+        ]);
+      } finally {
+        stopTimer();
+        waiting.cancel();
+      }
+      if (settled === undefined) {
+        await child.abort(context, { background: true });
+        await settle(input, runtime, context, "failed", "Request exceeded its 15 minute deadline", null);
+        return;
+      }
       const latest = await runtime.snapshot(RunFamily, input.runId, context);
       if (!latest || latest.status !== "running") {
         await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted", reason: "run no longer active" } }), context);

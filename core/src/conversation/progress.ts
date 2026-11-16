@@ -1,3 +1,5 @@
+import { RequestDeadlinesDoc } from "./deadlines.js";
+import { REQUEST_TIMEOUT_MS } from "../delegate/limits.js";
 import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { type CommitPublication, type ConversationView, defineDoc, type Harness, type SubmissionId } from "@earendil-works/pi-durable";
@@ -7,7 +9,7 @@ import { owedDeliveries, type Entries } from "../send/delivery.js";
 import { DeliveryDoc, MakeDoc } from "../send/doc.js";
 import { readSubmission, trackSubmissions, type SubmissionReader } from "./submissions.js";
 
-export type ChatMessage = { requestId: string; id: number | null; text: string; after: number | null; at?: number };
+export type ChatMessage = { requestId: string; id: number | null; text: string; after: number | null; at?: number; deadline?: number; error?: string };
 
 export function lastEntryId(view: ConversationView | undefined): number | null {
   const last = view?.entries.at(-1);
@@ -28,7 +30,7 @@ export async function recordChatMessage(harness: Harness, view: { readonly value
   await harness.commit(async (tx) => {
     const chat = await tx.doc(ChatDoc);
     if (chat.messages.some((message) => message.requestId === requestId)) return;
-    chat.messages.push({ requestId, id: null, text, after: lastEntryId(view.value), at: Date.now() });
+    chat.messages.push({ requestId, id: null, text, after: lastEntryId(view.value), at: Date.now(), deadline: Date.now() + REQUEST_TIMEOUT_MS });
   }, BACKGROUND_CONTEXT);
 }
 
@@ -36,7 +38,11 @@ export async function linkChatMessage(harness: Harness, requestId: string, id: n
   await harness.commit(async (tx) => {
     const chat = await tx.doc(ChatDoc);
     const message = chat.messages.find((entry) => entry.requestId === requestId);
-    if (message !== undefined) message.id = id;
+    if (message !== undefined) {
+      message.id = id;
+      const deadlines = await tx.doc(RequestDeadlinesDoc);
+      if (message.deadline !== undefined && !deadlines.pending.some((item) => item.id === id)) deadlines.pending.push({ id, until: message.deadline });
+    }
   }, BACKGROUND_CONTEXT);
 }
 
@@ -78,10 +84,15 @@ export async function computeProgress(
   const runs = (await Promise.all((index?.ids ?? []).map((id) => harness.snapshot(RunFamily, id, context)))).filter((run): run is RunDoc => run !== undefined);
   const owed = new Set((await owedDeliveries(harness, entries(), context, read)).map((item) => item.message));
   const messages: MessageProgress[] = [];
+  const oldest = Number(entries()[0]?.id ?? 0);
+  const pendingRequests = new Set(((await harness.snapshot(RequestDeadlinesDoc, context))?.pending ?? []).map((item) => item.id));
+  const active = new Set(runs.filter((run) => run.status === "running").flatMap((run) => run.origin));
   for (const message of chat?.messages ?? []) {
     if (message.id === null) continue;
     const id = message.id as SubmissionId;
+    if (message.after !== null && message.after < oldest && !pendingRequests.has(message.id) && !active.has(id) && message !== chat?.messages.at(-1)) continue;
     const record = await read(id, context);
+    if ((record?.status === "done" || record?.status === "unanswered") && record.entry !== undefined && Number(record.entry) < oldest && !runs.some((run) => run.status === "running" && run.origin.includes(id))) continue;
     const subtasks = await subtasksOf(harness, runs, id, context);
     const pending = subtasks.some((subtask) => subtask.running) || (await noticePending(read, runs, id, context));
     messages.push({
@@ -92,8 +103,8 @@ export async function computeProgress(
       answer: record?.answer ? String(record.answer) : null,
       text: message.text,
       after: message.after,
-      state: owed.has(message.id) ? "processing" : stateOf(record?.status, pending),
-      error: record?.status === "unanswered" && record.reason !== "aborted" ? record.reason : null,
+      state: message.error ? "done" : owed.has(message.id) ? "processing" : stateOf(record?.status, pending),
+      error: message.error ?? (record?.status === "unanswered" && record.reason !== "aborted" ? record.reason : null),
       subtasks,
     });
   }

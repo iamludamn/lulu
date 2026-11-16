@@ -224,7 +224,7 @@ class OtlpExporter implements TelemetryContext {
 
   async #send(url: string, body: unknown): Promise<void> {
     try {
-      const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...this.#config.headers }, body: JSON.stringify(body) });
+      const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...this.#config.headers }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
       if (!response.ok) console.error(JSON.stringify({ message: "OTLP export rejected", status: response.status }));
     } catch (error) {
       console.error(JSON.stringify({ message: "OTLP export failed", error: error instanceof Error ? error.message : String(error) }));

@@ -29,29 +29,33 @@ public struct ConversationEntry: Codable, Identifiable, Sendable {
 public struct ConversationView: Codable, Sendable {
     public let entries: [ConversationEntry]
     public let docs: [String: JSONValue]
+    public var before: Int? = nil
 }
 
 public struct ViewFrame: Decodable, Sendable {
     let entries: [ConversationEntry]
-    let order: [String]
+    let order: [String]?
+    let reset: Bool?
+    let before: Int?
     let docs: [String: JSONValue]
 
     func applied(to view: ConversationView?) -> ConversationView? {
-        var known = Dictionary(uniqueKeysWithValues: (view?.entries ?? []).map { ($0.id, $0) })
+        var known = Dictionary(uniqueKeysWithValues: (reset == true ? [] : view?.entries ?? []).map { ($0.id, $0) })
         for entry in entries { known[entry.id] = entry }
-        let merged = order.compactMap { known[$0] }
-        guard merged.count == order.count else { return nil }
-        return ConversationView(entries: merged, docs: docs)
+        if let order, !order.allSatisfy({ known[$0] != nil }) { return nil }
+        let merged = known.values.sorted { (Int($0.id) ?? 0) < (Int($1.id) ?? 0) }
+        return ConversationView(entries: merged, docs: docs, before: reset == true ? before : view?.before)
     }
 }
 
 public enum ServerMessage: Decodable, Sendable {
     case state(view: ViewFrame, progress: SessionProgress, mcp: [McpStatus], panel: PanelState, assets: [AssetItem])
+    case history(entries: [ConversationEntry], before: Int?)
     case models(ModelConfig)
     case voice(JSONValue)
     case result(requestId: String, error: String?)
 
-    private enum Keys: String, CodingKey { case type, view, progress, mcp, panel, assets, config, requestId, ok, error, event }
+    private enum Keys: String, CodingKey { case type, view, progress, mcp, panel, assets, config, requestId, ok, error, event, entries, before }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: Keys.self)
@@ -64,6 +68,7 @@ public enum ServerMessage: Decodable, Sendable {
                 panel: (try? container.decodeIfPresent(PanelState.self, forKey: .panel)) ?? PanelState(),
                 assets: (try? container.decodeIfPresent([AssetItem].self, forKey: .assets)) ?? []
             )
+        case "history": self = .history(entries: try container.decode([ConversationEntry].self, forKey: .entries), before: try container.decodeIfPresent(Int.self, forKey: .before))
         case "models": self = .models(try container.decode(ModelConfig.self, forKey: .config))
         case "voice": self = .voice(try container.decode(JSONValue.self, forKey: .event))
         case "result":
