@@ -126,7 +126,7 @@ export class BotSession {
       {
         ...options,
         telemetry: telemetry.context,
-        onReport: (error) => reportError("Harness background task failed", error),
+        onReport: (report) => reportError("Harness background task failed", report.error, { kind: report.kind, ...("reason" in report ? { reason: report.reason } : {}), ...("extension" in report ? { extension: report.extension } : {}) }),
       },
       BACKGROUND_CONTEXT,
     );
