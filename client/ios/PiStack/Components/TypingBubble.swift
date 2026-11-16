@@ -3,15 +3,16 @@ import SwiftUI
 struct TypingBubble: View {
     let text: String
     @State private var shown = false
+    @State private var visible = true
     @Environment(\.accessibilityReduceMotion) private var reduced
 
     var body: some View {
-        TimelineView(.animation(paused: reduced)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduced || !visible)) { context in
             let time = context.date.timeIntervalSinceReferenceDate
             let swell = reduced ? 0 : 0.5 - 0.5 * cos(time * .pi)
             let beat = reduced ? 0 : 0.5 - 0.5 * cos(time * 2 * .pi)
             HStack(spacing: 8) {
-                TypingDots(reduced: reduced)
+                TypingDots(time: time, reduced: reduced)
                 if !text.isEmpty {
                     Text(text).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
                         .animation(.snappy, value: text)
@@ -32,7 +33,11 @@ struct TypingBubble: View {
         .opacity(shown ? 1 : 0)
         .padding(.leading, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onAppear { withAnimation(.spring(duration: 0.4, bounce: 0.3)) { shown = true } }
+        .onScrollVisibilityChange(threshold: 0.05) { visible = $0 }
+        .onAppear {
+            if reduced { shown = true }
+            else { withAnimation(.spring(duration: 0.4, bounce: 0.3)) { shown = true } }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("助手正在输入")
     }

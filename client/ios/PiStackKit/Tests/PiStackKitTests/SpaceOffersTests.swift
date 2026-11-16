@@ -80,3 +80,25 @@ func spacesSavedBeforeCoversRemainOnPanel(kind: String) throws {
     #expect(src == "artifact://spaces/trip/index.html@2")
     #expect(preview == "artifact://spaces/trip/cover.html@2")
 }
+
+@Test func receiptFloorsAreScopedToEachSpaceAndUseTheHighestVersion() throws {
+    let state = try panel("""
+    {"order":[],"widgets":{},"spaceReceipts":{
+      "trip-old":{"id":"trip","version":1,"action":"add"},
+      "trip-new":{"id":"trip","version":3,"action":"update"},
+      "other":{"id":"other","version":100,"action":"update"}
+    }}
+    """)
+    let older = spaceOfferStates(try [entry("offer", version: 2)], panel: state)
+    #expect(older["offer"] == .superseded)
+    let newer = spaceOfferStates(try [entry("offer", version: 4)], panel: state)
+    #expect(newer["offer"] == .add)
+}
+
+@Test func negativeReceiptVersionsKeepTheirExistingOrdering() throws {
+    let state = try panel("""
+    {"order":["trip"],"widgets":{"trip":{"id":"trip","size":"m","title":"Trip","body":{"kind":"space","src":"artifact://spaces/trip/index.html@-2"}}},"spaceReceipts":{"old":{"id":"trip","version":-5,"action":"add"}}}
+    """)
+    let states = spaceOfferStates(try [entry("offer", version: -1)], panel: state)
+    #expect(states["offer"] == .update)
+}

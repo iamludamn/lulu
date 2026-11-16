@@ -12,16 +12,14 @@ struct ChatView: View {
     let onVoiceConversation: () -> Void
     @Binding var reading: ChatRow?
     let onReaderFrame: (ReaderFrame) -> Void
-    @State private var pinned = true
-    @State private var bottomMarkerY: CGFloat = 0
-    @State private var composerTop: CGFloat = 0
-    @State private var dragging = false
+    @State private var bottomState = ChatBottomState()
     @State private var sent = 0
     @State private var floor: String?
     @State private var position = ScrollPosition()
     @State private var metrics = Metrics()
     @Environment(\.topInset) private var topInset
     @Environment(\.openArtifact) private var openArtifact
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let bottom = "bottom"
     private static let page = 40
@@ -30,7 +28,6 @@ struct ChatView: View {
     private var snapshot: BotStore.Snapshot { store.snapshot }
     private var busy: Bool { live(of: snapshot.view).busy }
     private var reconnecting: Bool { snapshot.link == .offline && snapshot.halt == nil }
-    private var distanceFromBottom: CGFloat { composerTop > 0 ? max(0, bottomMarkerY - composerTop + 8) : 0 }
 
     var body: some View {
         let rows = chatRows(snapshot)
@@ -39,13 +36,15 @@ struct ChatView: View {
             ScrollView {
                 VStack(spacing: 4) {
                     if start > 0 {
-                        Button("更早的消息") { revealEarlier(rows, start) }
-                            .buttonStyle(.plain)
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .id("earlier")
+                        Button { revealEarlier(rows, start) } label: {
+                            Text("更早的消息")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .id("earlier")
                     }
                     ForEach(rows[start...]) { row in
                         MessageRow(row: row, store: store, botId: bot.id, api: api, expanded: row.id == reading?.id, onRead: { id in reading = rows.first { $0.id == id } }, onOpen: openArtifact, onKept: onKept)
@@ -55,7 +54,7 @@ struct ChatView: View {
                     }
                     Color.clear.frame(height: 1)
                         .id(Self.bottom)
-                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { bottomMarkerY = $0 }
+                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { metrics.bottomMarkerY = $0; updateBottomState() }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -63,17 +62,14 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity)
             }
             .defaultScrollAnchor(.bottom)
-            .defaultScrollAnchor(pinned ? .bottom : nil, for: .sizeChanges)
+            .defaultScrollAnchor(bottomState.pinned ? .bottom : nil, for: .sizeChanges)
             .scrollPosition($position)
             .scrollClipDisabled()
             .contentMargins(.top, topInset, for: .scrollContent)
             .contentMargins(.bottom, 0, for: .scrollContent)
             .scrollDismissesKeyboard(.interactively)
             .onScrollPhaseChange { _, phase in
-                dragging = phase == .interacting || phase == .decelerating
-            }
-            .onChange(of: distanceFromBottom) { _, distance in
-                if dragging || distance <= 24 { pinned = distance <= 24 }
+                metrics.dragging = phase == .interacting || phase == .decelerating
             }
             .onScrollGeometryChange(for: Extent.self) { Extent(offset: $0.contentOffset.y + $0.contentInsets.top, height: $0.contentSize.height) } action: { _, extent in
                 if let reveal = metrics.reveal, extent.height != reveal.height {
@@ -88,24 +84,18 @@ struct ChatView: View {
             .onChange(of: sent) {
                 Task {
                     try? await Task.sleep(for: .milliseconds(60))
-                    proxy.scrollTo(Self.bottom, anchor: .bottom)
-                }
-            }
-            .onChange(of: composing.wrappedValue) {
-                guard pinned else { return }
-                Task {
-                    try? await Task.sleep(for: .milliseconds(350))
-                    guard pinned else { return }
+                    guard bottomState.pinned else { return }
                     proxy.scrollTo(Self.bottom, anchor: .bottom)
                 }
             }
             .overlay(alignment: .bottomTrailing) {
-                if distanceFromBottom > 120 {
+                if bottomState.showJump {
                     Button {
-                        pinned = true
-                        withAnimation { proxy.scrollTo(Self.bottom, anchor: .bottom) }
+                        bottomState.pinned = true
+                        if reduceMotion { proxy.scrollTo(Self.bottom, anchor: .bottom) }
+                        else { withAnimation { proxy.scrollTo(Self.bottom, anchor: .bottom) } }
                     } label: {
-                        Image(systemName: "arrow.down").font(.headline).frame(width: 32, height: 32)
+                        Image(systemName: "arrow.down").font(.headline).frame(width: 44, height: 44)
                     }
                     .buttonStyle(.glass)
                     .buttonBorderShape(.circle)
@@ -113,10 +103,10 @@ struct ChatView: View {
                     .accessibilityHint("滚动到对话最底部")
                     .padding(.horizontal, 16)
                     .padding(.bottom, 40)
-                    .transition(.scale.combined(with: .opacity))
+                    .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
                 }
             }
-            .animation(.snappy, value: distanceFromBottom > 120)
+            .animation(reduceMotion ? nil : .snappy, value: bottomState.showJump)
         }
         .overlay { gate(rows) }
         .overlay(alignment: .top) {
@@ -137,7 +127,7 @@ struct ChatView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if snapshot.halt == nil {
                 Composer(draft: $draft, store: store, transcription: transcription, onTranscribed: transcribed, busy: busy, placeholder: placeholder, focused: composing, onSend: send, onVoiceConversation: onVoiceConversation)
-                    .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { composerTop = $0 }
+                    .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { metrics.composerTop = $0; updateBottomState() }
             }
         }
         .overlayPreferenceValue(LongBubbleBounds.self) { bounds in
@@ -160,13 +150,11 @@ struct ChatView: View {
         .sensoryFeedback(.success, trigger: busy) { old, new in old && !new }
     }
 
-    private func transition(_ row: ChatRow) -> AnyTransition {
-        if row.card != nil { return .asymmetric(insertion: .scale(scale: 0.85).combined(with: .opacity), removal: .identity) }
-        guard row.role == .user || row.typing else { return .identity }
-        return .asymmetric(
-            insertion: .scale(scale: 0.92, anchor: row.role == .user ? .bottomTrailing : .bottomLeading).combined(with: .opacity),
-            removal: .identity
-        )
+    private func updateBottomState() {
+        let distance = metrics.composerTop > 0 ? max(0, metrics.bottomMarkerY - metrics.composerTop + 8) : 0
+        var next = bottomState
+        next.update(distance: distance, userScrolling: metrics.dragging)
+        if bottomState != next { bottomState = next }
     }
 
     private var placeholder: String { "给 \(bot.name) 发消息" }
@@ -178,7 +166,7 @@ struct ChatView: View {
 
     private func transcribed(_ text: String, sendImmediately: Bool) {
         if sendImmediately {
-            pinned = true
+            bottomState.pinned = true
             sent += 1
             store.submit(text)
         } else {
@@ -190,7 +178,7 @@ struct ChatView: View {
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        pinned = true
+        bottomState.pinned = true
         sent += 1
         store.submit(text)
         draft = ""
@@ -242,4 +230,7 @@ private struct Extent: Equatable {
 private final class Metrics {
     var extent = Extent()
     var reveal: Extent?
+    var bottomMarkerY: CGFloat = 0
+    var composerTop: CGFloat = 0
+    var dragging = false
 }
