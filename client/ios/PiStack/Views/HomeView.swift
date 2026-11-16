@@ -33,6 +33,7 @@ struct HomeView: View {
     @State private var bottomInset: CGFloat = 0
     @State private var voiceOpen = false
     @State private var voice = VoiceCall()
+    @State private var transcription = VoiceTranscription()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var composing: Bool
     @Environment(\.scenePhase) private var phase
@@ -49,7 +50,7 @@ struct HomeView: View {
             Wallpaper()
             TabView(selection: $page) {
                 ForEach(Page.allCases) { item in
-                    content(item).safeAreaPadding(.bottom, composing ? 0 : bottomInset).tag(item)
+                    content(item).tag(item)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
@@ -58,14 +59,18 @@ struct HomeView: View {
             .environment(\.topInset, barBottom)
             .environment(\.keepPull) { page, progress in pull = progress > 0 ? (page, progress) : nil }
             .ignoresSafeArea(.container, edges: [.top, .bottom])
-            .safeAreaBar(edge: .top, spacing: 0) {
-                topBar.onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { barBottom = $0 }
-            }
-            // Only the controls draw glass; suppress the bar's full-width scroll edge layer.
             .scrollEdgeEffectHidden(true, for: [.top, .bottom])
             .scaleEffect(voiceOpen && !reduceMotion ? 0.98 : 1)
             .allowsHitTesting(!voiceOpen)
             .accessibilityHidden(voiceOpen)
+            // Only the individual controls draw glass over the full-height content.
+            topBar
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { barBottom = $0 }
+                .frame(maxHeight: .infinity, alignment: .top)
+                .opacity(voiceOpen ? 0 : 1)
+                .scaleEffect(voiceOpen && !reduceMotion ? 0.98 : 1)
+                .allowsHitTesting(!voiceOpen)
+                .accessibilityHidden(voiceOpen)
             if voiceOpen {
                 voiceTranscript
                     .transition(.opacity)
@@ -105,7 +110,7 @@ struct HomeView: View {
         .sheet(isPresented: $inspector) { InspectorView(store: store, botId: bot.id, api: api) }
         .sensoryFeedback(.selection, trigger: page)
         .task { store.start() }
-        .onDisappear { voice.stop(); store.stop() }
+        .onDisappear { transcription.cancel(); voice.stop(); store.stop() }
         .onChange(of: phase) { _, next in
             if next == .active { store.start() } else if next == .background { voice.stop(); voiceOpen = false; store.stop() }
         }
@@ -121,7 +126,7 @@ struct HomeView: View {
         case .panel:
             PanelView(widgets: store.snapshot.panel.list, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onCheck: store.check, onCompose: fadeToChat)
         case .chat:
-            ChatView(bot: bot, store: store, api: api, draft: $draft, composing: $composing, onKept: land, onVoiceConversation: {
+            ChatView(bot: bot, store: store, transcription: transcription, api: api, draft: $draft, composing: $composing, onKept: land, onVoiceConversation: {
                 composing = false
                 withAnimation(voiceTransition) { voiceOpen = true }
             },
@@ -147,6 +152,17 @@ struct HomeView: View {
             PageSwitcher(page: page, landed: landed, pull: pull, onTarget: { targets[$0] = $1 }) { next in
                 withAnimation(.snappy) { page = next }
             }
+            .opacity(transcription.recording ? 0 : 1)
+            .allowsHitTesting(!transcription.recording)
+            .accessibilityHidden(transcription.recording)
+            .overlay {
+                if transcription.recording {
+                    RecordingWaveform(levels: transcription.levels)
+                        .background { Capsule().fill(.clear).glassEffect(.regular, in: .capsule) }
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: transcription.recording)
             Spacer()
             Button { inspector = true } label: {
                 Avatar(name: bot.name, id: bot.id, size: 38)
@@ -166,12 +182,12 @@ struct HomeView: View {
 
     private var voiceTranscript: some View {
         ZStack {
-            VoiceAtmosphere(muted: voice.muted)
+            VoiceAtmosphere(muted: voice.muted, audioLevel: { voice.audioLevel(at: $0) })
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
             GeometryReader { proxy in
                 VStack {
-                    Text(bot.name.capitalized)
+                    Text("lu")
                         .font(.system(size: 27, weight: .medium, design: .rounded))
                         .tracking(0.5)
                         .foregroundStyle(Color(red: 0.18, green: 0.29, blue: 0.38))
@@ -183,15 +199,12 @@ struct HomeView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 12) {
                             ForEach(voice.lines) { line in
-                                Text(line.text)
-                                    .font(.body)
-                                    .frame(maxWidth: .infinity, alignment: line.mine ? .trailing : .leading)
-                                    .padding(12)
-                                    .background(.ultraThinMaterial, in: .rect(cornerRadius: 16))
+                                CallTranscriptRow(mine: line.mine, text: line.text)
                                     .id(line.id)
                             }
                         }
                     }
+                    .defaultScrollAnchor(.bottom)
                     .onChange(of: voice.lines.count) { _, _ in
                         if let last = voice.lines.last { scroll.scrollTo(last.id, anchor: .bottom) }
                     }

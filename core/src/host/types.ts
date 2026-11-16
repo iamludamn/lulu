@@ -7,7 +7,7 @@ export const SOCKET_OPEN = 1;
 
 export interface Socket {
   readonly readyState: number;
-  send(message: string): void;
+  send(message: string | ArrayBuffer): void;
   close(code?: number, reason?: string): void;
 }
 

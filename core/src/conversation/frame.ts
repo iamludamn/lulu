@@ -27,6 +27,8 @@ function parseClientMessage(value: Record<string, unknown>): ClientMessage {
     return { type, requestId, ids: value.ids };
   }
   if (type === "widget.make" && isString(requestId) && isString(value.origin)) return { type, requestId, origin: value.origin };
+  if ((type === "asr.start" || type === "asr.finish" || type === "asr.cancel") && isString(requestId)) return { type, requestId };
+  if (type === "asr.audio" && isString(requestId) && isString(value.audio)) return { type, requestId, audio: value.audio };
   if (type === "voice.start" && isString(requestId)) return { type, requestId };
   if (type === "voice.audio" && isString(requestId) && isString(value.audio)) return { type, requestId, audio: value.audio };
   if (type === "voice.mute" && isString(requestId) && typeof value.muted === "boolean") return { type, requestId, muted: value.muted };

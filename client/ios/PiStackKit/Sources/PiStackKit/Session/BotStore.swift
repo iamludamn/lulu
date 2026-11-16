@@ -33,6 +33,9 @@ public final class BotStore {
     public private(set) var snapshot = Snapshot()
     public var onVoiceEvent: ((JSONValue) -> Void)?
     public var onVoiceError: ((String) -> Void)?
+    public var onASREvent: ((JSONValue) -> Void)?
+    public var onASRError: ((String) -> Void)?
+    private var asrRequestId: String?
     private var voiceRequestId: String?
 
     private let socketURL: URL
@@ -59,6 +62,7 @@ public final class BotStore {
 
     public func stop() {
         onVoiceError?("连接已关闭，语音通话已结束")
+        onASRError?("连接已关闭，语音识别已取消")
         running = false
         timer?.cancel()
         timer = nil
@@ -68,7 +72,23 @@ public final class BotStore {
     }
 
     public func submit(_ content: String) { dispatch(Command(.submit(content))) }
+    public func startASR(_ id: String) {
+        asrRequestId = id
+        transmit(["type": "asr.start", "requestId": id])
+    }
+    public func sendASRAudio(_ data: Data, session: String) {
+        guard asrRequestId == session else { return }
+        transmit(["type": "asr.audio", "requestId": session, "audio": data.base64EncodedString()])
+    }
+    public func finishASR(_ id: String) {
+        transmit(["type": "asr.finish", "requestId": id])
+    }
+    public func cancelASR(_ id: String) {
+        if asrRequestId == id { asrRequestId = nil }
+        transmit(["type": "asr.cancel", "requestId": id])
+    }
     public func startVoice() {
+        NSLog("LuluVoice sending start link=%@", String(describing: snapshot.link))
         let id = newId()
         voiceRequestId = id
         transmit(["type": "voice.start", "requestId": id])
@@ -183,6 +203,7 @@ public final class BotStore {
         guard self.task === task else { return }
         self.task = nil
         snapshot.link = .offline
+        onASRError?("连接已断开，语音识别已取消")
         if onVoiceEvent != nil { onVoiceError?("连接已断开，语音通话已结束") }
         switch task.closeCode.rawValue {
         case 4404: snapshot.halt = .notFound
@@ -212,9 +233,17 @@ public final class BotStore {
             snapshot.hasReceivedState = true
             persist()
         case .models(let config): snapshot.models = config
-        case .voice(let event): onVoiceEvent?(event)
+        case .voice(let event):
+            if event["type"]?.string == "voice.state" { NSLog("LuluVoice store state %@ callback=%d", event["state"]?.string ?? "", onVoiceEvent != nil) }
+            if event["type"]?.string?.hasPrefix("asr.") == true { onASREvent?(event) }
+            else { onVoiceEvent?(event) }
         case .result(let requestId, let error):
+            if requestId == asrRequestId {
+                if let error { onASRError?(error) }
+                return
+            }
             if requestId == voiceRequestId {
+                NSLog("LuluVoice start result error=%@", error ?? "none")
                 voiceRequestId = nil
                 if let error { onVoiceError?(error) }
                 return

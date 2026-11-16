@@ -4,6 +4,7 @@ import SwiftUI
 struct ChatView: View {
     let bot: BotSummary
     let store: BotStore
+    let transcription: VoiceTranscription
     let api: Api
     @Binding var draft: String
     var composing: FocusState<Bool>.Binding
@@ -12,6 +13,8 @@ struct ChatView: View {
     @Binding var reading: ChatRow?
     let onReaderFrame: (ReaderFrame) -> Void
     @State private var pinned = true
+    @State private var bottomMarkerY: CGFloat = 0
+    @State private var composerTop: CGFloat = 0
     @State private var dragging = false
     @State private var sent = 0
     @State private var floor: String?
@@ -27,6 +30,7 @@ struct ChatView: View {
     private var snapshot: BotStore.Snapshot { store.snapshot }
     private var busy: Bool { live(of: snapshot.view).busy }
     private var reconnecting: Bool { snapshot.link == .offline && snapshot.halt == nil }
+    private var distanceFromBottom: CGFloat { composerTop > 0 ? max(0, bottomMarkerY - composerTop + 8) : 0 }
 
     var body: some View {
         let rows = chatRows(snapshot)
@@ -46,10 +50,12 @@ struct ChatView: View {
                     ForEach(rows[start...]) { row in
                         MessageRow(row: row, store: store, botId: bot.id, api: api, expanded: row.id == reading?.id, onRead: { id in reading = rows.first { $0.id == id } }, onOpen: openArtifact, onKept: onKept)
                             .equatable()
-                            .padding(.bottom, row.tail ? 12 : 0)
+                            .padding(.bottom, row.tail && row.id != rows.last?.id ? 12 : 0)
                             .transition(.opacity.animation(.easeOut(duration: 0.2)))
                     }
-                    Color.clear.frame(height: 1).id(Self.bottom)
+                    Color.clear.frame(height: 1)
+                        .id(Self.bottom)
+                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { bottomMarkerY = $0 }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -61,12 +67,13 @@ struct ChatView: View {
             .scrollPosition($position)
             .scrollClipDisabled()
             .contentMargins(.top, topInset, for: .scrollContent)
+            .contentMargins(.bottom, 0, for: .scrollContent)
             .scrollDismissesKeyboard(.interactively)
             .onScrollPhaseChange { _, phase in
                 dragging = phase == .interacting || phase == .decelerating
             }
-            .onScrollGeometryChange(for: Bool.self) { $0.visibleRect.maxY > $0.contentSize.height - 24 } action: { _, near in
-                if dragging || near { pinned = near }
+            .onChange(of: distanceFromBottom) { _, distance in
+                if dragging || distance <= 24 { pinned = distance <= 24 }
             }
             .onScrollGeometryChange(for: Extent.self) { Extent(offset: $0.contentOffset.y + $0.contentInsets.top, height: $0.contentSize.height) } action: { _, extent in
                 if let reveal = metrics.reveal, extent.height != reveal.height {
@@ -81,24 +88,35 @@ struct ChatView: View {
             .onChange(of: sent) {
                 Task {
                     try? await Task.sleep(for: .milliseconds(60))
-                    proxy.scrollTo(Self.bottom)
+                    proxy.scrollTo(Self.bottom, anchor: .bottom)
+                }
+            }
+            .onChange(of: composing.wrappedValue) {
+                guard pinned else { return }
+                Task {
+                    try? await Task.sleep(for: .milliseconds(350))
+                    guard pinned else { return }
+                    proxy.scrollTo(Self.bottom, anchor: .bottom)
                 }
             }
             .overlay(alignment: .bottomTrailing) {
-                if !pinned {
+                if distanceFromBottom > 120 {
                     Button {
                         pinned = true
-                        withAnimation { proxy.scrollTo(Self.bottom) }
+                        withAnimation { proxy.scrollTo(Self.bottom, anchor: .bottom) }
                     } label: {
                         Image(systemName: "arrow.down").font(.headline).frame(width: 32, height: 32)
                     }
                     .buttonStyle(.glass)
                     .buttonBorderShape(.circle)
-                    .padding(16)
+                    .accessibilityLabel("回到最新消息")
+                    .accessibilityHint("滚动到对话最底部")
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 40)
                     .transition(.scale.combined(with: .opacity))
                 }
             }
-            .animation(.snappy, value: pinned)
+            .animation(.snappy, value: distanceFromBottom > 120)
         }
         .overlay { gate(rows) }
         .overlay(alignment: .top) {
@@ -118,7 +136,8 @@ struct ChatView: View {
         .animation(.snappy, value: reconnecting)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if snapshot.halt == nil {
-                Composer(draft: $draft, busy: busy, placeholder: placeholder, focused: composing, onSend: send, onVoiceConversation: onVoiceConversation)
+                Composer(draft: $draft, store: store, transcription: transcription, onTranscribed: transcribed, busy: busy, placeholder: placeholder, focused: composing, onSend: send, onVoiceConversation: onVoiceConversation)
+                    .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { composerTop = $0 }
             }
         }
         .overlayPreferenceValue(LongBubbleBounds.self) { bounds in
@@ -155,6 +174,17 @@ struct ChatView: View {
     private func revealEarlier(_ rows: [ChatRow], _ start: Int) {
         metrics.reveal = metrics.extent
         floor = rows[max(0, start - Self.page)].id
+    }
+
+    private func transcribed(_ text: String, sendImmediately: Bool) {
+        if sendImmediately {
+            pinned = true
+            sent += 1
+            store.submit(text)
+        } else {
+            draft += text
+            composing.wrappedValue = true
+        }
     }
 
     private func send() {

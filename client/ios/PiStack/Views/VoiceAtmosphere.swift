@@ -4,14 +4,14 @@ import SwiftUI
 /// two GPU passes animate its flow and draw the translucent, integrated rings.
 struct VoiceAtmosphere: View {
     let muted: Bool
+    let audioLevel: (Date) -> Double
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var started = Date()
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { context in
             let time = reduceMotion ? 0 : context.date.timeIntervalSince(started)
-            // Mock envelope until the voice transport supplies measured audio levels.
-            let level = muted ? 0.0 : max(0.08, 0.35 + 0.18 * sin(time * 2.7) + 0.12 * sin(time * 5.1))
+            let level = reduceMotion ? 0 : audioLevel(context.date)
             GeometryReader { proxy in
                 ZStack {
                     Image("VoiceAtmosphere")
@@ -30,7 +30,7 @@ struct VoiceAtmosphere: View {
                 .clipped()
             }
         }
-        .accessibilityLabel(muted ? "已静音的语音柔光" : "模拟语音柔光和波纹")
+        .accessibilityLabel(muted ? "已静音的语音柔光" : "随语音变化的柔光和波纹")
     }
 }
 

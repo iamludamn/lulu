@@ -1,8 +1,12 @@
+import PiStackKit
 import SwiftUI
 import UIKit
 
 struct Composer: View {
     @Binding var draft: String
+    let store: BotStore
+    let transcription: VoiceTranscription
+    let onTranscribed: (String, Bool) -> Void
     let busy: Bool
     let placeholder: String
     var focused: FocusState<Bool>.Binding
@@ -65,7 +69,7 @@ struct Composer: View {
             microphone
         }
         .padding(.horizontal, 16)
-        .padding(.bottom, 8)
+        .padding(.bottom, 4)
         .overlay(alignment: .top) {
             if listening {
                 Text(voiceTarget == .text ? "转文字" : voiceTarget == .cancel ? "松手取消" : voiceTarget == .conversation ? "松手进入语音对话" : "松开发送")
@@ -75,7 +79,7 @@ struct Composer: View {
                 .offset(y: -48)
                 .allowsHitTesting(false)
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
-            } else if let notice {
+            } else if let notice = transcription.processing ? "正在识别…" : notice {
                 Text(notice)
                     .font(.caption)
                     .padding(.horizontal, 14).padding(.vertical, 9)
@@ -103,24 +107,30 @@ struct Composer: View {
         .animation(.snappy(duration: 0.2), value: notice)
         .onChange(of: voiceGestureActive) { _, active in
             if !active {
+                if listening { transcription.cancel() }
                 listening = false
                 voiceTarget = .send
             }
+        }
+        .onChange(of: transcription.error) { _, error in
+            if let error { showNotice(error) }
+        }
+        .onDisappear { transcription.cancel() }
+    }
+
+    private func showNotice(_ message: String) {
+        noticeTask?.cancel()
+        notice = message
+        noticeTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            if !Task.isCancelled { notice = nil }
         }
     }
 
     private var microphone: some View {
         ZStack {
-            if listening {
-                TimelineView(.animation(minimumInterval: 0.12)) { context in
-                    let time = context.date.timeIntervalSinceReferenceDate
-                    HStack(spacing: 3) {
-                        ForEach(0..<4) { index in
-                            Capsule().frame(width: 3, height: 6 + 12 * abs(sin(time * 4 + Double(index))))
-                        }
-                    }
-                }
-                .frame(width: 26, height: 26)
+            if transcription.processing {
+                ProgressView().controlSize(.small)
             } else {
                 Image(systemName: "mic.fill").font(.system(size: 19, weight: .medium))
             }
@@ -130,6 +140,7 @@ struct Composer: View {
         .glassEffect(.regular, in: .circle)
         .scaleEffect(listening ? 1.08 : 1)
         .contentShape(Circle())
+        .allowsHitTesting(!transcription.processing)
         .gesture(LongPressGesture(minimumDuration: 0.35).sequenced(before: DragGesture(minimumDistance: 0))
             .updating($voiceGestureActive) { value, active, _ in
                 if case .second(true, _) = value { active = true }
@@ -140,21 +151,27 @@ struct Composer: View {
                     noticeTask?.cancel()
                     notice = nil
                     listening = true
+                    focused.wrappedValue = false
+                    transcription.start(store)
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 }
                 let next = target(for: drag?.translation ?? .zero)
                 if next != voiceTarget {
                     voiceTarget = next
-                    UISelectionFeedbackGenerator().selectionChanged()
+                    if next != .send {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    }
                 }
             }
             .onEnded { value in
                 guard case .second(true, let drag) = value else { return }
                 switch target(for: drag?.translation ?? .zero) {
-                case .send: notice = "语音发送尚未接入"
-                case .text: notice = "语音转文字尚未接入"
-                case .cancel: notice = "已取消"
-                case .conversation: notice = nil; onVoiceConversation()
+                case .send:
+                    transcription.finish { text in onTranscribed(text, true) }
+                case .text:
+                    transcription.finish { text in onTranscribed(text, false) }
+                case .cancel: transcription.cancel(); showNotice("已取消")
+                case .conversation: transcription.cancel(); notice = nil; onVoiceConversation()
                 }
                 listening = false
                 voiceTarget = .send

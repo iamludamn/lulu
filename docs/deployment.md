@@ -31,6 +31,7 @@ npm exec -- wrangler kv namespace create LULU_MCP --config wrangler.local.jsonc
 | Artifacts | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`; optional `S3_REGION`. |
 | Memory recall classifier | Optional `TYPESAFE_API_KEY`; missing credentials fall back to supplying memory context. |
 | Search integrations | `TAVILY_API_KEY`, `EXA_API_KEY` where used. |
+| Hold-to-talk ASR | `VOLC_SPEECH_ASR_API_KEY` with `volc.seedasr.sauc.duration` access. Streams mono 16 kHz PCM16 through the bot socket; cancel discards the recording, release sends only the final transcript, and slide-left places it in the composer. Recordings are limited to 60 seconds. |
 | Voice | `DOUBAO_API_KEY`; optional `DOUBAO_WS_URL` and `DOUBAO_REPORT` control the transport and reporting mode. |
 | Telemetry | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, optional `OTEL_SERVICE_NAME`. See [observability](observability.md). |
 

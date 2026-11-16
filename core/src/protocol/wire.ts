@@ -15,6 +15,8 @@ export type ClientMessage =
   | { type: "widget.make"; requestId: string; origin: string }
   | { type: "widget.check"; requestId: string; id: string; index: number; done: boolean }
   | { type: "layout.order"; requestId: string; ids: string[] }
+  | { type: "asr.start" | "asr.finish" | "asr.cancel"; requestId: string }
+  | { type: "asr.audio"; requestId: string; audio: string }
   | { type: "voice.start"; requestId: string }
   | { type: "voice.audio"; requestId: string; audio: string }
   | { type: "voice.mute"; requestId: string; muted: boolean }

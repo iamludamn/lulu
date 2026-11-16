@@ -23,6 +23,7 @@ import { AssetsDoc, DeliveryDoc, MakeDoc } from "../send/doc.js";
 import { chaseDeliveries } from "../send/delivery.js";
 import { keepWidget, orderCards } from "../send/keep.js";
 import { MAKE_TIMEOUT_MS, makeOutcome, startMake } from "../send/make.js";
+import { AsrSessions } from "../voice/asr.js";
 import { VoiceSession } from "./voice.js";
 import { MAX_CLIENT_FRAME_CHARACTERS, type ClientMessage, type ServerMessage } from "../protocol/wire.js";
 import { parseFrame } from "./frame.js";
@@ -84,9 +85,11 @@ export class BotSession {
   #mcpReconnect: Promise<void> = Promise.resolve();
 
   readonly #voice: VoiceSession;
+  readonly #asr: AsrSessions;
 
   constructor(host: DurableHost) {
     this.#host = host;
+    this.#asr = new AsrSessions(host, (socket, event) => this.#send(socket, { type: "voice", event }));
     this.#voice = new VoiceSession({
       host,
       harness: () => this.#harness,
@@ -309,11 +312,25 @@ export class BotSession {
 
   #detach(socket: Socket): void {
     this.#voice.detach(socket);
+    this.#asr.cancel(socket);
     for (const [requestId, maker] of this.#makers) if (maker.socket === socket) this.#makers.delete(requestId);
   }
 
   async #handle(socket: Socket, command: Command): Promise<void> {
     switch (command.type) {
+      case "asr.start":
+        await this.#asr.start(socket, command.requestId);
+        this.#acknowledge(socket, command.requestId);
+        return;
+      case "asr.audio":
+        this.#asr.audio(socket, command.requestId, command.audio);
+        return;
+      case "asr.finish":
+        this.#asr.finish(socket, command.requestId);
+        return;
+      case "asr.cancel":
+        this.#asr.cancel(socket, command.requestId);
+        return;
       case "voice.start":
         return this.#voice.start(socket, command.requestId);
       case "voice.audio":
