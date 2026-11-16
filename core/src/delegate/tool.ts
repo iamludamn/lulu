@@ -103,7 +103,12 @@ async function send(api: ToolExecutionApi<DelegateDetails>, args: DelegateArgs, 
   if (!run.conversationId) return fail(shortId(run.id) + " has no live conversation; use resume");
   const child = await api.conversation(run.conversationId, context);
   if (!child) return fail(shortId(run.id) + " has no live conversation; use resume");
-  await child.submit({ type: "input", content: message, requestId: "delegate:send:" + run.id + ":" + run.generation + ":" + String(api.taskId) }, context);
+  await api.commit(async (tx) => {
+    await child.submit(tx, { type: "input", content: message, requestId: "delegate:send:" + run.id + ":" + run.generation + ":" + String(api.taskId) });
+    const live = await tx.doc(LiveDoc, api.conversationId);
+    const draft = await tx.doc(RunFamily, run.id, { id: run.id, task: run.task, description: run.description, origin: run.origin, agent: run.agent, cwd: run.cwd });
+    draft.origin = [...new Set([...draft.origin, ...(live.run?.inputs ?? [])])];
+  }, context);
   return ok("sent to " + shortId(run.id), "send", run.id);
 }
 
@@ -121,6 +126,7 @@ async function resume(api: ToolExecutionApi<DelegateDetails>, args: DelegateArgs
     if (draft.resumeTaskId === resumeTaskId) return;
     await reserveDelegate(tx, run.id);
     draft.deadline = Date.now() + REQUEST_TIMEOUT_MS;
+    draft.origin = [...((await tx.doc(LiveDoc, api.conversationId)).run?.inputs ?? [])];
     const generation = draft.generation + 1;
     draft.resumeTaskId = resumeTaskId;
     draft.status = "running";

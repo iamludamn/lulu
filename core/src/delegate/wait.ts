@@ -1,3 +1,4 @@
+import { InjectionBindings } from "../memory/doc.js";
 import { awaitWithContext, withCancel } from "@earendil-works/chord/context";
 import { REQUEST_TIMEOUT_MS } from "./limits.js";
 import { AssistantEntry, defineTask } from "@earendil-works/pi-durable";
@@ -87,17 +88,19 @@ export interface Settling {
 export async function settle<I extends Settling, S extends { phase: string }>(input: I, runtime: TaskRuntime<I, S, WaitResult, object>, context: Context, status: "done" | "failed", text: string, usage: RunUsage | null): Promise<void> {
   const short = shortId(input.runId);
   const parent = await runtime.conversation(input.parentId, context);
-  const notice = parent ? await parent.submit({ type: "input", content: noticeText(short, status, input.task, text, input.token), requestId: input.noticeId }, context) : undefined;
   const endedAt = runtime.now();
   await runtime.commit(async (tx) => {
     if ((await readRunStatus(tx, input.runId)) !== "running") return { status: "terminal", outcome: { status: "aborted", reason: "run no longer active" } };
-    await updateRun(tx, input.runId, status === "done" ? { status, endedAt, output: text, usage, noticeId: notice?.id ?? null } : { status, endedAt, error: text, usage, noticeId: notice?.id ?? null });
+    const notice = parent ? await parent.submit(tx, { type: "input", content: noticeText(short, status, input.task, text, input.token), requestId: input.noticeId }) : undefined;
+    const run = await tx.doc(RunFamily, input.runId, { id: input.runId, task: input.task, description: "", origin: [], agent: "", cwd: "" });
+    if (notice !== undefined) {
+      const bindings = await tx.doc(InjectionBindings);
+      const requestId = [...run.origin].reverse().map((id) => bindings.requests[String(id)]).find((id) => id !== undefined);
+      if (requestId !== undefined) bindings.requests[String(notice)] = requestId;
+    }
+    await updateRun(tx, input.runId, status === "done" ? { status, endedAt, output: text, usage, noticeId: notice ?? null } : { status, endedAt, error: text, usage, noticeId: notice ?? null });
     return { status: "terminal", outcome: { status: "completed", result: { runId: input.runId, status } } };
   }, context);
-  if (notice) {
-    const final = await runtime.snapshot(RunFamily, input.runId, context);
-    if (final?.status !== status) await notice.abort(context).catch(() => undefined);
-  }
 }
 
 export const DelegateWait = defineTask<WaitInput, WaitCheckpoint, WaitResult, object>({

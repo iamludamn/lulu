@@ -52,8 +52,16 @@ export interface UpstreamHandlers {
   close(): void;
 }
 
+export type DecisionQuestions = Record<string, { type: "noul"; instructions: string; criteria: { true: string; false: string } }>;
+
+export interface DecisionModel {
+  readonly name: string;
+  run(state: string, questions: DecisionQuestions, signal: AbortSignal): Promise<unknown>;
+}
+
 export interface DurableHost {
   readonly env: Environment;
+  readonly decisionModel?: DecisionModel;
   readonly telemetry: TelemetryContext;
   readMcpAuth(): Promise<string | undefined>;
   writeMcpAuth(content: string): Promise<void>;

@@ -1,3 +1,5 @@
+import { DREAMING_TASK, DreamingTriggerDoc, reconcileDreaming } from "../memory/dreaming.js";
+import { admitPrompt, prepareInjection } from "../memory/injection.js";
 import { expireRequests } from "./deadlines.js";
 import { RunFamily } from "../delegate/runs.js";
 import { entryRange, HISTORY_PAGE_SIZE, observeView } from "./view.js";
@@ -8,7 +10,7 @@ import type { TelemetrySpan } from "@earendil-works/pi-telemetry";
 import type { McpHost, McpServerConfig } from "../agent/mcp.js";
 import { handleMcpRegistry } from "../agent/mcp-registry.js";
 import { mcpStore } from "../agent/mcp-store.js";
-import { ChatDoc, linkChatMessage, recordChatMessage, trackProgress, trackSnapshot } from "./progress.js";
+import { ChatDoc, trackProgress, trackSnapshot } from "./progress.js";
 import type { EpisodeSource } from "../memory/doc.js";
 import { episodesOf } from "../memory/episodes.js";
 import type { McpStatus, ModelRef, SessionProgress } from "../protocol/contract.js";
@@ -31,15 +33,11 @@ import { MAX_CLIENT_FRAME_CHARACTERS, type ClientMessage, type ServerMessage } f
 import { parseFrame } from "./frame.js";
 import { createChatHarnessOptions, reconnectChatMcp } from "../agent/chat.js";
 import { chatModelConfig, chatModelRef, createChatModels, durableModel } from "../agent/models.js";
-import { memoryTelemetry } from "../memory/telemetry.js";
 import { createMemoryUpdate, recoverMemoryUpdates, MEMORY_UPDATE } from "../memory/schedule.js";
-import { RecallDoc } from "../memory/doc.js";
-import { judgeRecall } from "../memory/recall.js";
 import { createHarnessTelemetry, observeDelegateTiming } from "../telemetry/agent.js";
 import { SOCKET_OPEN, type DurableHost, type Socket } from "../host/types.js";
 
 const MEMORY_SOURCE_ENTRIES = 200;
-const RECALL_ENTRIES = 8;
 const MODEL_KEY = "model";
 const STATE_INTERVAL_MS = 50;
 const PROGRESS_WAIT_MS = 500;
@@ -77,6 +75,7 @@ export class BotSession {
   #dirty = false;
   #alarmUpdate: Promise<void> = Promise.resolve();
   #prompts: Promise<void> = Promise.resolve();
+  #dreaming: Promise<void> = Promise.resolve();
   readonly #handshakes = new WeakMap<Socket, Promise<boolean>>();
     #panel: PanelState = EMPTY_PANEL;
   #assets: AssetItem[] = [];
@@ -112,6 +111,7 @@ export class BotSession {
   }
 
   recover(): void {
+    void this.#reconcileDreaming();
     this.#mcpReady = this.#reconnectMcp().catch((error: unknown) => reportError("MCP reconnect failed", error)).finally(() => {
       if (this.#resumeAfterMcp) {
         this.#resumeAfterMcp = false;
@@ -142,7 +142,8 @@ export class BotSession {
     this.#harness = harness;
     observeDelegateTiming(harness, telemetry.context);
     harness.observeCommits({ advance: (publication) => {
-      if (publication.changes.some((change) => (change.type === "document" && (change.record.kind === CRON_KIND || change.record.kind === SANDBOX_KIND || change.record.kind === RunFamily.definition.kind || change.record.kind === ChatDoc.definition.kind)) || (change.type === "submission") || (change.type === "task" && (change.value.kind === SANDBOX_LIFECYCLE || change.value.kind === MEMORY_UPDATE)))) {
+      if (publication.changes.some((change) => change.type === "document" && (change.record.kind === PanelDoc.definition.kind || change.record.kind === AssetsDoc.definition.kind))) void this.#reconcileDreaming();
+      if (publication.changes.some((change) => (change.type === "document" && (change.record.kind === CRON_KIND || change.record.kind === SANDBOX_KIND || change.record.kind === RunFamily.definition.kind || change.record.kind === ChatDoc.definition.kind || change.record.kind === DreamingTriggerDoc.definition.kind)) || (change.type === "submission") || (change.type === "task" && (change.value.kind === SANDBOX_LIFECYCLE || change.value.kind === MEMORY_UPDATE || change.value.kind === DREAMING_TASK)))) {
         void this.#refreshAlarm().catch((error: unknown) => reportError("Schedule alarm reconciliation failed", error));
       }
     }, end: () => {} });
@@ -221,6 +222,14 @@ export class BotSession {
     await this.#refreshAlarm();
   }
 
+  #reconcileDreaming(): Promise<void> {
+    this.#dreaming = this.#dreaming.then(() => reconcileDreaming(this.#harness, this.#host, chatModelRef(this.#host.env, this.#selected))).catch((error: unknown) => {
+      reportError("Source dreaming reconciliation failed", error);
+      return this.#refreshAlarm();
+    });
+    return this.#dreaming;
+  }
+
   #snapshotFailed(snapshot: string): (error: unknown) => void {
     return (error) => {
       reportError("Snapshot refresh failed", error, { snapshot });
@@ -232,6 +241,7 @@ export class BotSession {
 
   fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
+    if (pathname === "/memory/sources.changed" && request.method === "POST") return this.#reconcileDreaming().then(() => new Response(null, { status: 204 }));
     if (pathname === "/memory/source") return this.#memorySource(request);
     if (pathname === "/schedules") return this.#schedulesResponse();
     if (pathname === "/mcp" || pathname.startsWith("/mcp/")) {
@@ -404,34 +414,12 @@ export class BotSession {
   }
 
   async #submitPrompt(socket: Socket, command: Extract<Command, { type: "prompt.submit" }>): Promise<void> {
-    const content = command.content;
-    await this.#recall(command.requestId, content);
-    await recordChatMessage(this.#harness, this.#view, command.requestId, content);
+    const injection = await prepareInjection(this.#host, this.#harness, command.requestId, command.content, this.#view.value, chatModelRef(this.#host.env, this.#selected));
     if (this.#resumeAfterMcp) await this.#mcpReady;
-    const submission = await this.#root.submit(
-      {
-        type: "input",
-        content,
-        requestId: command.requestId,
-        whenBusy: command.whenBusy,
-      },
-      BACKGROUND_CONTEXT,
-    );
-    await linkChatMessage(this.#harness, command.requestId, submission.id as number);
+    await admitPrompt(this.#harness, this.#root, this.#view.value, command, injection);
     void this.#refreshAlarm().catch((error: unknown) => reportError("Prompt alarm reconciliation failed", error));
     this.#broadcastState();
     this.#acknowledge(socket, command.requestId);
-  }
-
-  async #recall(requestId: string, content: string): Promise<void> {
-    if ((await this.#harness.snapshot(RecallDoc, BACKGROUND_CONTEXT))?.requestId === requestId) return;
-    const turns = [...episodesOf(this.#view.value.entries.slice(-RECALL_ENTRIES)), { role: "user" as const, text: content }];
-    const decision = await judgeRecall(this.#host.env, memoryTelemetry(this.#host.telemetry, this.#host.name, requestId, String(this.#root.id)), turns);
-    await this.#harness.commit(async (tx) => {
-      const recall = await tx.doc(RecallDoc);
-      recall.requestId = requestId;
-      recall.inject = decision.inject;
-    }, BACKGROUND_CONTEXT);
   }
 
   #inPromptOrder<T>(task: () => Promise<T>): Promise<T> {
@@ -603,6 +591,7 @@ export class BotSession {
     const selected = chatModelRef(this.#host.env, this.#selected);
     let outcome: AlarmOutcome;
     try {
+      await this.#reconcileDreaming();
       await expireRequests(this.#harness, this.#root, now);
       await recoverMemoryUpdates(this.#harness, this.#root, createMemoryUpdate(this.#host));
       outcome = await fireSchedules(this.#harness, parentId, selected, now);

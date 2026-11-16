@@ -1,3 +1,4 @@
+import { createDreamingTask } from "../memory/dreaming.js";
 import { defineExtension, section, type Extension, type Registry } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
@@ -12,7 +13,6 @@ import { createSandboxProvider } from "../sandbox/backends.js";
 import { memoryTelemetry } from "../memory/telemetry.js";
 import { createMemoryUpdate } from "../memory/schedule.js";
 import { createMemoryExtension } from "../memory/extension.js";
-import { memoryContext, remoteFiles } from "../memory/client.js";
 import { createArtifactExtension } from "../artifact/extension.js";
 import { artifactConfigured } from "../artifact/s3.js";
 import type { McpHost } from "./mcp.js";
@@ -61,7 +61,11 @@ export const CATALOG: Record<string, (deps: HarnessDeps) => Extension> = {
     }),
   mcp: ({ mcp }) => mcp.extension,
   codemode: ({ host, mcp }) => createCodemodeExtension({ sandbox: host.sandbox, namespaces: mcp.namespaces }),
-  memory: ({ host }) => createMemoryExtension(() => memoryContext(host, host.name), remoteFiles(host, host.name), memoryTelemetry(host.telemetry, host.name), createMemoryUpdate(host)),
+  memory: ({ host }) => createMemoryExtension({
+    telemetry: memoryTelemetry(host.telemetry, host.name),
+    update: createMemoryUpdate(host),
+    dreaming: createDreamingTask(host),
+  }),
   artifact: ({ host }) => createArtifactExtension(artifactConfigured(host.env)),
 };
 

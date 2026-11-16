@@ -1,3 +1,4 @@
+import { DREAMING_TASK, DreamingTriggerDoc } from "../memory/dreaming.js";
 import { DelegateIndex } from "../delegate/runs.js";
 import { REQUEST_TIMEOUT_MS } from "../delegate/limits.js";
 import { requestDeadlineAt } from "../conversation/deadlines.js";
@@ -72,7 +73,7 @@ export async function nextAlarmAt(harness: Harness): Promise<number | undefined>
     if (!SELF_ADVANCING_KINDS.has(task.state.kind)) continue;
     const state = task.record.state;
     const checkpoint = state.status === "running" || state.status === "pending" ? state.checkpoint : undefined;
-    if ((task.record.kind === SANDBOX_LIFECYCLE || task.record.kind === MEMORY_UPDATE) && task.state.kind === "running" && checkpoint && typeof checkpoint === "object" && !Array.isArray(checkpoint) && checkpoint.phase === "wait" && typeof checkpoint.until === "number" && checkpoint.until > now) deadlines.push(checkpoint.until);
+    if ((task.record.kind === SANDBOX_LIFECYCLE || task.record.kind === MEMORY_UPDATE || task.record.kind === DREAMING_TASK) && task.state.kind === "running" && checkpoint && typeof checkpoint === "object" && !Array.isArray(checkpoint) && checkpoint.phase === "wait" && typeof checkpoint.until === "number" && checkpoint.until > now) deadlines.push(checkpoint.until);
     else deadlines.push(now + RECOVERY_ALARM_DELAY_MS);
   }
   const jobs = (await harness.snapshot(CronJobsDoc, BACKGROUND_CONTEXT))?.jobs ?? [];
@@ -82,6 +83,8 @@ export async function nextAlarmAt(harness: Harness): Promise<number | undefined>
     const run = await harness.snapshot(RunFamily, id, BACKGROUND_CONTEXT);
     if (run?.status === "running") deadlines.push(Math.max(now + 1000, run.deadline ?? run.startedAt + REQUEST_TIMEOUT_MS));
   }
+  const dreamingRetry = (await harness.snapshot(DreamingTriggerDoc, BACKGROUND_CONTEXT))?.retryAt;
+  if (dreamingRetry != null) deadlines.push(Math.max(now + 1000, dreamingRetry));
   const requestDeadline = await requestDeadlineAt(harness, now);
   if (requestDeadline !== undefined) deadlines.push(requestDeadline);
   return deadlines.length === 0 ? undefined : Math.min(...deadlines);

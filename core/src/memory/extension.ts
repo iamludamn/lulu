@@ -1,58 +1,49 @@
-import { NOOP_TELEMETRY_CONTEXT, type TelemetryContext } from "@earendil-works/pi-telemetry";
-import { memorySpan } from "./telemetry.js";
-import { getCurrentSystemMessage } from "@earendil-works/pi-ai/utils/transcript";
-import { defineExtension, GenerationTask, hook, section } from "@earendil-works/pi-durable";
 import { contextCoverage } from "./context.js";
-import { RecallDoc } from "./doc.js";
-import type { ReadableFiles } from "./files.js";
-import { createReadTools } from "./tools.js";
+import { injectionContext } from "./injection.js";
+import type { createDreamingTask } from "./dreaming.js";
+import { NOOP_TELEMETRY_CONTEXT, type TelemetryContext } from "@earendil-works/pi-telemetry";
+import { getCurrentSystemMessage } from "@earendil-works/pi-ai/utils/transcript";
+import { defineExtension, GenerationTask, hook, LiveDoc, section } from "@earendil-works/pi-durable";
+import { memorySpan } from "./telemetry.js";
+import { InjectionBindings, InjectionFamily } from "./doc.js";
+import { SandboxDoc } from "../sandbox/doc.js";
+import { RunFamily } from "../delegate/runs.js";
 import type { createMemoryUpdate } from "./schedule.js";
 
-export function createMemoryExtension(context: () => Promise<string>, files: ReadableFiles, telemetry: TelemetryContext = NOOP_TELEMETRY_CONTEXT, update?: ReturnType<typeof createMemoryUpdate>) {
+export type MemoryExtensionOptions = {
+  telemetry?: TelemetryContext;
+  update?: ReturnType<typeof createMemoryUpdate>;
+  dreaming?: ReturnType<typeof createDreamingTask>;
+};
+
+export function createMemoryExtension({ telemetry = NOOP_TELEMETRY_CONTEXT, update, dreaming }: MemoryExtensionOptions) {
   return defineExtension({
     name: "pistack.memory",
-    tools: createReadTools(files, telemetry),
-    tasks: update === undefined ? [] : [update],
-    hooks: [
-      hook(GenerationTask, {
-        beforeRequest: async ({ messages }, api) => {
-          const text = getCurrentSystemMessage(messages)?.sections?.memory ?? undefined;
-          await memorySpan(telemetry, "memory.request", {
-            "lulu.conversation.id": String(api.conversationId),
-            "lulu.task.id": String(api.taskId),
-            "lulu.memory.coverage": contextCoverage(text),
-            "lulu.memory.characters": text?.length ?? 0,
-          }, async () => undefined);
-        },
-      }),
-    ],
-    sections: [
-      section(
-        "memory",
-        async (input, scope) => {
-          return memorySpan(telemetry, "memory.context.delivery", {}, async (span) => {
-            const shown = input.shown.memory;
-            const recall = await input.read.snapshot(RecallDoc, scope);
-            span.setAttributes({ "lulu.memory.request_id": recall?.requestId, "lulu.recall.inject": recall?.inject ?? false });
-            let value = shown;
-            let outcome = shown ? "reused" : "empty";
-            if (recall?.inject === true) {
-              try {
-                const refreshed = await context();
-                value = refreshed || shown;
-                outcome = refreshed ? "refreshed" : shown ? "reused" : "empty";
-              } catch {
-                outcome = "failed";
-                span.setStatus({ status: "error", error: { name: "MemoryError", message: "memory context refresh failed" } });
-              }
-            }
-            const coverage = contextCoverage(value);
-            span.setAttributes({ "lulu.memory.outcome": outcome, "lulu.memory.coverage": coverage, "lulu.memory.available": coverage === "content" || coverage === "catalog", "lulu.memory.characters": value?.length ?? 0 });
-            return value;
-          });
-        },
-        { tag: false },
-      ),
-    ],
+    tasks: [...(update === undefined ? [] : [update]), ...(dreaming === undefined ? [] : [dreaming])],
+    hooks: [hook(GenerationTask, {
+      beforeRequest: async ({ messages }, api) => {
+        const text = getCurrentSystemMessage(messages)?.sections?.memory;
+        await memorySpan(telemetry, "memory.request", { "lulu.conversation.id": String(api.conversationId), "lulu.task.id": String(api.taskId), "lulu.memory.characters": text?.length ?? 0, "lulu.memory.coverage": contextCoverage(text ?? undefined) }, async () => undefined);
+      },
+    })],
+    sections: [section("memory", async (input, context) => memorySpan(telemetry, "memory.context.delivery", { "lulu.memory.available": false, "lulu.memory.coverage": "none" }, async (span) => {
+      try {
+        const binding = await input.read.snapshot(SandboxDoc, input.conversationId, context);
+        const child = binding?.key ? await input.read.snapshot(RunFamily, binding.key, context) : undefined;
+        const inputs = child?.conversationId === input.conversationId ? child.origin : (await input.read.snapshot(LiveDoc, input.conversationId, context))?.run?.inputs ?? [];
+        const bindings = await input.read.snapshot(InjectionBindings, context);
+        const requestId = [...inputs].reverse().map((id) => bindings?.requests[String(id)]).find((id) => id !== undefined);
+        const injection = requestId === undefined ? undefined : await input.read.snapshot(InjectionFamily, requestId, context);
+        span.setAttributes({ "lulu.memory.request_id": requestId, "lulu.memory.outcome": injection?.outcome ?? "empty", "lulu.memory.selected": injection?.selected.length ?? 0 });
+        const text = injection === undefined ? undefined : injectionContext(injection);
+        const coverage = contextCoverage(text);
+        span.setAttributes({ "lulu.memory.available": coverage === "content" || coverage === "catalog", "lulu.memory.coverage": coverage, "lulu.memory.characters": text?.length ?? 0, "lulu.memory.missing": injection?.selected.filter((item) => item.text === null).length ?? 0 });
+        return text;
+      } catch {
+        span.setAttributes({ "lulu.memory.outcome": "failed" });
+        span.setStatus({ status: "error", error: { name: "MemoryError", message: "Request memory selection unavailable" } });
+        return undefined;
+      }
+    }), { tag: false })],
   });
 }

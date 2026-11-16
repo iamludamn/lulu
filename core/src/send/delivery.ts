@@ -1,3 +1,4 @@
+import { InjectionBindings } from "../memory/doc.js";
 import { entryRange } from "../conversation/view.js";
 import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -51,10 +52,14 @@ export async function chaseDeliveries(harness: Harness, root: Conversation, entr
       const delivery = await tx.doc(DeliveryDoc);
       if (!delivery.nudges.some((nudge) => nudge.requestId === owed.requestId)) delivery.nudges.push({ message: owed.message, requestId: owed.requestId, id: null });
     }, BACKGROUND_CONTEXT);
-    const submission = await root.submit({ type: "input", content: NUDGE_PROMPT, requestId: owed.requestId, whenBusy: "followUp" }, BACKGROUND_CONTEXT);
     await harness.commit(async (tx) => {
+      const id = await root.submit(tx, { type: "input", content: NUDGE_PROMPT, requestId: owed.requestId, whenBusy: "followUp" });
+      const bindings = await tx.doc(InjectionBindings);
+      const requestId = bindings.requests[String(owed.message)];
+      if (requestId !== undefined) bindings.requests[String(id)] = requestId;
       const nudge = (await tx.doc(DeliveryDoc)).nudges.find((item) => item.requestId === owed.requestId);
-      if (nudge !== undefined) nudge.id = submission.id as number;
+      if (nudge !== undefined) nudge.id = Number(id);
     }, BACKGROUND_CONTEXT);
+    harness.resume();
   }
 }

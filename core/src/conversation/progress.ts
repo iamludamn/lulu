@@ -1,8 +1,6 @@
 import { RequestDeadlinesDoc } from "./deadlines.js";
-import { REQUEST_TIMEOUT_MS } from "../delegate/limits.js";
 import type { Context } from "@earendil-works/chord/context";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { type CommitPublication, type ConversationView, defineDoc, type Harness, type SubmissionId } from "@earendil-works/pi-durable";
+import { type CommitPublication, defineDoc, type Harness, type SubmissionId } from "@earendil-works/pi-durable";
 import type { MessageProgress, MessageState, SessionProgress, SubtaskProgress } from "../protocol/contract.js";
 import { DelegateIndex, RunFamily, type RunDoc } from "../delegate/runs.js";
 import { owedDeliveries, type Entries } from "../send/delivery.js";
@@ -10,11 +8,6 @@ import { DeliveryDoc, MakeDoc } from "../send/doc.js";
 import { readSubmission, trackSubmissions, type SubmissionReader } from "./submissions.js";
 
 export type ChatMessage = { requestId: string; id: number | null; text: string; after: number | null; at?: number; deadline?: number; error?: string };
-
-export function lastEntryId(view: ConversationView | undefined): number | null {
-  const last = view?.entries.at(-1);
-  return last === undefined ? null : Number(last.id);
-}
 
 export type ChatState = { messages: ChatMessage[] };
 
@@ -25,26 +18,6 @@ export const ChatDoc = defineDoc<ChatState>({
   checkpointWhen: () => false,
   initial: () => ({ messages: [] }),
 });
-
-export async function recordChatMessage(harness: Harness, view: { readonly value: ConversationView }, requestId: string, text: string): Promise<void> {
-  await harness.commit(async (tx) => {
-    const chat = await tx.doc(ChatDoc);
-    if (chat.messages.some((message) => message.requestId === requestId)) return;
-    chat.messages.push({ requestId, id: null, text, after: lastEntryId(view.value), at: Date.now(), deadline: Date.now() + REQUEST_TIMEOUT_MS });
-  }, BACKGROUND_CONTEXT);
-}
-
-export async function linkChatMessage(harness: Harness, requestId: string, id: number): Promise<void> {
-  await harness.commit(async (tx) => {
-    const chat = await tx.doc(ChatDoc);
-    const message = chat.messages.find((entry) => entry.requestId === requestId);
-    if (message !== undefined) {
-      message.id = id;
-      const deadlines = await tx.doc(RequestDeadlinesDoc);
-      if (message.deadline !== undefined && !deadlines.pending.some((item) => item.id === id)) deadlines.pending.push({ id, until: message.deadline });
-    }
-  }, BACKGROUND_CONTEXT);
-}
 
 const LIVE_TASK_STATES = new Set(["pending", "running", "waiting", "completing"]);
 

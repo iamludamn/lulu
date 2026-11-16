@@ -53,10 +53,11 @@ export function createReadTools(files: ReadableFiles, telemetry: TelemetryContex
   const read = defineTool({
     name: "memory_read",
     description: "读取一个长期记忆文件的全文。",
-    parameters: Type.Object({ path: PathParam }),
+    parameters: Type.Object({ path: PathParam, version: Type.Optional(Type.String({ description: "Optional exact published commit version" })) }),
     replay: "safe",
-    execute: async ({ path }) => memorySpan(telemetry, "memory.retrieve", { "gen_ai.tool.name": "memory_read" }, async (span) => {
-      const text = await files.read(path);
+    execute: async ({ path, version }) => memorySpan(telemetry, "memory.retrieve", { "gen_ai.tool.name": "memory_read" }, async (span) => {
+      if (!isMemoryFile(path)) return fail("Invalid memory resource path");
+      const text = await files.read(path, version);
       span.setAttributes({ "lulu.memory.outcome": text === undefined || text === "" ? "empty" : "success", "lulu.memory.characters": Math.min(text?.length ?? 0, OUTPUT_CHARACTERS) });
       return text === undefined ? fail(`${path} 不存在。`) : ok(text);
     }),

@@ -73,6 +73,22 @@ export function createMemoryFiles(storage: DurableObjectStorage): MemoryFiles {
   };
 
   return {
+    published: () => serial(async () => {
+      const version = await head();
+      if (version === undefined) return { version: "empty", files: {} };
+      const paths = await tracked(version);
+      const files: Record<string, string> = {};
+      for (const path of paths) {
+        const text = await committed(version, path);
+        if (text === undefined) throw new Error("Committed memory file is unavailable");
+        files[path] = text;
+      }
+      return { version, files };
+    }),
+    readVersion: (path, version) => serial(() => {
+      if (!/^[a-f0-9]{40}$/.test(version)) return Promise.resolve(undefined);
+      return committed(version, path);
+    }),
     files: () => serial(working),
     read: (path) => serial(() => read(path)),
     write: (path, content) => serial(() => write(path, content)),

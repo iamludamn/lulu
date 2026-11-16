@@ -4,7 +4,7 @@ import { mcpCatalog } from "./mcp-catalog.js";
 
 export const BOT_ID = "main";
 
-export type ApiHost = Pick<DurableHost, "env" | "objects" | "telemetry" | "kv">;
+export type ApiHost = Pick<DurableHost, "env" | "objects" | "telemetry" | "kv"> & { waitUntil(task: Promise<unknown>): void };
 
 const PREFIX = `/api/bots/${BOT_ID}`;
 
@@ -35,7 +35,11 @@ async function spaceState(request: Request, host: ApiHost): Promise<Response> {
   if (!SPACE_ID.test(id)) return json({ error: "Invalid id" }, 400);
   const query = new URLSearchParams({ name: `spaces/${id}/state.json` });
   const artifacts = host.objects.ARTIFACTS.getByName(BOT_ID);
-  if (request.method === "PUT") return artifacts.fetch(`https://artifact/write?${query}`, { method: "PUT", body: await request.text() });
+  if (request.method === "PUT") {
+    const response = await artifacts.fetch(`https://artifact/write?${query}`, { method: "PUT", body: await request.text() });
+    if (response.ok) host.waitUntil(host.objects.BOTS.getByName(BOT_ID).fetch("https://bot/memory/sources.changed", { method: "POST" }).then((result) => { if (!result.ok) throw new Error("Memory source notification rejected"); }).catch(() => console.error("Memory source notification failed")));
+    return response;
+  }
   return artifacts.fetch(`https://artifact/read?${query}`);
 }
 
