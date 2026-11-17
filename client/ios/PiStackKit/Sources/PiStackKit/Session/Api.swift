@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 public enum ApiError: LocalizedError {
     case message(String)
@@ -91,8 +92,21 @@ public struct Api: Sendable {
         return components.url!
     }
 
+    private func artifactCache(_ url: URL) -> URL {
+        let key = SHA256.hash(data: Data(url.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()
+        return URL.cachesDirectory.appending(path: "artifact-\(key)")
+    }
+
+    public func cachedArtifactText(_ id: String, name: String, version: Int?) -> String? {
+        let url = artifactCache(artifactURL(id, name: name, version: version))
+        return (try? Data(contentsOf: url)).map { String(decoding: $0, as: UTF8.self) }
+    }
+
     public func artifactText(_ id: String, name: String, version: Int?) async throws -> String {
-        String(decoding: try await fetch(artifactURL(id, name: name, version: version)), as: UTF8.self)
+        let url = artifactURL(id, name: name, version: version)
+        let data = try await fetch(url)
+        try? data.write(to: artifactCache(url), options: .atomic)
+        return String(decoding: data, as: UTF8.self)
     }
 
     private func fetch(_ url: URL) async throws -> Data {
@@ -130,6 +144,7 @@ public struct Api: Sendable {
     public func schedules(_ id: String) async throws -> [ScheduleEntry] {
         try decode([ScheduleEntry].self, try await call("/api/bots/\(id)/schedules", failure: "加载定时任务失败"))
     }
+
 }
 
 private struct AnyEncodable: Encodable {

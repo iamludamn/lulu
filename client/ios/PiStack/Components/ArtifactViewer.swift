@@ -40,11 +40,12 @@ private struct ArtifactPage: View {
 
     var body: some View {
         let title = space?.title ?? (item.fileName as NSString).deletingPathExtension
+        let cached = { api.cachedArtifactText(botId, name: item.name, version: item.version) }
         let load = { try await api.artifactText(botId, name: item.name, version: item.version) }
         if item.isHTML {
-            HTMLDocument(title: title, load: load, bridge: bridge)
+            HTMLDocument(title: title, cached: cached, load: load, bridge: bridge)
         } else {
-            MarkdownDocument(title: title, load: load)
+            MarkdownDocument(title: title, cached: cached, load: load)
         }
     }
 }

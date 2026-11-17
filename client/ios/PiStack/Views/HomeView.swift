@@ -99,7 +99,7 @@ struct HomeView: View {
             }
         }
         .overlay {
-            if !store.snapshot.hasReceivedState && store.snapshot.link != .offline && store.snapshot.halt == nil {
+            if store.snapshot.view == nil && !store.snapshot.hasReceivedState && store.snapshot.link != .offline && store.snapshot.halt == nil {
                 LoadingScreen()
                     .transition(.opacity)
                     .zIndex(1)
