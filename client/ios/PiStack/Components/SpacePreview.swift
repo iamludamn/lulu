@@ -53,6 +53,9 @@ struct SpacePreview: View {
             failed = true
             return
         }
+        if page == nil, let html = api.cachedArtifactText(botId, name: address.name, version: address.version) {
+            page = Page(html: html, bridge: preview == nil ? SpaceBridge(botId: botId, space: id, refresh: nil, preview: true, api: api) : nil)
+        }
         do {
             let html = try await api.artifactText(botId, name: address.name, version: address.version)
             guard !Task.isCancelled else { return }

@@ -126,9 +126,10 @@ struct AssetPage: View {
         thumbnail = nil
         guard let address else { return }
         if address.isMarkdown {
+            text = api.cachedArtifactText(botId, name: address.name, version: address.version)
             let loaded = try? await api.artifactText(botId, name: address.name, version: address.version)
             guard !Task.isCancelled else { return }
-            text = loaded
+            if let loaded { text = loaded }
             return
         }
         guard let file = try? await api.download(api.artifactURL(botId, address), as: address.fileName), !Task.isCancelled else { return }

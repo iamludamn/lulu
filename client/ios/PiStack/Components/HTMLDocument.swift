@@ -4,11 +4,12 @@ import WebKit
 
 struct HTMLDocument: View {
     let title: String
+    var cached: () -> String? = { nil }
     let load: () async throws -> String
     var bridge: SpaceBridge?
 
     var body: some View {
-        Loaded(load: load) { html in
+        Loaded(cached: cached, load: load) { html in
             HTMLPage(html: html, bridge: bridge)
                 .ignoresSafeArea(edges: .bottom)
         }
@@ -57,12 +58,19 @@ struct HTMLPage: UIViewRepresentable {
         context.coordinator.dark = dark
         let prepared = HTMLTheme.prepared(html, network: bridge != nil)
         bridge?.attach(view, html: prepared)
+        context.coordinator.html = prepared
         view.loadHTMLString(prepared, baseURL: nil)
         return view
     }
 
     func updateUIView(_ view: WKWebView, context: Context) {
         let dark = scheme == .dark
+        let prepared = HTMLTheme.prepared(html, network: bridge != nil)
+        if context.coordinator.html != prepared {
+            context.coordinator.html = prepared
+            bridge?.attach(view, html: prepared)
+            view.loadHTMLString(prepared, baseURL: nil)
+        }
         guard context.coordinator.dark != dark else { return }
         context.coordinator.dark = dark
         view.evaluateJavaScript(HTMLTheme.script(dark: dark))
@@ -70,6 +78,7 @@ struct HTMLPage: UIViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         var dark = false
+        var html = ""
 
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             guard action.navigationType == .linkActivated, let url = action.request.url, url.scheme != "about" else {

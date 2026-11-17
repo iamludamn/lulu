@@ -2,10 +2,11 @@ import SwiftUI
 
 struct MarkdownDocument: View {
     let title: String
+    var cached: () -> String? = { nil }
     let load: () async throws -> String
 
     var body: some View {
-        Loaded(load: load) { text in
+        Loaded(cached: cached, load: load) { text in
             ScrollView {
                 MarkdownText(text: text, selectable: true, document: true)
                     .lineSpacing(5)

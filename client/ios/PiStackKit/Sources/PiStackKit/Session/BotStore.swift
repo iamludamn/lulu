@@ -46,6 +46,7 @@ public final class BotStore {
     private let retryTimeout: Duration
     private var stateTimer: Task<Void, Never>?
     private var saving: Task<Void, Never>?
+    private var latestState: Data?
     private var task: URLSessionWebSocketTask?
     private var timer: Task<Void, Never>?
     private var attempts = 0
@@ -170,10 +171,16 @@ public final class BotStore {
         guard snapshot.view == nil else { return }
         let url = cacheURL
         Task {
-            let cached = await Task.detached { Cache.load(url)?.offline }.value
+            let (cached, state) = await Task.detached {
+                (Cache.load(url)?.offline, try? Data(contentsOf: url.appendingPathExtension("state")))
+            }.value
             guard snapshot.view == nil, let cached else { return }
             snapshot.view = cached.view
             snapshot.progress = cached.progress
+            if !snapshot.hasReceivedState, let state, case .state(_, _, _, let panel, let assets) = try? JSONDecoder().decode(ServerMessage.self, from: state) {
+                snapshot.panel = panel
+                snapshot.assets = assets
+            }
         }
     }
 
@@ -181,11 +188,15 @@ public final class BotStore {
         guard let view = snapshot.view, let progress = snapshot.progress else { return }
         let cache = Cache(view: view, progress: progress)
         let url = cacheURL
+        let state = latestState
         saving?.cancel()
         saving = Task {
             try? await Task.sleep(for: .seconds(1.5))
             guard !Task.isCancelled else { return }
-            await Task.detached { cache.write(to: url) }.value
+            await Task.detached {
+                cache.write(to: url)
+                if let state { try? state.write(to: url.appendingPathExtension("state"), options: .atomic) }
+            }.value
         }
     }
 
@@ -225,6 +236,7 @@ public final class BotStore {
                 }
                 let decoded = await Task.detached { try? JSONDecoder().decode(ServerMessage.self, from: data) }.value
                 guard self.task === task, let decoded else { continue }
+                if case .state = decoded { latestState = data }
                 receive(decoded)
             } catch {
                 closed(task)

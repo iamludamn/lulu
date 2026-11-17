@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct Loaded<Value, Content: View>: View {
+    var cached: () -> Value? = { nil }
     let load: () async throws -> Value
     @ViewBuilder let content: (Value) -> Content
     @State private var value: Value?
@@ -25,6 +26,7 @@ struct Loaded<Value, Content: View>: View {
         }
         .task(id: attempt) {
             error = nil
+            if value == nil { value = cached() }
             do {
                 value = try await load()
             } catch {
