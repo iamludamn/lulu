@@ -8,7 +8,7 @@ Start with the prerequisites and build in [README](../README.md), then follow [d
 
 For web development, run the Worker first, then `npm run dev -w @lulu/client`. Vite proxies `/api`, including WebSockets, to `http://127.0.0.1:8787`. Set `LULU_WORKER_URL` to use another local Worker address.
 
-For desktop development, run `npm run dev --prefix client/desktop` on a supported graphical host. For iOS, open `client/ios/PiStack.xcodeproj` in Xcode, choose your own signing team, and select an iOS 26 simulator or device. Configure your own server in the native clients; their checked-in defaults refer to the maintainer's instance.
+For desktop development, run `npm run dev --prefix client/desktop` on a supported graphical host. For iOS, open `client/ios/PiStack.xcodeproj` in Xcode, choose your own signing team, and select an iOS 26 simulator or device. Configure your own server in the native clients. The desktop client defaults to the local Worker; iOS asks for a server on first launch.
 
 ## Design conventions
 
