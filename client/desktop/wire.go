@@ -14,7 +14,7 @@ const (
 	botName          = "lulu"
 	liveDoc          = "pi.live"
 	sendTool         = "send_to_user"
-	defaultServer    = "https://lulu.jiahaowu0322.workers.dev"
+	defaultServer    = "http://127.0.0.1:8787"
 	closeBotNotFound = 4404
 )
 

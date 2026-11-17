@@ -51,7 +51,7 @@ Wrangler can include process environment variables as local bindings with `CLOUD
 
 The local server defaults to port 8787. Pass `--port` and `--inspector-port` if they are occupied. In another terminal at the repository root, run `npm run dev -w @lulu/client` for the web development server. It proxies API and WebSocket requests to port 8787; set `LULU_WORKER_URL` if needed. Rebuild the core after core changes.
 
-Local Wrangler state lives under `.wrangler/`. Do not commit it or point development commands at remote production storage. Native clients have their own server setting; configure your instance instead of the checked-in default.
+Local Wrangler state lives under `.wrangler/`. Do not commit it or point development commands at remote production storage. Native clients have their own server setting; configure your instance before use. The desktop default is the local Worker, and iOS requires a server address on first launch.
 
 ## Deploy your instance
 
