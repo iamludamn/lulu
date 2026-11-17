@@ -122,6 +122,14 @@ struct ChatView: View {
             }
             .animation(reduceMotion ? nil : .snappy, value: bottomState.showJump)
         }
+        .overlay(alignment: .top) {
+            GeometryReader { proxy in
+                ChatEdgeBackdrop(edge: .top, fade: 48)
+                    .frame(height: max(0, topInset - proxy.frame(in: .global).minY) + 24)
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
         .overlay { gate(rows) }
         .overlay(alignment: .top) {
             if reconnecting {
@@ -141,6 +149,19 @@ struct ChatView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if snapshot.halt == nil {
                 Composer(draft: $draft, store: store, transcription: transcription, onTranscribed: transcribed, busy: busy, placeholder: placeholder, focused: composing, onSend: send, onVoiceConversation: onVoiceConversation)
+                    .background {
+                        GeometryReader { proxy in
+                            ChatEdgeBackdrop(edge: .bottom, fade: 40)
+                                .frame(height: proxy.size.height + proxy.safeAreaInsets.bottom + 40)
+                                .offset(y: -40)
+                        }
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                    }
+                    .background {
+                        ChatInputShield()
+                            .ignoresSafeArea(.container, edges: .bottom)
+                    }
                     .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { metrics.composerTop = $0; updateBottomState() }
             }
         }
