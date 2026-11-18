@@ -13,6 +13,7 @@ interface Env {
   readonly OPENCODE_API_KEY?: string;
   readonly DEEPSEEK_API_KEY?: string;
   readonly LULU_MODEL?: string;
+  readonly LULU_CHAT_TOKEN?: string;
   readonly E2B_API_KEY?: string;
   readonly E2B_TEMPLATE?: string;
   readonly E2B_DOMAIN?: string;

@@ -20,6 +20,7 @@ import (
 type api struct {
 	base   *url.URL
 	client *http.Client
+	token  string
 }
 
 func normalizeServer(text string) (*url.URL, bool) {
@@ -37,8 +38,8 @@ func normalizeServer(text string) (*url.URL, bool) {
 	return &url.URL{Scheme: u.Scheme, Host: u.Host}, true
 }
 
-func newAPI(base *url.URL) *api {
-	return &api{base: base, client: &http.Client{Transport: netproxy.Transport(), Timeout: 30 * time.Second}}
+func newAPI(base *url.URL, token string) *api {
+	return &api{base: base, client: &http.Client{Transport: netproxy.Transport(), Timeout: 30 * time.Second}, token: token}
 }
 
 func (a *api) path(p string, query url.Values) string {

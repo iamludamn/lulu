@@ -61,7 +61,7 @@ func (a *app) connect(base string) {
 		a.store.stop()
 	}
 	url, _ := normalizeServer(base)
-	a.api = newAPI(url)
+	a.api = newAPI(url, a.prefs.chatToken(url.String()))
 	a.store = newStore(a.api, func(fn func()) { a.win.Update(fn) })
 	a.resources = map[string]*resource{}
 	a.chat = chatView{}
@@ -69,10 +69,19 @@ func (a *app) connect(base string) {
 	a.store.start()
 }
 
-func (a *app) applyServer(text string) {
+func (a *app) applyServer(text, token string) {
 	base, ok := normalizeServer(text)
 	if !ok {
 		a.settings.serverErr = "地址无效，例如 https://example.workers.dev"
+		return
+	}
+	token = strings.TrimSpace(token)
+	if token != "" && base.Scheme != "https" {
+		a.settings.serverErr = "使用连接令牌时，服务器地址必须是 HTTPS"
+		return
+	}
+	if err := a.prefs.setChatToken(base.String(), token); err != nil {
+		a.settings.serverErr = "无法保存访问令牌到系统钥匙串"
 		return
 	}
 	a.prefs.setServer(base.String())
