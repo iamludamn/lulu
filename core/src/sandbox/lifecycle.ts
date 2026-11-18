@@ -5,10 +5,11 @@ import { WorkspaceLost, type SandboxProvider, type SandboxRef } from "./provider
 import { toError } from "@earendil-works/pi-durable/env";
 import type { Context } from "@earendil-works/chord/context";
 import { ensureSandboxLifecycle, resetSandbox, waitForSandbox } from "./workspace.js";
+import { accounting, confirmedReady, finishResource, opening, stoppingResource, uncertainResource } from "./accounting.js";
 
 export const SANDBOX_LIFECYCLE = "pistack.sandbox.lifecycle";
 type LifecycleInput = { holder: ConversationId };
-type LifecycleState = { phase: "check" } | { phase: "wait"; until: number; revision: number } | { phase: "apply"; epoch: number; ref: SandboxRef | null; backend: string; profile: string; cwd: string; action: "open" | "renew" | "idle" | "destroy"; requestId: string };
+type LifecycleState = { phase: "check" } | { phase: "wait"; until: number; revision: number } | { phase: "apply"; epoch: number; ref: SandboxRef | null; backend: string; profile: string; cwd: string; action: "open" | "renew" | "idle" | "destroy"; requestId: string; started?: number };
 type LifecycleResult = { released: true };
 export type SandboxLifecycleTask = Task<LifecycleInput, LifecycleState, LifecycleResult, object>;
 
@@ -58,8 +59,11 @@ export function createSandboxLifecycle(provider: SandboxProvider | undefined): S
           else if (now < binding.lastUsedAt + SANDBOX_IDLE_MS) return wait(binding.lastUsedAt + SANDBOX_IDLE_MS);
           else action = "idle";
           const requestId = binding.operation?.requestId ?? `sandbox:${action}:${task.input.holder}:${binding.epoch}:${binding.lastUsedAt}`;
+          const key = `${task.input.holder}:${binding.epoch}`;
+          if (action === "open" && binding.backend) opening(await accounting(tx, now), key, binding.backend, now, !binding.ref || binding.idleSince !== null);
+          if (action === "idle" || action === "destroy") stoppingResource(await accounting(tx, now), key);
           binding.operation = { taskId: runtime.taskId, kind: action, requestId };
-          return { status: "running", checkpoint: { phase: "apply", epoch: binding.epoch, ref: binding.ref, backend: binding.backend!, profile: binding.profile, cwd: binding.cwd, action, requestId } };
+          return { status: "running", checkpoint: { phase: "apply", epoch: binding.epoch, ref: binding.ref, backend: binding.backend!, profile: binding.profile, cwd: binding.cwd, action, requestId, started: now } };
         }, context);
       },
       wait: async (task, runtime, context) => {
@@ -78,6 +82,8 @@ export function createSandboxLifecycle(provider: SandboxProvider | undefined): S
       },
       apply: async (task, runtime, context) => {
         const checkpoint = task.state.checkpoint;
+        const started = runtime.now();
+        const key = `${task.input.holder}:${checkpoint.epoch}`;
         let ref = checkpoint.ref;
         let cwd = checkpoint.cwd;
         let failure: unknown;
@@ -104,9 +110,12 @@ export function createSandboxLifecycle(provider: SandboxProvider | undefined): S
           const binding = await tx.doc(SandboxDoc, task.input.holder);
           if (binding.epoch !== checkpoint.epoch || binding.operation?.taskId !== runtime.taskId || binding.operation.requestId !== checkpoint.requestId) return { status: "running", checkpoint: { phase: "check" } };
           const now = runtime.now();
+          const journal = await accounting(tx, now);
           if (failure !== undefined) {
+            uncertainResource(journal, key, checkpoint.backend, checkpoint.started ?? started);
             binding.error = toError(failure).message;
             if (failure instanceof WorkspaceLost) {
+              finishResource(journal, key, now);
               binding.lost = true;
               binding.operation = null;
               return { status: "running", checkpoint: { phase: "check" } };
@@ -116,6 +125,8 @@ export function createSandboxLifecycle(provider: SandboxProvider | undefined): S
           }
           binding.operation = null;
           binding.error = null;
+          if (ref && (checkpoint.action === "open" || checkpoint.action === "renew")) confirmedReady(journal, key, ref, started, now);
+          if (checkpoint.action === "idle" || checkpoint.action === "destroy") finishResource(journal, key, now);
           if (checkpoint.action === "destroy") resetSandbox(binding);
           else {
             binding.ref = ref;

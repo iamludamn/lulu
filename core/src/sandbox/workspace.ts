@@ -5,6 +5,7 @@ import { toError } from "@earendil-works/pi-durable/env";
 import { SandboxDoc, SANDBOX_LEASE_MS, type SandboxBinding } from "./doc.js";
 import type { SandboxLifecycleTask } from "./lifecycle.js";
 import { WorkspaceLost, type SandboxProvider, type SandboxRequest } from "./provider.js";
+import { accounting, associateSandbox, confirmedReady, finishResource, opening, uncertainResource } from "./accounting.js";
 
 export async function waitForSandbox(read: DocumentObserver, holder: ConversationId, ready: (binding: Readonly<SandboxBinding> | null) => boolean, context: Context): Promise<void> {
   const watch = await read.watchDoc(SandboxDoc, holder, context);
@@ -48,7 +49,7 @@ export async function releaseSandbox(api: ToolExecutionApi, holder: Conversation
   }, withoutAbortSignal(context));
 }
 
-type Reservation = { wait: TaskId } | { lost: true } | { error: string } | { epoch: number; request: SandboxRequest };
+type Reservation = { wait: TaskId } | { lost: true } | { error: string } | { epoch: number; started: number; request: SandboxRequest };
 
 export async function openSandbox(api: ToolExecutionApi, provider: SandboxProvider, lifecycle: SandboxLifecycleTask, context: Context) {
   const own = await api.snapshot(SandboxDoc, api.conversationId, context);
@@ -67,12 +68,14 @@ export async function openSandbox(api: ToolExecutionApi, provider: SandboxProvid
       }
       const key = `${holder}:${binding.epoch}`;
       const requestId = `sandbox:open:${key}`;
+      const journal = await accounting(tx, now);
+      opening(journal, key, binding.backend, now, binding.ref === null || binding.idleSince !== null);
       binding.operation = { taskId: api.taskId, kind: "open", requestId };
       binding.users = [...binding.users.filter((user) => user.taskId !== api.taskId), { taskId: api.taskId, expiresAt: now + SANDBOX_LEASE_MS }];
       binding.lastUsedAt = now;
       binding.revision += 1;
       const ref = binding.ref === null ? null : JSON.parse(JSON.stringify(binding.ref)) as SandboxBinding["ref"];
-      return { epoch: binding.epoch, request: { backend: binding.backend, profile: binding.profile, key, requestId, ref, cwd: binding.cwd } };
+      return { epoch: binding.epoch, started: now, request: { backend: binding.backend, profile: binding.profile, key, requestId, ref, cwd: binding.cwd } };
     }, context);
     if ("wait" in reserved) {
       await waitForSandbox(api, holder, (binding) => !binding?.operation || binding.operation.taskId !== reserved.wait || binding.error !== null, context);
@@ -86,6 +89,10 @@ export async function openSandbox(api: ToolExecutionApi, provider: SandboxProvid
       await api.commit(async (tx) => {
         const binding = await tx.doc(SandboxDoc, holder);
         if (binding.epoch !== reserved.epoch || binding.operation?.taskId !== api.taskId) throw new Error("Sandbox binding changed while opening the workspace");
+        const now = Date.now();
+        const journal = await accounting(tx, now);
+        const resource = confirmedReady(journal, reserved.request.key, opened.ref, reserved.started, now);
+        await associateSandbox(tx, journal, api.taskId, api.conversationId, resource, now);
         binding.ref = opened.ref;
         binding.cwd = opened.cwd;
         binding.idleSince = null;
@@ -98,6 +105,10 @@ export async function openSandbox(api: ToolExecutionApi, provider: SandboxProvid
       await api.commit(async (tx) => {
         const binding = await tx.doc(SandboxDoc, holder);
         if (binding.epoch !== reserved.epoch || binding.operation?.taskId !== api.taskId) return;
+        const now = Date.now();
+        const journal = await accounting(tx, now);
+        uncertainResource(journal, reserved.request.key, reserved.request.backend, reserved.started);
+        if (error instanceof WorkspaceLost) finishResource(journal, reserved.request.key, now);
         binding.error = toError(error).message;
         if (error instanceof WorkspaceLost) binding.lost = true;
         if (reserved.request.ref !== null || error instanceof WorkspaceLost) binding.operation = null;

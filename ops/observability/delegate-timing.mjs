@@ -50,8 +50,8 @@ if (summary && values.tempo && (runStart < start || runEnd > end)) warnings.push
 function timing(name) {
   const operations = matched.filter((span) => span.name === name);
   const intervals = operations.map((span) => [
-    Math.max(Number(BigInt(span.startTimeUnixNano) / 1000000n), runStart ?? -Infinity),
-    Math.min(Number(BigInt(span.endTimeUnixNano) / 1000000n), runEnd ?? Infinity),
+    Math.max(Number(BigInt(span.startTimeUnixNano) / 1000000n), runStart ?? -Infinity, start),
+    Math.min(Number(BigInt(span.endTimeUnixNano) / 1000000n), runEnd ?? Infinity, end),
   ]).filter(([a, b]) => b >= a).sort((a, b) => a[0] - b[0]);
   let unionMs = 0;
   let accumulatedMs = 0;
@@ -69,7 +69,7 @@ function timing(name) {
 }
 const sandbox = timing('sandbox.use');
 const commands = timing('sandbox.exec');
-const agentRunMs = summary ? Math.max(0, runEnd - runStart) : null;
+const agentRunMs = summary ? Math.max(0, Math.min(runEnd, end) - Math.max(runStart, start)) : null;
 console.log(JSON.stringify({
   runId: values.run,
   status: summary?.['lulu.delegate.status'] ?? null,
