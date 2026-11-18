@@ -20,6 +20,7 @@ interface Env {
   readonly E2B_SANDBOX_URL?: string;
   readonly SANDBOX_BACKEND?: string;
   readonly SANDBOX_BACKENDS?: string;
+  readonly CONTEXT_DEV_API_KEY?: string;
   readonly PERPLEXITY_API_KEY?: string;
   readonly LULU_SPACE_WEBHOOK_ORIGIN?: string;
   readonly LULU_SPACE_WEBHOOK_SECRET?: string;

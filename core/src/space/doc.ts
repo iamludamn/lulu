@@ -6,8 +6,8 @@ import type { SpaceStatus } from "../protocol/panel.js";
 export type Mode = SpaceStatus["mode"];
 
 export type Finding = { id: string; url: string; title: string; detail?: string; observedAt: number; truncated?: boolean };
-export type MonitorRun = { id: string; at: number; startedAt: number; error: string | null; findings: Finding[]; cost: number };
-export type Delivery = { id: string; monitor: string; paused: boolean; run?: MonitorRun };
+export type MonitorRun = { id: string; at: number; startedAt: number; error: string | null; findings: Finding[]; cost: number; credits?: number };
+export type Delivery = { id: string; monitor: string; paused: boolean; run?: MonitorRun; reconcile?: boolean };
 export type Refresh = {
   generation: string;
   mode: Mode;
@@ -17,6 +17,7 @@ export type Refresh = {
   nextAt: number | null;
   retryAt: number | null;
   monitor: string | null;
+  sealedWebhookSecret?: string;
   providerState: "create" | "active" | "pause" | "paused" | "resume" | "delete" | "deleted" | null;
   startedAt: number;
   checkedAt: number | null;
@@ -35,6 +36,7 @@ export type Refresh = {
   changes: string[];
   reconciledAt?: number;
   cost: number;
+  credits?: number;
 };
 
 export const SpaceRefreshIndex = defineDoc<{ ids: string[]; devices?: string[]; pushRetryAt?: number | null }>({
@@ -83,6 +85,7 @@ export function spaceStatus(entry: Refresh): SpaceStatus {
     notify: entry.notify,
     phase: entry.providerState,
     cost: entry.cost,
+    ...(entry.credits !== undefined && { credits: entry.credits }),
   };
 }
 

@@ -1,9 +1,10 @@
+import { contextDelivery, contextLifecycle, contextMonitor, contextRuns, createContextMonitor, findContextMonitor, openSecret, sealSecret } from "./context-monitor.js";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { Harness, Tx } from "@earendil-works/pi-durable";
 import { nextDailyAfter } from "../cron/schedule.js";
 import type { Environment } from "../host/types.js";
 import { PanelDoc } from "../panel/doc.js";
-import { SPACE_ID } from "../protocol/panel.js";
+import { SPACE_ID, type MonitorProvider } from "../protocol/panel.js";
 import { SpaceRefreshDoc, SpaceRefreshIndex, spaceEntries, spaceEntry, spaceStatus, stopTracking, type Mode, type MonitorRun, type Refresh } from "./doc.js";
 import { bytes, DAY, deliveryOf, json, modeOf, monitorId, monitorRun, provider, pull, record, signed, signingSecret, SourceError } from "./source.js";
 
@@ -27,6 +28,7 @@ function initial(mode: Mode, old: Refresh | undefined, notify: boolean, now: num
     monitor: null, providerState: mode.kind === "subscription" ? "create" : null, startedAt: now,
     checkedAt: null, updatedAt: old?.updatedAt ?? null, error: null,
     version: old?.version ?? 0, seen: old?.seen ?? 0, delivered: old?.delivered ?? 0,
+    ...(old?.credits !== undefined && { credits: old.credits }),
     findings: old?.findings ?? [], ...(old?.value !== undefined && { value: old.value }), inbox: [], runs: [], changes: old?.changes ?? [], cost: old?.cost ?? 0,
   };
 }
@@ -35,6 +37,7 @@ function addRun(entry: Refresh, run: MonitorRun): boolean {
   if (entry.runs.includes(run.id)) return false;
   entry.runs = [...entry.runs, run.id].slice(-LEDGER);
   entry.cost += run.cost;
+  if (run.credits !== undefined) entry.credits = (entry.credits ?? 0) + run.credits;
   if (entry.checkedAt === null || run.at >= entry.checkedAt) {
     entry.checkedAt = run.at;
     entry.error = run.error;
@@ -69,14 +72,23 @@ async function apply(
   }, context);
 }
 
-function credentials(env: Environment): { key: string; root: string; callback: URL } {
-  const key = env.PERPLEXITY_API_KEY;
+const providerOf = (mode: Mode): MonitorProvider => mode.kind === "subscription" ? mode.provider ?? "perplexity" : "perplexity";
+
+function providers(env: Environment): MonitorProvider[] {
+  return (["context", "perplexity"] as const).filter((name) => {
+    try { credentials(env, name); return true; }
+    catch { return false; }
+  });
+}
+
+function credentials(env: Environment, name: MonitorProvider): { key: string; root: string; callback: URL } {
+  const key = name === "context" ? env.CONTEXT_DEV_API_KEY : env.PERPLEXITY_API_KEY;
   const root = env.LULU_SPACE_WEBHOOK_SECRET;
   const origin = env.LULU_SPACE_WEBHOOK_ORIGIN;
   const callback = origin ? URL.parse(origin) : null;
   const privateOrigin = env.LULU_SPACE_PRIVATE_ORIGIN ? URL.parse(env.LULU_SPACE_PRIVATE_ORIGIN) : null;
   if (privateOrigin?.protocol !== "https:" || privateOrigin.origin === callback?.origin || !key || !root || root.length < 32 || callback?.protocol !== "https:" || callback.username || callback.password ||
-    callback.pathname !== "/" || callback.search || callback.hash) throw new SourceError(503, "Perplexity subscriptions are not configured");
+    callback.pathname !== "/" || callback.search || callback.hash) throw new SourceError(503, "The selected monitor provider is not configured");
   return { key, root, callback };
 }
 
@@ -87,11 +99,13 @@ export async function receiveSpaceEvent(harness: Harness, request: Request, env:
   if (!SPACE_ID.test(id)) throw new SourceError(404, "Unknown subscription");
   const entry = await spaceEntry(harness, id);
   if (entry?.mode.kind !== "subscription" || entry.generation !== generation) throw new SourceError(404, "Unknown subscription");
+  const name = searchParams.get("provider") === "context" ? "context" : "perplexity";
+  if (providerOf(entry.mode) !== name) throw new SourceError(404, "Unknown subscription");
+  const { root } = credentials(env, name);
   const data = await bytes(request);
-  const deliveryId = await signed(request, data, await signingSecret(credentials(env).root, generation));
-  if (!deliveryId) throw new SourceError(401, "Invalid signature");
-  const delivery = deliveryOf(json(data), deliveryId);
+  const delivery = name === "context" ? await contextEvent(request, data, entry, root) : await perplexityEvent(request, data, root, generation);
   if (delivery === null) return new Response(null, { status: 204 });
+  const deliveryId = delivery.id;
   await harness.commit(async (tx) => {
     const { entry: current } = await tx.doc(SpaceRefreshDoc, id, null);
     if (!current || current.generation !== generation || !current.enabled || !(await kept(tx, id))) return;
@@ -104,6 +118,17 @@ export async function receiveSpaceEvent(harness: Harness, request: Request, env:
   return new Response(null, { status: 204 });
 }
 
+async function contextEvent(request: Request, data: Uint8Array, entry: Refresh, root: string) {
+  if (!entry.sealedWebhookSecret) throw new SourceError(503, "Subscription is still being connected");
+  return contextDelivery(request, data, await openSecret(entry.sealedWebhookSecret, root, entry.generation));
+}
+
+async function perplexityEvent(request: Request, data: Uint8Array, root: string, generation: string) {
+  const deliveryId = await signed(request, data, await signingSecret(root, generation));
+  if (!deliveryId) throw new SourceError(401, "Invalid signature");
+  return deliveryOf(json(data), deliveryId);
+}
+
 export async function handleSpaceRefresh(harness: Harness, request: Request, env: Environment): Promise<Response> {
   const url = new URL(request.url);
   const id = url.searchParams.get("id") ?? "";
@@ -113,18 +138,27 @@ export async function handleSpaceRefresh(harness: Harness, request: Request, env
     if (!panel || !has(panel.widgets, id) || !visible(panel.widgets[id]?.body.kind)) throw new SourceError(404, "Space not kept");
     const entry = await spaceEntry(harness, id);
     const data = entry === undefined ? null : { version: entry.version, updatedAt: entry.updatedAt, findings: entry.findings, value: entry.value === undefined ? undefined : json(new TextEncoder().encode(entry.value)) };
-    return Response.json({ status: entry === undefined ? null : spaceStatus(entry), data }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json({ status: entry === undefined ? null : spaceStatus(entry), data, providers: providers(env) }, { headers: { "Cache-Control": "no-store" } });
   }
   const input = record(json(await bytes(request)));
   if (request.method === "POST" && input.action === "configure") {
     const mode = modeOf(input.mode, env.LULU_SPACE_PULL_HOSTS);
-    if (mode.kind === "subscription") credentials(env);
     await harness.commit(async (tx) => {
       if (!(await kept(tx, id))) throw new SourceError(404, "Space not kept");
       const doc = await tx.doc(SpaceRefreshDoc, id, null);
       const previous = doc.entry;
+      if (mode.kind === "subscription") {
+        const name = mode.provider ?? (previous?.mode.kind === "subscription" && previous.providerState !== "deleted" ? providerOf(previous.mode) : env.PERPLEXITY_API_KEY ? "perplexity" : "context");
+        credentials(env, name);
+        if (name === "context" && mode.source.kind === "page" && mode.source.urls.length !== 1) {
+          throw new SourceError(400, "Context.dev monitors one page per subscription");
+        }
+        if (name === "context" || previous?.mode.kind !== "subscription" || previous.mode.provider !== undefined) mode.provider = name;
+        else delete mode.provider;
+      }
       if (previous?.mode.kind === "subscription" && previous.providerState !== "deleted") {
-        if (JSON.stringify(previous.mode) !== JSON.stringify(mode)) throw new SourceError(409, "Remove the current subscription before changing its source");
+        if (mode.kind !== "subscription" || providerOf(previous.mode) !== providerOf(mode) ||
+            JSON.stringify(previous.mode.source) !== JSON.stringify(mode.source) || previous.mode.goal !== mode.goal) throw new SourceError(409, "Remove the current subscription before changing its source");
         previous.notify = input.notify === true;
         return;
       }
@@ -228,11 +262,24 @@ async function runPull(harness: Harness, id: string, entry: Refresh, env: Enviro
   });
 }
 
-async function createMonitor(entry: Refresh, id: string, env: Environment): Promise<string> {
+async function connectMonitor(entry: Refresh, id: string, env: Environment): Promise<{ id: string; sealed?: string }> {
   if (entry.mode.kind !== "subscription") throw new Error("No monitor source");
-  const { key, root, callback } = credentials(env);
-  callback.pathname = "/api/webhooks/perplexity";
+  const name = providerOf(entry.mode);
+  const { key, root, callback } = credentials(env, name);
+  callback.pathname = "/api/webhooks/" + name;
   callback.search = new URLSearchParams({ space: id, generation: entry.generation }).toString();
+  if (name === "context") {
+    const tag = "lulu-" + entry.generation;
+    const existing = await findContextMonitor(key, tag);
+    if (entry.providerState !== "create") return { id: existing };
+    const source = entry.mode.source;
+    const instructions = entry.mode.goal;
+    const target = source.kind === "search" ? { type: "search" as const, query: source.query, instructions } :
+      { type: "page" as const, url: source.urls[0], instructions };
+    const result = existing ? await contextMonitor(key, existing) : await createContextMonitor(key, tag, `Lulu Space ${id}`, callback.href, target);
+    if (!result.id || !result.secret) throw new SourceError(502, "Context.dev did not return the monitor ID and signing secret");
+    return { id: result.id, sealed: await sealSecret(result.secret, root, entry.generation) };
+  }
   const match = async (): Promise<string> => {
     let after = "";
     for (;;) {
@@ -247,7 +294,7 @@ async function createMonitor(entry: Refresh, id: string, env: Environment): Prom
     }
   };
   const existing = await match();
-  if (existing || entry.providerState !== "create") return existing;
+  if (existing || entry.providerState !== "create") return { id: existing };
   const source = entry.mode.source;
   const targets = source.kind === "search" ? [{ type: "search", query: source.query, max_results: 5 }] :
     source.urls.map((url) => ({ type: "page", url }));
@@ -258,7 +305,7 @@ async function createMonitor(entry: Refresh, id: string, env: Environment): Prom
   }, entry.generation);
   const monitor = monitorId(result.id);
   if (!monitor) throw new Error("Monitor returned an invalid ID");
-  return monitor;
+  return { id: monitor };
 }
 
 async function drain(harness: Harness, id: string, entry: Refresh): Promise<void> {
@@ -269,7 +316,7 @@ async function drain(harness: Harness, id: string, entry: Refresh): Promise<void
     for (const item of current.inbox) {
       if (!ids.has(item.id) || item.monitor !== current.monitor) continue;
       if (item.run && item.run.startedAt >= Math.floor(current.startedAt / 1000) * 1000) updated = addRun(current, item.run) || updated;
-      paused ||= item.paused;
+      paused ||= item.paused || item.reconcile === true;
     }
     current.inbox = current.inbox.filter((item) => !ids.has(item.id));
     current.events = [...(current.events ?? []), ...ids].slice(-LEDGER);
@@ -282,33 +329,32 @@ async function drain(harness: Harness, id: string, entry: Refresh): Promise<void
   });
 }
 
-async function reconcile(harness: Harness, id: string, entry: Refresh, key: string): Promise<void> {
+async function reconcile(harness: Harness, id: string, entry: Refresh, key: string, name: MonitorProvider): Promise<void> {
+  if (!entry.monitor) throw new SourceError(503, "Monitor is not connected");
   const until = Date.now();
-  const since = Math.max(entry.startedAt, (entry.reconciledAt ?? entry.startedAt) - DAY);
-  const info = await provider(key, "/" + entry.monitor);
-  let after = "";
-  let updated = false;
+  const since = Math.max(Math.floor(entry.startedAt / 1000) * 1000, (entry.reconciledAt ?? entry.startedAt) - DAY);
+  const info = name === "context" ? await contextMonitor(key, entry.monitor) : await provider(key, "/" + entry.monitor);
+  let cursor = "";
   for (;;) {
-    const runs = await provider(key, `/${entry.monitor}/runs?` + new URLSearchParams({ limit: "5", ...(after && { after }) }));
-    const items: unknown[] = Array.isArray(runs.data) ? runs.data : [];
-    const parsed = items.map(monitorRun).filter((run) => run !== undefined);
+    const page = name === "context" ? await contextRuns(key, entry.monitor, cursor, since) : await perplexityRuns(key, entry.monitor, cursor, since);
     if (!(await apply(harness, id, entry, (current) => {
-      for (const run of parsed) if (run.at >= since && run.startedAt >= Math.floor(current.startedAt / 1000) * 1000) updated = addRun(current, run) || updated;
-      if (updated) {
-        changed(current, until);
-        updated = false;
+      let updated = false;
+      for (const run of page.runs) {
+        if (run.at >= since && run.startedAt >= Math.floor(current.startedAt / 1000) * 1000) updated = addRun(current, run) || updated;
       }
+      if (updated) changed(current, until);
     }))) return;
-    const last = record(items.at(-1)).id;
-    after = typeof last === "string" ? last : "";
-    if (!runs.has_more || !/^run_[a-zA-Z0-9_]+$/.test(after) || parsed.some((run) => run.at < since)) break;
+    if (!page.cursor) break;
+    if (page.cursor === cursor) throw new SourceError(502, "Monitor API repeated a pagination cursor");
+    cursor = page.cursor;
   }
   await apply(harness, id, entry, (current) => {
     current.reconciledAt = until;
     if (info.status === "paused") {
       current.enabled = false;
       current.providerState = "paused";
-      current.error = `Monitor paused (${typeof info.pause_reason === "string" ? info.pause_reason : "provider"})`;
+      const reason = record(info).pause_reason ?? record(info).error;
+      current.error = `Monitor paused (${typeof reason === "string" && reason ? reason : "provider"})`;
       current.retryAt = null;
     } else {
       current.retryAt = current.inbox.length > 0 ? Date.now() : until + DAY;
@@ -316,15 +362,26 @@ async function reconcile(harness: Harness, id: string, entry: Refresh, key: stri
   });
 }
 
+async function perplexityRuns(key: string, monitor: string, after: string, since: number) {
+  const page = await provider(key, `/${monitor}/runs?` + new URLSearchParams({ limit: "5", ...(after && { after }) }));
+  const items: unknown[] = Array.isArray(page.data) ? page.data : [];
+  const runs = items.map(monitorRun).filter((run) => run !== undefined);
+  const last = record(items.at(-1)).id;
+  const cursor = page.has_more && typeof last === "string" && /^run_[a-zA-Z0-9_]+$/.test(last) && !runs.some((run) => run.at < since) ? last : "";
+  return { runs, cursor };
+}
+
 async function runMonitor(harness: Harness, id: string, entry: Refresh, env: Environment): Promise<void> {
-  const { key } = credentials(env);
+  const name = providerOf(entry.mode);
+  const { key, root } = credentials(env, name);
   const state = entry.providerState;
   if (state === "active" && entry.inbox.length > 0) return drain(harness, id, entry);
-  if (state === "active") return reconcile(harness, id, entry, key);
+  if (state === "active") return reconcile(harness, id, entry, key, name);
   if (state === "create") {
-    const monitor = await createMonitor(entry, id, env);
+    const monitor = await connectMonitor(entry, id, env);
     await apply(harness, id, entry, (current) => {
-      current.monitor = monitor;
+      current.monitor = monitor.id;
+      if (monitor.sealed) current.sealedWebhookSecret = monitor.sealed;
       current.providerState = "active";
       current.retryAt = Date.now();
       current.error = null;
@@ -333,13 +390,20 @@ async function runMonitor(harness: Harness, id: string, entry: Refresh, env: Env
   }
   if (state !== "pause" && state !== "resume" && state !== "delete") return;
   const startedAt = Date.now();
-  const monitor = entry.monitor ?? await createMonitor(entry, id, env);
+  const monitor = entry.monitor ?? (await connectMonitor(entry, id, env)).id;
+  let sealed: string | undefined;
+  if (name === "context" && state === "resume" && monitor && !entry.sealedWebhookSecret) {
+    const result = await contextMonitor(key, monitor);
+    if (!result.secret) throw new SourceError(502, "Context.dev did not return the signing secret");
+    sealed = await sealSecret(result.secret, root, entry.generation);
+  }
   if (monitor) {
     try {
-      await provider(key, state === "delete" ? `/${monitor}` : `/${monitor}/${state}`, state === "delete" ? "DELETE" : "POST");
+      if (name === "context") await contextLifecycle(key, monitor, state);
+      else await provider(key, state === "delete" ? `/${monitor}` : `/${monitor}/${state}`, state === "delete" ? "DELETE" : "POST");
     } catch (error) {
       if (!(error instanceof SourceError && (error.status === 404 && state === "delete" || error.status === 409 && state !== "delete" &&
-        record(await provider(key, `/${monitor}`)).status === (state === "pause" ? "paused" : "active")))) throw error;
+        (name === "context" ? await contextMonitor(key, monitor) : await provider(key, `/${monitor}`)).status === (state === "pause" ? "paused" : "active")))) throw error;
     }
   }
   await apply(harness, id, entry, async (current, tx) => {
@@ -347,8 +411,14 @@ async function runMonitor(harness: Harness, id: string, entry: Refresh, env: Env
     current.providerState = state === "delete" ? "deleted" : state === "pause" ? "paused" : "active";
     current.retryAt = state === "resume" ? Date.now() : null;
     current.error = null;
-    if (state === "resume") current.startedAt = startedAt;
-    if (state === "delete") await stopTracking(tx, id);
+    if (state === "resume") {
+      current.startedAt = startedAt;
+      if (sealed) current.sealedWebhookSecret = sealed;
+    }
+    if (state === "delete") {
+      delete current.sealedWebhookSecret;
+      await stopTracking(tx, id);
+    }
   });
 }
 
