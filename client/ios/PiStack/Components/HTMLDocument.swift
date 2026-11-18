@@ -7,6 +7,9 @@ struct HTMLDocument: View {
     var cached: () -> String? = { nil }
     let load: () async throws -> String
     var bridge: SpaceBridge?
+    var updates: SpaceUpdate?
+    var showUpdatesInitially = false
+    @State private var showUpdates = false
 
     var body: some View {
         Loaded(cached: cached, load: load) { html in
@@ -21,10 +24,41 @@ struct HTMLDocument: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if bridge?.preview == false, updates?.hasNewContent == true {
+                Button { showUpdates = true } label: {
+                    Label("有新内容", systemImage: "circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(8)
+                        .background(.thinMaterial)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .sheet(isPresented: $showUpdates) {
+            if let bridge { SpaceUpdatesView(bridge: bridge, status: updates) }
+        }
+        .task(id: showUpdatesInitially) {
+            if showUpdatesInitially { showUpdates = true }
+        }
+        .onChange(of: updates, initial: true) { previous, current in
+            if previous?.updatedAt != current?.updatedAt || previous?.version != current?.version ||
+                previous?.mode != current?.mode {
+                bridge?.invalidateManagedData(current)
+            }
+        }
         .toolbar {
             if let bridge {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("刷新", systemImage: "arrow.clockwise") { Task { await bridge.refresh() } }
+                    if bridge.preview || updates == nil || updates?.mode.kind == "manual" {
+                        Button("刷新", systemImage: "arrow.clockwise") { Task { await bridge.refresh() } }
+                    }
+                    if !bridge.preview {
+                        Button(updates?.hasNewContent == true ? "有新内容" : "更新", systemImage: updates?.hasNewContent == true ? "bell.badge" : "clock") {
+                            showUpdates = true
+                        }
+                    }
                 }
             }
         }
@@ -81,11 +115,11 @@ struct HTMLPage: UIViewRepresentable {
         var html = ""
 
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            guard action.navigationType == .linkActivated, let url = action.request.url, url.scheme != "about" else {
+            guard let url = action.request.url, url.scheme != "about", action.targetFrame?.isMainFrame != false else {
                 decisionHandler(.allow)
                 return
             }
-            UIApplication.shared.open(url)
+            if action.navigationType == .linkActivated, ["https", "http"].contains(url.scheme ?? "") { UIApplication.shared.open(url) }
             decisionHandler(.cancel)
         }
     }

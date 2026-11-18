@@ -14,6 +14,7 @@ struct SpaceOpening: Hashable {
     let id: String
     let title: String
     var preview = false
+    var showUpdates = false
     var refresh: SpaceRefresh = .manual
 }
 
@@ -28,14 +29,16 @@ private struct ArtifactPage: View {
     let space: SpaceOpening?
     let botId: String
     let api: Api
+    let updates: SpaceUpdate?
     @State private var bridge: SpaceBridge?
 
-    init(item: ArtifactAddress, space: SpaceOpening?, botId: String, api: Api) {
+    init(item: ArtifactAddress, space: SpaceOpening?, botId: String, api: Api, updates: SpaceUpdate?) {
         self.item = item
         self.space = space
         self.botId = botId
         self.api = api
-        _bridge = State(initialValue: space.map { SpaceBridge(botId: botId, space: $0.id, refresh: $0.refresh, preview: $0.preview, api: api) })
+        self.updates = updates
+        _bridge = State(initialValue: space.map { SpaceBridge(botId: botId, space: $0.id, refresh: $0.refresh, preview: $0.preview, api: api, updates: updates) })
     }
 
     var body: some View {
@@ -43,7 +46,7 @@ private struct ArtifactPage: View {
         let cached = { api.cachedArtifactText(botId, name: item.name, version: item.version) }
         let load = { try await api.artifactText(botId, name: item.name, version: item.version) }
         if item.isHTML {
-            HTMLDocument(title: title, cached: cached, load: load, bridge: bridge)
+            HTMLDocument(title: title, cached: cached, load: load, bridge: bridge, updates: updates, showUpdatesInitially: space?.showUpdates == true)
         } else {
             MarkdownDocument(title: title, cached: cached, load: load)
         }
@@ -67,6 +70,7 @@ private struct ArtifactSource: ViewModifier {
 private struct ArtifactViewer: ViewModifier {
     let botId: String
     let api: Api
+    let panel: PanelState
     @Namespace private var zoom
     @State private var opening: ArtifactOpening?
     @State private var preview: URL?
@@ -78,8 +82,14 @@ private struct ArtifactViewer: ViewModifier {
             .environment(\.openSpace) { opening = ArtifactOpening(address: $0, source: $2, space: $1) }
             .environment(\.artifactZoom, zoom)
             .navigationDestination(item: $opening) { item in
-                ArtifactPage(item: item.address, space: item.space, botId: botId, api: api)
+                ArtifactPage(item: item.address, space: item.space, botId: botId, api: api, updates: item.space.flatMap { panel.spaceUpdates[$0.id] })
                     .navigationTransition(.zoom(sourceID: item.source, in: zoom))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openSpaceUpdate)) { note in
+                if let id = note.object as? String { openUpdates(id) }
+            }
+            .onChange(of: panel.order, initial: true) { _, _ in
+                if let id = SpacePush.shared.pendingSpace { openUpdates(id) }
             }
             .quickLookPreview($preview)
             .alert("无法打开", isPresented: Binding(get: { problem != nil }, set: { if !$0 { problem = nil } })) {
@@ -87,6 +97,13 @@ private struct ArtifactViewer: ViewModifier {
             } message: {
                 Text(problem ?? "")
             }
+    }
+
+    private func openUpdates(_ id: String) {
+        guard let widget = panel.widgets[id], case .space(let src, _, let refresh, _) = widget.body,
+              let address = ArtifactAddress(src) else { return }
+        opening = ArtifactOpening(address: address, source: "space-\(id)", space: SpaceOpening(id: id, title: widget.title, showUpdates: true, refresh: refresh))
+        SpacePush.shared.opened(id)
     }
 
     private func open(_ item: ArtifactAddress, source: String) {
@@ -105,8 +122,8 @@ private struct ArtifactViewer: ViewModifier {
 }
 
 extension View {
-    func artifactViewer(botId: String, api: Api) -> some View {
-        modifier(ArtifactViewer(botId: botId, api: api))
+    func artifactViewer(botId: String, api: Api, panel: PanelState) -> some View {
+        modifier(ArtifactViewer(botId: botId, api: api, panel: panel))
     }
 
     func artifactSource(_ id: String, radius: CGFloat) -> some View {

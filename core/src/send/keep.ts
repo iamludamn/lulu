@@ -1,3 +1,4 @@
+import { archiveRefresh } from "../space/doc.js";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Harness } from "@earendil-works/pi-durable";
 import { PanelDoc } from "../panel/doc.js";
@@ -29,6 +30,7 @@ export async function keepWidget(harness: Harness, entries: Entries, origin: str
       const dropped = panel.order.filter((id) => panel.widgets[id]?.origin === origin);
       panel.order = panel.order.filter((id) => !dropped.includes(id));
       for (const id of dropped) {
+        if (["space", "web"].includes(panel.widgets[id]?.body.kind ?? "")) await archiveRefresh(tx, id);
         rememberSpace(panel, panel.widgets[id]);
         delete panel.widgets[id];
       }

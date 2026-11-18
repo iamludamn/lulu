@@ -38,9 +38,10 @@
     },
   ],
   "assets": {
+    "binding": "ASSETS",
     "directory": "../../client/web/dist",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"],
+    "run_worker_first": ["/*"],
   },
   "vars": {
     "OTEL_EXPORTER_OTLP_ENDPOINT": "https://otel.ludamn.xyz",
