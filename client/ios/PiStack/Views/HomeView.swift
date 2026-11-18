@@ -38,10 +38,10 @@ struct HomeView: View {
     @FocusState private var composing: Bool
     @Environment(\.scenePhase) private var phase
 
-    init(bot: BotSummary, api: Api) {
+    init(bot: BotSummary, api: Api, token: String) {
         self.bot = bot
         self.api = api
-        _store = State(initialValue: BotStore(botId: bot.id, server: api.base))
+        _store = State(initialValue: BotStore(botId: bot.id, server: api.base, token: token))
         _draft = State(initialValue: ChatDraft(botId: bot.id))
     }
 

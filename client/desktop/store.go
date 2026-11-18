@@ -200,7 +200,11 @@ func (s *store) run(ctx context.Context) {
 
 func (s *store) session(ctx context.Context, client *http.Client) (bool, websocket.StatusCode) {
 	dialCtx, cancelDial := context.WithTimeout(ctx, 15*time.Second)
-	conn, _, err := websocket.Dial(dialCtx, s.api.socketURL(), &websocket.DialOptions{HTTPClient: client})
+	headers := make(http.Header)
+	if s.api.base.Scheme == "https" && s.api.token != "" {
+		headers.Set("Authorization", "Bearer "+s.api.token)
+	}
+	conn, _, err := websocket.Dial(dialCtx, s.api.socketURL(), &websocket.DialOptions{HTTPClient: client, HTTPHeader: headers})
 	cancelDial()
 	if err != nil {
 		s.post(func() {

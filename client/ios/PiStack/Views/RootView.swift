@@ -8,10 +8,10 @@ struct RootView: View {
             if let api = model.api {
                 if let bot = model.bot {
                     NavigationStack {
-                        HomeView(bot: bot, api: api)
+                        HomeView(bot: bot, api: api, token: model.chatToken(for: api.base))
                             .toolbarVisibility(.hidden, for: .navigationBar)
                     }
-                    .id(bot.id)
+                    .id(model.connectionRevision)
                 } else if let error = model.error {
                     ContentUnavailableView {
                         Label("连接失败", systemImage: "wifi.exclamationmark")
@@ -31,7 +31,7 @@ struct RootView: View {
                 NavigationStack { SettingsView() }
             }
         }
-        .task(id: model.server) { await model.resolve() }
+        .task(id: model.connectionRevision) { await model.resolve() }
     }
 }
 

@@ -41,6 +41,7 @@ public final class BotStore {
     private var historyRequest: String?
 
     private let socketURL: URL
+    private let token: String
     private let cacheURL: URL
     private let stateTimeout: Duration
     private let retryTimeout: Duration
@@ -52,12 +53,13 @@ public final class BotStore {
     private var attempts = 0
     private var running = false
 
-    public convenience init(botId: String, server: URL) {
-        self.init(botId: botId, server: server, stateTimeout: .seconds(15), retryTimeout: .seconds(30))
+    public convenience init(botId: String, server: URL, token: String = "") {
+        self.init(botId: botId, server: server, token: token, stateTimeout: .seconds(15), retryTimeout: .seconds(30))
     }
 
-    init(botId: String, server: URL, stateTimeout: Duration, retryTimeout: Duration = .seconds(30)) {
+    init(botId: String, server: URL, token: String = "", stateTimeout: Duration, retryTimeout: Duration = .seconds(30)) {
         socketURL = Api.socketURL(base: server, botId: botId)
+        self.token = token
         cacheURL = Cache.url(for: socketURL)
         self.stateTimeout = stateTimeout
         self.retryTimeout = retryTimeout
@@ -203,7 +205,11 @@ public final class BotStore {
     private func connect() {
         loadingHistory = false
         historyRequest = nil
-        let task = URLSession.shared.webSocketTask(with: socketURL)
+        var request = URLRequest(url: socketURL)
+        if socketURL.scheme == "wss", !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        let task = URLSession.shared.webSocketTask(with: request)
         task.maximumMessageSize = 64 << 20
         self.task = task
         task.resume()
