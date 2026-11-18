@@ -1,5 +1,6 @@
 import PiStackKit
 import SwiftUI
+import UIKit
 
 struct ChatView: View {
     let bot: BotSummary
@@ -70,6 +71,7 @@ struct ChatView: View {
                 .padding(.top, 8)
                 .frame(maxWidth: 720)
                 .frame(maxWidth: .infinity)
+                .background { ChatScrollAnchor(metrics: metrics) }
             }
             .defaultScrollAnchor(.bottom)
             .defaultScrollAnchor(bottomState.pinned ? .bottom : nil, for: .sizeChanges)
@@ -107,6 +109,7 @@ struct ChatView: View {
             .overlay(alignment: .bottom) {
                 if bottomState.showJump {
                     Button {
+                        metrics.scrollView?.stopScrollingAndZooming()
                         followLatest()
                         if reduceMotion { proxy.scrollTo(Self.bottom, anchor: .bottom) }
                         else { withAnimation { proxy.scrollTo(Self.bottom, anchor: .bottom) } }
@@ -277,9 +280,33 @@ private struct Extent: Equatable {
 }
 
 private final class Metrics {
+    weak var scrollAnchor: UIView?
+
+    var scrollView: UIScrollView? {
+        var ancestor = scrollAnchor?.superview
+        while let view = ancestor {
+            if let scrollView = view as? UIScrollView { return scrollView }
+            ancestor = view.superview
+        }
+        return nil
+    }
+
     var extent = Extent()
     var reveal: Extent?
     var bottomMarkerY: CGFloat = 0
     var composerTop: CGFloat = 0
     var dragging = false
+}
+
+private struct ChatScrollAnchor: UIViewRepresentable {
+    let metrics: Metrics
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        metrics.scrollAnchor = view
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {}
 }
