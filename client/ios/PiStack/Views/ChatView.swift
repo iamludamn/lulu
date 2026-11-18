@@ -104,10 +104,10 @@ struct ChatView: View {
                     proxy.scrollTo(Self.bottom, anchor: .bottom)
                 }
             }
-            .overlay(alignment: .bottomTrailing) {
+            .overlay(alignment: .bottom) {
                 if bottomState.showJump {
                     Button {
-                        bottomState.pinned = true
+                        followLatest()
                         if reduceMotion { proxy.scrollTo(Self.bottom, anchor: .bottom) }
                         else { withAnimation { proxy.scrollTo(Self.bottom, anchor: .bottom) } }
                     } label: {
@@ -117,8 +117,7 @@ struct ChatView: View {
                     .buttonBorderShape(.circle)
                     .accessibilityLabel("回到最新消息")
                     .accessibilityHint("滚动到对话最底部")
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 40)
+                    .padding(.bottom, 12)
                     .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
                 }
             }
@@ -195,6 +194,11 @@ struct ChatView: View {
         .sensoryFeedback(.success, trigger: busy) { old, new in old && !new }
     }
 
+    private func followLatest() {
+        metrics.dragging = false
+        bottomState.followLatest()
+    }
+
     private func updateBottomState() {
         let distance = metrics.composerTop > 0 ? max(0, metrics.bottomMarkerY - metrics.composerTop + 8) : 0
         var next = bottomState
@@ -211,7 +215,7 @@ struct ChatView: View {
 
     private func transcribed(_ text: String, sendImmediately: Bool) {
         if sendImmediately {
-            bottomState.pinned = true
+            followLatest()
             sent += 1
             store.submit(text)
         } else {
@@ -223,7 +227,7 @@ struct ChatView: View {
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        bottomState.pinned = true
+        followLatest()
         sent += 1
         store.submit(text)
         draft = ""

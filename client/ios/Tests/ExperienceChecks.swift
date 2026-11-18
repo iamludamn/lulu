@@ -9,19 +9,24 @@ import Foundation
 
     private static func checkScrollThresholds() {
         var state = ChatBottomState()
-        state.update(distance: 25, userScrolling: false)
+        state.update(distance: 160, userScrolling: false)
         precondition(state.pinned && !state.showJump)
-        state.update(distance: 25, userScrolling: true)
-        precondition(!state.pinned && !state.showJump)
-        state.update(distance: 120, userScrolling: true)
-        precondition(!state.showJump)
-        state.update(distance: 121, userScrolling: true)
+        state.update(distance: 64, userScrolling: true)
+        precondition(state.pinned && !state.showJump)
+        state.update(distance: 65, userScrolling: true)
         precondition(!state.pinned && state.showJump)
-        state.pinned = true
-        state.update(distance: 121, userScrolling: false)
-        precondition(state.pinned && state.showJump)
+        state.update(distance: 40, userScrolling: true)
+        precondition(!state.pinned && state.showJump)
+        state.update(distance: 12, userScrolling: false)
+        precondition(!state.pinned && state.showJump)
         state.update(distance: 24, userScrolling: true)
         precondition(state.pinned && !state.showJump)
+        state.update(distance: 160, userScrolling: true)
+        state.followLatest()
+        state.update(distance: 100, userScrolling: false)
+        precondition(state.pinned && !state.showJump)
+        state.update(distance: 100, userScrolling: true)
+        precondition(!state.pinned && state.showJump)
     }
 
     @MainActor private static func checkDraftPersistence() async throws {

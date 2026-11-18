@@ -1,12 +1,20 @@
 import Foundation
 
 struct ChatBottomState: Equatable {
-    var pinned = true
-    var showJump = false
+    private(set) var pinned = true
+
+    var showJump: Bool { !pinned }
 
     mutating func update(distance: CGFloat, userScrolling: Bool) {
-        let nearBottom = distance <= 24
-        if userScrolling || nearBottom { pinned = nearBottom }
-        showJump = distance > 120
+        guard userScrolling else { return }
+        if distance > 64 {
+            pinned = false
+        } else if distance <= 24 {
+            pinned = true
+        }
+    }
+
+    mutating func followLatest() {
+        pinned = true
     }
 }
