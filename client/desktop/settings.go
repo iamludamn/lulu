@@ -70,6 +70,7 @@ type settingsState struct {
 	fileText  loader[string]
 	schedules loader[[]scheduleEntry]
 	server    string
+	chatToken string
 	serverErr string
 	md        markdown.Options
 }
@@ -89,6 +90,7 @@ func (a *app) goSettings(page settingsPage) {
 		load(a, &s.schedules, func(ctx context.Context, api *api) ([]scheduleEntry, error) { return api.schedules(ctx) })
 	case settingsServer:
 		s.server = a.api.base.String()
+		s.chatToken = a.api.token
 		s.serverErr = ""
 	}
 }
@@ -472,8 +474,14 @@ func (a *app) serverPage(c *ui.Context, p palette) {
 		in := ui.TextInput(c, &s.server).Placeholder("https://example.workers.dev").Label("服务器地址")
 		if in.Changed() {
 			s.serverErr = ""
+			if base, ok := normalizeServer(s.server); !ok || base.String() != a.api.base.String() {
+				if s.chatToken == a.api.token {
+					s.chatToken = ""
+				}
+			}
 		}
-		submit := in.Submitted()
+		token := ui.TextInput(c, &s.chatToken).Label("连接令牌").Placeholder("连接令牌").Password()
+		submit := in.Submitted() || token.Submitted()
 		if s.serverErr != "" {
 			ui.Text(c, s.serverErr).FontSize(12).TextColor(p.bad)
 		}
@@ -481,9 +489,10 @@ func (a *app) serverPage(c *ui.Context, p palette) {
 			ui.Spacer(c)
 			if ghostButton(c, p, "", "恢复默认", 36).Clicked() {
 				s.server = defaultServer
+				s.chatToken = a.prefs.chatToken(defaultServer)
 			}
 			if fillButton(c, p, "保存并重连", 36).Clicked() || submit {
-				a.applyServer(s.server)
+				a.applyServer(s.server, s.chatToken)
 			}
 		})
 	})

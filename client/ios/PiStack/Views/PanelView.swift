@@ -3,6 +3,7 @@ import SwiftUI
 
 struct PanelView: View {
     let widgets: [PanelWidget]
+    let spaceUpdates: [String: SpaceUpdate]
     let botName: String
     let botId: String
     let api: Api
@@ -24,7 +25,7 @@ struct PanelView: View {
                     ForEach(rows(widgets), id: \.first!.id) { row in
                         HStack(alignment: .top, spacing: 12) {
                             ForEach(row) { widget in
-                                WidgetCard(widget: widget, botId: botId, api: api, onPrompt: onPrompt, onDrop: onDrop, onCheck: { onCheck(widget.id, $0, $1) })
+                                WidgetCard(widget: widget, update: spaceUpdates[widget.id], botId: botId, api: api, onPrompt: onPrompt, onDrop: onDrop, onCheck: { onCheck(widget.id, $0, $1) })
                             }
                             if row.count == 1 && row[0].size == .s && !row[0].isSpace { Color.clear.frame(maxWidth: .infinity) }
                         }
@@ -149,6 +150,7 @@ struct WidgetFace: View {
 
 private struct WidgetCard: View {
     let widget: PanelWidget
+    let update: SpaceUpdate?
     let botId: String
     let api: Api
     let onPrompt: (String) -> Void
@@ -159,9 +161,18 @@ private struct WidgetCard: View {
     var body: some View {
         let card = WidgetFace(widget: widget, botId: botId, api: api, interactive: true, onPrompt: onPrompt, onCheck: onCheck)
             .frosted(26)
+            .overlay(alignment: .topTrailing) {
+                if update?.hasNewContent == true {
+                    Circle().fill(Color.accentColor)
+                        .frame(width: 10, height: 10)
+                        .padding(15)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
             .contentShape(.rect(cornerRadius: 26, style: .continuous))
             .contextMenu {
-                if widget.isSpace {
+                if widget.isSpace && (update == nil || update?.mode.kind == "manual") {
                     Button("刷新", systemImage: "arrow.clockwise") { NotificationCenter.default.post(name: .spaceRefresh, object: widget.id) }
                 }
                 if let origin = widget.origin {
@@ -170,6 +181,8 @@ private struct WidgetCard: View {
             }
         if let (page, refresh) = space {
             Button { openSpace(page, SpaceOpening(id: widget.id, title: widget.title, refresh: refresh), "space-\(widget.id)") } label: { card }
+                .accessibilityLabel(widget.title)
+                .accessibilityValue(update?.hasNewContent == true ? "有新内容" : "")
                 .buttonStyle(.plain)
                 .artifactSource("space-\(widget.id)", radius: 26)
         } else {

@@ -1,3 +1,4 @@
+import { archiveRefresh } from "../space/doc.js";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { defineTool, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord/context";
@@ -52,6 +53,7 @@ async function remove(api: ToolExecutionApi<PanelDetails>, args: PanelArgs, cont
   await api.commit(async (tx) => {
     const draft = await tx.doc(PanelDoc);
     draft.order = draft.order.filter((entry) => entry !== id);
+    if (draft.widgets[id]?.body.kind === "space") await archiveRefresh(tx, id);
     rememberSpace(draft, draft.widgets[id]);
     delete draft.widgets[id];
   }, context);
@@ -72,7 +74,7 @@ export const createPanelTool = (): ToolRegistration =>
       "update replaces a kept non-space widget by id. Space revisions must instead be offered with send_to_user using the same id and a new artifact ref for the user to swipe and accept; it cannot add new widgets, which only the user does by swiping a card you offer with send_to_user.",
       "Pick the body kind by the shape of the information: stat for one number or status, gauge for progress toward a limit, chart for a trend, list for items or a checklist, timeline for dated events, note for a short summary, media for one image, actions for ready-made requests, weather for a city's forecast (only the city; the client fetches and refreshes it by itself once a day, so never update it), space for a small app page the user keeps, one that fetches live data or remembers what the user does (an .html artifact; read the `space` skill of the artifact server first). Never change a widget into or out of a space: its saved state would be lost.",
       "Offer a panel widget only for information the user will check repeatedly and that changes over time, such as a balance, a progress figure, a countdown, a schedule or a short checklist. Do not offer one for a one-off answer; that is a chat reply or a document. Offer at most one widget per conversation topic, and prefer updating a kept widget over offering a new one.",
-      "To keep a widget fresh, create a daily schedule whose prompt updates it by id. Weather and space widgets refresh themselves, so never schedule updates for them.",
+      "To keep a widget fresh, create a daily schedule whose prompt updates it by id. Weather and Space have their own refresh settings. Never create chat schedules to refresh their data.",
     ].join(" "),
     parameters: PanelParams,
     replay: "safe",

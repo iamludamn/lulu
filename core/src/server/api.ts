@@ -43,22 +43,28 @@ async function spaceState(request: Request, host: ApiHost): Promise<Response> {
   return artifacts.fetch(`https://artifact/read?${query}`);
 }
 
-function botSocket(request: Request, host: ApiHost): Promise<Response> {
-  if (request.method !== "GET") return Promise.resolve(json({ error: "Method not allowed" }, 405, { Allow: "GET" }));
+async function botSocket(request: Request, host: ApiHost): Promise<Response> {
+  if (request.method !== "GET") return json({ error: "Method not allowed" }, 405, { Allow: "GET" });
+  if (!await authorizeSocket(request, host.env.LULU_CHAT_TOKEN)) return unauthorized();
   if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
-    return Promise.resolve(json({ error: "WebSocket upgrade required" }, 426, { Upgrade: "websocket" }));
+    return json({ error: "WebSocket upgrade required" }, 426, { Upgrade: "websocket" });
   }
   return host.objects.BOTS.getByName(BOT_ID).fetch(request);
 }
 
 const MCP_CALLBACK = "/mcp/callback";
+const bearer = (request: Request): string => /^Bearer\s+(.+)$/i.exec(request.headers.get("Authorization") ?? "")?.[1] ?? "";
+const unauthorized = (): Response => json({ error: "Unauthorized" }, 401, { "WWW-Authenticate": "Bearer" });
+
+export async function authorizeSocket(request: Request, token: string | undefined): Promise<boolean> {
+  return token === undefined || (token !== "" && await tokensMatch(bearer(request), token));
+}
 
 async function mcpRegistry(request: Request, host: ApiHost, rest: string): Promise<Response> {
   if (rest !== MCP_CALLBACK) {
     const token = host.env.MCP_ADMIN_TOKEN;
     if (token === undefined || token === "") return json({ error: "MCP_ADMIN_TOKEN is not configured" }, 503);
-    const given = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "";
-    if (!(await tokensMatch(given, token))) return json({ error: "Unauthorized" }, 401, { "WWW-Authenticate": "Bearer" });
+    if (!await tokensMatch(bearer(request), token)) return unauthorized();
   }
   if (rest === "/mcp/catalog") return mcpCatalog(request, host.kv, host.telemetry);
   const url = new URL(request.url);
@@ -93,10 +99,42 @@ export function handleApi(request: Request, host: ApiHost): Promise<Response> {
   );
 }
 
+export function spaceIngress(url: URL, env: DurableHost["env"]): "private" | "webhook" | "none" {
+  const publicOrigin = env.LULU_SPACE_WEBHOOK_ORIGIN ? URL.parse(env.LULU_SPACE_WEBHOOK_ORIGIN)?.origin : undefined;
+  if (publicOrigin === undefined) return "private";
+  const privateOrigin = env.LULU_SPACE_PRIVATE_ORIGIN ? URL.parse(env.LULU_SPACE_PRIVATE_ORIGIN)?.origin : undefined;
+  if (url.origin === publicOrigin) return "webhook";
+  return url.origin === privateOrigin ? "private" : "none";
+}
+
 async function route(request: Request, host: ApiHost, pathname: string): Promise<Response> {
+  const ingress = spaceIngress(new URL(request.url), host.env);
+  if (ingress === "none") return notFound();
+  const webhook = pathname === "/api/webhooks/perplexity" || pathname === "/api/webhooks/context";
+  if (webhook || ingress === "webhook") {
+    if (!webhook || ingress !== "webhook") return notFound();
+    if (request.method !== "POST") return json({ error: "Method not allowed" }, 405, { Allow: "POST" });
+    const query = new URL(request.url).searchParams;
+    query.set("provider", pathname.endsWith("/context") ? "context" : "perplexity");
+    return host.objects.BOTS.getByName(BOT_ID).fetch("https://bot/space-webhook?" + query, {
+      method: "POST", headers: request.headers, body: request.body,
+    });
+  }
   if (!pathname.startsWith(`${PREFIX}/`)) return notFound();
   const rest = pathname.slice(PREFIX.length).replace(/\/+$/, "");
   if (rest === "/ws") return botSocket(request, host);
+  if (rest === "/observability/api/v1/query") {
+    if (request.method !== "GET") return json({ error: "Method not allowed" }, 405, { Allow: "GET" });
+    const token = host.env.LULU_OBSERVABILITY_TOKEN;
+    if (!token || !await tokensMatch(bearer(request), token)) return unauthorized();
+    return host.objects.BOTS.getByName(BOT_ID).fetch("https://bot/sandbox-window" + new URL(request.url).search);
+  }
+  if (rest === "/spaces/refresh" || rest === "/spaces/device") {
+    const action = rest === "/spaces/refresh" ? "space-refresh" : "space-device";
+    return host.objects.BOTS.getByName(BOT_ID).fetch("https://bot/" + action + new URL(request.url).search, {
+      method: request.method, headers: request.headers, body: request.body,
+    });
+  }
   if (rest === "/spaces/state") {
     if (request.method !== "GET" && request.method !== "PUT") return json({ error: "Method not allowed" }, 405, { Allow: "GET, PUT" });
     return spaceState(request, host);

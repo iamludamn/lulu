@@ -2,13 +2,18 @@ const arg = process.argv[2] ?? "24h";
 const since = /^\d+h$/.test(arg) ? Date.now() - Number(arg.slice(0, -1)) * 3600e3 : Date.parse(arg);
 if (Number.isNaN(since)) throw new Error("usage: lulu-state.mjs <24h | ISO time>");
 const url = process.env.LULU_WS ?? "wss://lulu.jiahaowu0322.workers.dev/api/bots/main/ws";
+const token = process.env.LULU_CHAT_TOKEN;
 
 const state = await new Promise((resolve, reject) => {
-  const ws = new WebSocket(url);
+  const headers = token && new URL(url).protocol === "wss:" ? { Authorization: `Bearer ${token}` } : {};
+  const ws = new WebSocket(url, { headers });
   let last;
   const timer = setTimeout(() => (last ? resolve(last) : reject(new Error("no state with entries within 90s"))), 90_000);
   ws.onopen = () => ws.send(JSON.stringify({ type: "hello" }));
-  ws.onerror = () => reject(new Error("websocket error"));
+  ws.onerror = () => {
+    clearTimeout(timer);
+    reject(new Error("websocket error"));
+  };
   ws.onmessage = (event) => {
     const message = JSON.parse(event.data);
     if (message.type !== "state") return;

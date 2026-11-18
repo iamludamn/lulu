@@ -96,6 +96,23 @@ export const WidgetInput = Type.Object({
 export type WidgetInput = Static<typeof WidgetInput>;
 export type Widget = WidgetInput & { updatedAt: number; origin?: string };
 export type SpaceReceipt = { id: string; version: number; action: "add" | "update"; refresh?: "manual" | "open" | "daily" };
-export type PanelState = { order: string[]; widgets: Record<string, Widget>; spaceReceipts?: Record<string, SpaceReceipt> };
+export type MonitorProvider = "context" | "perplexity";
+export type SpaceStatus = {
+  mode: { kind: "manual" } | { kind: "scheduled"; url: string; time: string; tz: string } | {
+    kind: "subscription"; provider?: MonitorProvider; goal: string; source: { kind: "search"; query: string } | { kind: "page"; urls: string[] };
+  };
+  enabled: boolean;
+  checkedAt: number | null;
+  updatedAt: number | null;
+  nextAt: number | null;
+  error: string | null;
+  version: number;
+  seen: number;
+  notify: boolean;
+  phase: string | null;
+  cost: number;
+  credits?: number;
+};
+export type PanelState = { order: string[]; widgets: Record<string, Widget>; spaceReceipts?: Record<string, SpaceReceipt>; spaceUpdates?: Record<string, SpaceStatus> };
 
 export const EMPTY_PANEL: PanelState = { order: [], widgets: {} };

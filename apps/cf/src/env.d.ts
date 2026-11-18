@@ -1,4 +1,5 @@
 interface Env {
+  readonly ASSETS: Fetcher;
   readonly AI?: Ai;
   readonly BOTS: DurableObjectNamespace<import("./objects.js").Bot>;
   readonly MEMORY: DurableObjectNamespace<import("./objects.js").Memory>;
@@ -12,6 +13,8 @@ interface Env {
   readonly OPENCODE_API_KEY?: string;
   readonly DEEPSEEK_API_KEY?: string;
   readonly LULU_MODEL?: string;
+  readonly LULU_CHAT_TOKEN?: string;
+  readonly LULU_OBSERVABILITY_TOKEN?: string;
   readonly E2B_API_KEY?: string;
   readonly E2B_TEMPLATE?: string;
   readonly E2B_DOMAIN?: string;
@@ -19,6 +22,17 @@ interface Env {
   readonly E2B_SANDBOX_URL?: string;
   readonly SANDBOX_BACKEND?: string;
   readonly SANDBOX_BACKENDS?: string;
+  readonly CONTEXT_DEV_API_KEY?: string;
+  readonly PERPLEXITY_API_KEY?: string;
+  readonly LULU_SPACE_WEBHOOK_ORIGIN?: string;
+  readonly LULU_SPACE_WEBHOOK_SECRET?: string;
+  readonly LULU_SPACE_PRIVATE_ORIGIN?: string;
+  readonly LULU_SPACE_PULL_HOSTS?: string;
+  readonly LULU_APNS_TEAM_ID?: string;
+  readonly LULU_APNS_KEY_ID?: string;
+  readonly LULU_APNS_KEY?: string;
+  readonly LULU_APNS_TOPIC?: string;
+  readonly LULU_APNS_SANDBOX?: string;
   readonly TAVILY_API_KEY?: string;
   readonly EXA_API_KEY?: string;
   readonly VOLC_SPEECH_ASR_API_KEY?: string;

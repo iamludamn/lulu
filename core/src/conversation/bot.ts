@@ -1,3 +1,6 @@
+import { nextPushAlarm, sendSpacePushes, spaceDevice } from "../space/push.js";
+import { handleSpaceRefresh, nextSpaceAlarm, receiveSpaceEvent, refreshDueSpaces, spaceError } from "../space/refresh.js";
+import { SpaceRefreshDoc, SpaceRefreshIndex, spaceEntries, spaceStatus } from "../space/doc.js";
 import { DREAMING_TASK, DreamingTriggerDoc, reconcileDreaming } from "../memory/dreaming.js";
 import { admitPrompt, prepareInjection } from "../memory/injection.js";
 import { expireRequests } from "./deadlines.js";
@@ -19,6 +22,8 @@ import { CRON_KIND } from "../cron/doc.js";
 import { SANDBOX_KIND } from "../sandbox/doc.js";
 import { SANDBOX_LIFECYCLE, recoverSandboxLifecycle } from "../sandbox/lifecycle.js";
 import { createSandboxProvider } from "../sandbox/backends.js";
+import { observeSandboxActivity } from "../sandbox/activity.js";
+import { sandboxWindowQuery } from "../sandbox/report-api.js";
 import { checkItem } from "../panel/check.js";
 import { PanelDoc } from "../panel/doc.js";
 import { EMPTY_PANEL, type PanelState } from "../protocol/panel.js";
@@ -36,13 +41,14 @@ import { chatModelConfig, chatModelRef, createChatModels, durableModel } from ".
 import { createMemoryUpdate, recoverMemoryUpdates, MEMORY_UPDATE } from "../memory/schedule.js";
 import { createHarnessTelemetry, observeDelegateTiming } from "../telemetry/agent.js";
 import { SOCKET_OPEN, type DurableHost, type Socket } from "../host/types.js";
+import { authorizeSocket } from "../server/api.js";
 
 const MEMORY_SOURCE_ENTRIES = 200;
 const MODEL_KEY = "model";
 const STATE_INTERVAL_MS = 50;
 const PROGRESS_WAIT_MS = 500;
 
-type ClientAttachment = { readonly role: "client"; readonly ready: boolean; readonly incremental?: boolean };
+type ClientAttachment = { readonly role: "client"; readonly ready: boolean; readonly incremental?: boolean; readonly authenticated?: boolean };
 type HelloMessage = Extract<ClientMessage, { type: "hello" }>;
 type Command = Exclude<ClientMessage, HelloMessage>;
 
@@ -50,14 +56,13 @@ const reportError = (message: string, error: unknown, details: Readonly<Record<s
   console.error(JSON.stringify({ message, ...details, error: error instanceof Error ? error.message : String(error) }));
 };
 
-const idleClient = (): ClientAttachment => ({ role: "client", ready: false });
-
 const isReservedCloseCode = (code: number): boolean => code === 1005 || code === 1006 || code === 1015;
 
 export class BotSession {
   readonly #host: DurableHost;
   #harness!: Harness;
   #root!: Conversation;
+  #accountingReady!: () => Promise<void>;
   #view!: { readonly value: ConversationView };
   #models!: Models;
   #selected: ModelRef | undefined;
@@ -73,6 +78,7 @@ export class BotSession {
   #waitTimer: ReturnType<typeof setTimeout> | undefined = undefined;
   readonly #deferred: Array<() => void> = [];
   #dirty = false;
+  #spaceWork: Promise<void> | undefined;
   #alarmUpdate: Promise<void> = Promise.resolve();
   #prompts: Promise<void> = Promise.resolve();
   #dreaming: Promise<void> = Promise.resolve();
@@ -107,6 +113,9 @@ export class BotSession {
   }
 
   async start(storage: Storage): Promise<void> {
+    for (const socket of this.#host.sockets.all()) {
+      if (socket.readyState === SOCKET_OPEN && this.#attachmentOf(socket) === null) socket.close(1008, "Reconnect required");
+    }
     await this.#initialize(storage);
   }
 
@@ -143,7 +152,7 @@ export class BotSession {
     observeDelegateTiming(harness, telemetry.context);
     harness.observeCommits({ advance: (publication) => {
       if (publication.changes.some((change) => change.type === "document" && (change.record.kind === PanelDoc.definition.kind || change.record.kind === AssetsDoc.definition.kind))) void this.#reconcileDreaming();
-      if (publication.changes.some((change) => (change.type === "document" && (change.record.kind === CRON_KIND || change.record.kind === SANDBOX_KIND || change.record.kind === RunFamily.definition.kind || change.record.kind === ChatDoc.definition.kind || change.record.kind === DreamingTriggerDoc.definition.kind)) || (change.type === "submission") || (change.type === "task" && (change.value.kind === SANDBOX_LIFECYCLE || change.value.kind === MEMORY_UPDATE || change.value.kind === DREAMING_TASK)))) {
+      if (publication.changes.some((change) => (change.type === "document" && (change.record.kind === SpaceRefreshDoc.definition.kind || change.record.kind === SpaceRefreshIndex.definition.kind || change.record.kind === CRON_KIND || change.record.kind === SANDBOX_KIND || change.record.kind === RunFamily.definition.kind || change.record.kind === ChatDoc.definition.kind || change.record.kind === DreamingTriggerDoc.definition.kind)) || (change.type === "submission") || (change.type === "task" && (change.value.kind === SANDBOX_LIFECYCLE || change.value.kind === MEMORY_UPDATE || change.value.kind === DREAMING_TASK)))) {
         void this.#refreshAlarm().catch((error: unknown) => reportError("Schedule alarm reconciliation failed", error));
       }
     }, end: () => {} });
@@ -156,6 +165,7 @@ export class BotSession {
     const root = await harness.root(BACKGROUND_CONTEXT, { agent: { model, thinkingLevel: "off" } });
     await root.configure({ model, tools: null }, BACKGROUND_CONTEXT);
     this.#root = root;
+    this.#accountingReady = await observeSandboxActivity(harness, root.id, telemetry.context, BACKGROUND_CONTEXT);
     this.#resumeAfterMcp = !host.catalogReady;
     if (!this.#resumeAfterMcp) harness.resume();
     const update = createMemoryUpdate(this.#host);
@@ -199,10 +209,13 @@ export class BotSession {
     );
     trackSnapshot(
       harness,
-      async (context) => ({
-        panel: (await harness.snapshot(PanelDoc, context)) ?? EMPTY_PANEL,
-        assets: (await harness.snapshot(AssetsDoc, context))?.items ?? [],
-      }),
+      async (context) => {
+        const panel = (await harness.snapshot(PanelDoc, context)) ?? EMPTY_PANEL;
+        const spaces = await spaceEntries(harness, panel.order.filter((id) => ["space", "web"].includes(panel.widgets[id]?.body.kind ?? "")));
+        const spaceUpdates = Object.fromEntries(spaces
+          .map(([id, entry]) => [id, spaceStatus(entry)]));
+        return { panel: { ...panel, spaceUpdates }, assets: (await harness.snapshot(AssetsDoc, context))?.items ?? [] };
+      },
       {
         replace: (_context, value) => {
           this.#panel = value.panel;
@@ -212,7 +225,7 @@ export class BotSession {
       },
       BACKGROUND_CONTEXT,
       this.#snapshotFailed("layout"),
-      (publication) => publication.changes.some((change) => change.type === "document" && (change.record.kind === PanelDoc.definition.kind || change.record.kind === AssetsDoc.definition.kind)),
+      (publication) => publication.changes.some((change) => change.type === "document" && (change.record.kind === PanelDoc.definition.kind || change.record.kind === AssetsDoc.definition.kind || change.record.kind === SpaceRefreshDoc.definition.kind)),
     );
     await harness.commit(async (tx) => {
       const delivery = await tx.doc(DeliveryDoc);
@@ -241,15 +254,24 @@ export class BotSession {
 
   fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
+    if (pathname === "/sandbox-window") return this.#accountingReady().then(() => sandboxWindowQuery(request, this.#harness, BACKGROUND_CONTEXT));
     if (pathname === "/memory/sources.changed" && request.method === "POST") return this.#reconcileDreaming().then(() => new Response(null, { status: 204 }));
     if (pathname === "/memory/source") return this.#memorySource(request);
+    if (pathname === "/space-refresh" || pathname === "/space-webhook" || pathname === "/space-device") {
+      if (pathname === "/space-webhook" && request.method !== "POST") return Promise.resolve(new Response(null, { status: 405 }));
+      const handler = pathname === "/space-webhook" ? receiveSpaceEvent : pathname === "/space-device" ? spaceDevice : handleSpaceRefresh;
+      return handler(this.#harness, request, this.#host.env).then(async (response) => {
+        if (request.method === "POST") await this.#refreshAlarm();
+        return response;
+      }).catch(spaceError);
+    }
     if (pathname === "/schedules") return this.#schedulesResponse();
     if (pathname === "/mcp" || pathname.startsWith("/mcp/")) {
       const next = this.#mcpRequests.then(() => handleMcpRegistry(request, this.#host, { statuses: () => this.#mcp, reload: (name) => this.#reloadMcp(name) }));
       this.#mcpRequests = next.catch(() => undefined);
       return next;
     }
-    return Promise.resolve(this.#upgrade());
+    return this.#upgrade(request);
   }
 
   alarm(): Promise<void> {
@@ -262,6 +284,10 @@ export class BotSession {
       return;
     }
     const attachment = this.#attachmentOf(socket);
+    if (attachment === null) {
+      this.#reject(socket, 1008, "Reconnect required");
+      return;
+    }
     if (message.length > MAX_CLIENT_FRAME_CHARACTERS) {
       this.#reject(socket, 1009, "Command frame too large");
       return;
@@ -279,13 +305,13 @@ export class BotSession {
     }
 
     if (frame.type === "hello") {
-      const next = this.#hello(socket, frame.incremental === true);
+      const next = this.#hello(socket, attachment, frame.incremental === true);
       this.#handshakes.set(socket, next);
       await next;
       return;
     }
 
-    if (attachment?.ready !== true) {
+    if (this.#attachmentOf(socket)?.ready !== true) {
       this.#reject(socket, 1008, "Hello required");
       return;
     }
@@ -319,12 +345,14 @@ export class BotSession {
   }
 
   #attachmentOf(socket: Socket): ClientAttachment | null {
-    return this.#host.sockets.attachment(socket) as ClientAttachment | null;
+    const attachment = this.#host.sockets.attachment(socket) as ClientAttachment | null;
+    if (this.#host.env.LULU_CHAT_TOKEN !== undefined && attachment?.authenticated !== true) return null;
+    return attachment;
   }
 
-  async #hello(socket: Socket, incremental: boolean): Promise<boolean> {
+  async #hello(socket: Socket, attachment: ClientAttachment, incremental: boolean): Promise<boolean> {
     const config = await this.#config();
-    this.#host.sockets.attach(socket, { role: "client", ready: true, incremental } satisfies ClientAttachment);
+    this.#host.sockets.attach(socket, { ...attachment, ready: true, incremental } satisfies ClientAttachment);
     this.#send(socket, { type: "models", config });
     this.#send(socket, this.#stateMessage(undefined, true));
     return true;
@@ -474,8 +502,9 @@ export class BotSession {
     return this.#settling;
   }
 
-  #upgrade(): Response {
-    return this.#host.sockets.upgrade(idleClient()).response;
+  async #upgrade(request: Request): Promise<Response> {
+    if (!await authorizeSocket(request, this.#host.env.LULU_CHAT_TOKEN)) return new Response(null, { status: 401 });
+    return this.#host.sockets.upgrade({ role: "client", ready: false, authenticated: this.#host.env.LULU_CHAT_TOKEN !== undefined } satisfies ClientAttachment).response;
   }
 
   #config() {
@@ -595,6 +624,8 @@ export class BotSession {
       await expireRequests(this.#harness, this.#root, now);
       await recoverMemoryUpdates(this.#harness, this.#root, createMemoryUpdate(this.#host));
       outcome = await fireSchedules(this.#harness, parentId, selected, now);
+      this.#spaceWork ??= refreshDueSpaces(this.#harness, this.#host.env, now).then(() => sendSpacePushes(this.#harness, this.#host.env, Date.now())).finally(() => { this.#spaceWork = undefined; });
+      await this.#spaceWork;
     } catch (error) {
       reportError("Schedule run failed", error);
       await this.#serializeAlarmUpdate(() => replaceAlarm(this.#host.alarm, now + RECOVERY_ALARM_DELAY_MS));
@@ -610,7 +641,11 @@ export class BotSession {
   }
 
   #refreshAlarm(): Promise<void> {
-    return this.#serializeAlarmUpdate(async () => replaceAlarm(this.#host.alarm, await nextAlarmAt(this.#harness)));
+    return this.#serializeAlarmUpdate(async () => {
+      const [other, space, push] = await Promise.all([nextAlarmAt(this.#harness), nextSpaceAlarm(this.#harness), nextPushAlarm(this.#harness, this.#host.env)]);
+      const due = Math.min(other ?? Infinity, Math.max(Date.now() + 1000, Math.min(space ?? Infinity, push ?? Infinity)));
+      await replaceAlarm(this.#host.alarm, Number.isFinite(due) ? due : undefined);
+    });
   }
 
   #serializeAlarmUpdate(operation: () => Promise<void>): Promise<void> {

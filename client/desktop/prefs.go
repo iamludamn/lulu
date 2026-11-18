@@ -12,6 +12,21 @@ import (
 
 const serverSecret = "server"
 
+func (p *prefs) chatToken(server string) string {
+	token, _ := mygo.Secrets.Get("chat-token:" + server)
+	return string(token)
+}
+
+func (p *prefs) setChatToken(server, token string) error {
+	if token == p.chatToken(server) {
+		return nil
+	}
+	if token == "" {
+		return mygo.Secrets.Delete("chat-token:" + server)
+	}
+	return mygo.Secrets.Set("chat-token:"+server, []byte(token))
+}
+
 type prefs struct {
 	Wallpaper string  `json:"wallpaper,omitempty"`
 	Server    string  `json:"server,omitempty"`

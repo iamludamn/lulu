@@ -38,10 +38,10 @@ struct HomeView: View {
     @FocusState private var composing: Bool
     @Environment(\.scenePhase) private var phase
 
-    init(bot: BotSummary, api: Api) {
+    init(bot: BotSummary, api: Api, token: String) {
         self.bot = bot
         self.api = api
-        _store = State(initialValue: BotStore(botId: bot.id, server: api.base))
+        _store = State(initialValue: BotStore(botId: bot.id, server: api.base, token: token))
         _draft = State(initialValue: ChatDraft(botId: bot.id))
     }
 
@@ -115,10 +115,10 @@ struct HomeView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: store.snapshot.hasReceivedState)
-        .artifactViewer(botId: bot.id, api: api)
+        .artifactViewer(botId: bot.id, api: api, panel: store.snapshot.panel)
         .sheet(isPresented: $inspector) { InspectorView(store: store, botId: bot.id, api: api) }
         .sensoryFeedback(.selection, trigger: page)
-        .task { store.start() }
+        .task { store.start(); await SpacePush.shared.connect(api: api, botId: bot.id) }
         .onDisappear { draft.flush(); transcription.cancel(); voice.stop(); store.stop() }
         .onChange(of: phase) { _, next in
             if next == .active { store.start() } else if next == .background { draft.flush(); voice.stop(); voiceOpen = false; store.stop() }
@@ -132,7 +132,7 @@ struct HomeView: View {
             if !store.snapshot.hasReceivedState && store.snapshot.link == .offline {
                 connectionUnavailable
             } else {
-                PanelView(widgets: store.snapshot.panel.list, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onCheck: store.check, onCompose: fadeToChat)
+                PanelView(widgets: store.snapshot.panel.list, spaceUpdates: store.snapshot.panel.spaceUpdates, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onCheck: store.check, onCompose: fadeToChat)
             }
         case .chat:
             ChatView(bot: bot, store: store, transcription: transcription, api: api, containerBottomInset: bottomInset, draft: Binding(get: { draft.text }, set: { draft.text = $0 }), composing: $composing, onKept: land, onVoiceConversation: {
