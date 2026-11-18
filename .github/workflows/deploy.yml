@@ -28,8 +28,19 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run build
-      - run: npm exec -- wrangler deploy
+      - shell: bash
+        run: |
+          if [[ -z "$LULU_OBSERVABILITY_TOKEN" ]]; then
+            npm exec -- wrangler deploy
+            exit
+          fi
+          umask 077
+          lulu_secrets_file=$(mktemp "${RUNNER_TEMP}/lulu-secrets.XXXXXX")
+          trap 'rm -f "$lulu_secrets_file"' EXIT
+          node -e 'console.log(JSON.stringify({ LULU_OBSERVABILITY_TOKEN: process.env.LULU_OBSERVABILITY_TOKEN }))' > "$lulu_secrets_file"
+          npm exec -- wrangler deploy --secrets-file "$lulu_secrets_file"
         working-directory: apps/cf
         env:
+          LULU_OBSERVABILITY_TOKEN: ${{ secrets.LULU_OBSERVABILITY_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || 'de4897a194002b8815e728d7240c4218' }}
