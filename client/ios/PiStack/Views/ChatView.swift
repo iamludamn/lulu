@@ -109,10 +109,14 @@ struct ChatView: View {
             .overlay(alignment: .bottom) {
                 if bottomState.showJump {
                     Button {
-                        metrics.scrollView?.stopScrollingAndZooming()
+                        let scrollView = metrics.scrollView
+                        scrollView?.stopScrollingAndZooming()
+                        let viewportHeight = scrollView?.bounds.height ?? 0
+                        let animate = !reduceMotion && distanceFromLatest <= viewportHeight
                         followLatest()
-                        if reduceMotion { proxy.scrollTo(Self.bottom, anchor: .bottom) }
-                        else { withAnimation { proxy.scrollTo(Self.bottom, anchor: .bottom) } }
+                        withAnimation(animate ? .easeOut(duration: 0.26) : nil) {
+                            proxy.scrollTo(Self.bottom, anchor: .bottom)
+                        }
                     } label: {
                         Image(systemName: "arrow.down").font(.headline).frame(width: 44, height: 44)
                     }
@@ -121,10 +125,10 @@ struct ChatView: View {
                     .accessibilityLabel("回到最新消息")
                     .accessibilityHint("滚动到对话最底部")
                     .padding(.bottom, 12)
-                    .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
+                    .transition(.opacity)
                 }
             }
-            .animation(reduceMotion ? nil : .snappy, value: bottomState.showJump)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: bottomState.showJump)
         }
         .overlay { gate(rows) }
         .overlay(alignment: .top) {
@@ -202,10 +206,14 @@ struct ChatView: View {
         bottomState.followLatest()
     }
 
+    private var distanceFromLatest: CGFloat {
+        guard metrics.composerTop > 0 else { return 0 }
+        return max(0, metrics.bottomMarkerY - metrics.composerTop + 8)
+    }
+
     private func updateBottomState() {
-        let distance = metrics.composerTop > 0 ? max(0, metrics.bottomMarkerY - metrics.composerTop + 8) : 0
         var next = bottomState
-        next.update(distance: distance, userScrolling: metrics.dragging)
+        next.update(distance: distanceFromLatest, userScrolling: metrics.dragging)
         if bottomState != next { bottomState = next }
     }
 
