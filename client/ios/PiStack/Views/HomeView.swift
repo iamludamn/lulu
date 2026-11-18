@@ -63,7 +63,16 @@ struct HomeView: View {
             .scaleEffect(voiceOpen && !reduceMotion ? 0.98 : 1)
             .allowsHitTesting(!voiceOpen)
             .accessibilityHidden(voiceOpen)
-            // Only the individual controls draw glass over the full-height content.
+            if page == .chat && !voiceOpen {
+                GeometryReader { proxy in
+                    let controlsBottom = max(0, barBottom - proxy.frame(in: .global).minY)
+                    ChatEdgeBackdrop(edge: .top, fade: 80)
+                        .frame(height: controlsBottom + 32)
+                }
+                .ignoresSafeArea(.container, edges: .top)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
             topBar
                 .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { barBottom = $0 }
                 .frame(maxHeight: .infinity, alignment: .top)
@@ -126,7 +135,7 @@ struct HomeView: View {
                 PanelView(widgets: store.snapshot.panel.list, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onCheck: store.check, onCompose: fadeToChat)
             }
         case .chat:
-            ChatView(bot: bot, store: store, transcription: transcription, api: api, draft: Binding(get: { draft.text }, set: { draft.text = $0 }), composing: $composing, onKept: land, onVoiceConversation: {
+            ChatView(bot: bot, store: store, transcription: transcription, api: api, containerBottomInset: bottomInset, draft: Binding(get: { draft.text }, set: { draft.text = $0 }), composing: $composing, onKept: land, onVoiceConversation: {
                 composing = false
                 withAnimation(voiceTransition) { voiceOpen = true }
             },

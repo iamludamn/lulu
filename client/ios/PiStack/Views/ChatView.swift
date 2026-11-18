@@ -6,6 +6,7 @@ struct ChatView: View {
     let store: BotStore
     let transcription: VoiceTranscription
     let api: Api
+    let containerBottomInset: CGFloat
     @Binding var draft: String
     var composing: FocusState<Bool>.Binding
     let onKept: (Page) -> Void
@@ -13,6 +14,7 @@ struct ChatView: View {
     @Binding var reading: ChatRow?
     let onReaderFrame: (ReaderFrame) -> Void
     @State private var bottomState = ChatBottomState()
+    @State private var composerBottom: CGFloat?
     @State private var sent = 0
     @State private var fetchingEarlier = false
     @State private var floor: String?
@@ -122,14 +124,6 @@ struct ChatView: View {
             }
             .animation(reduceMotion ? nil : .snappy, value: bottomState.showJump)
         }
-        .overlay(alignment: .top) {
-            GeometryReader { proxy in
-                ChatEdgeBackdrop(edge: .top, fade: 48)
-                    .frame(height: max(0, topInset - proxy.frame(in: .global).minY) + 24)
-            }
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-        }
         .overlay { gate(rows) }
         .overlay(alignment: .top) {
             if reconnecting {
@@ -151,8 +145,9 @@ struct ChatView: View {
                 Composer(draft: $draft, store: store, transcription: transcription, onTranscribed: transcribed, busy: busy, placeholder: placeholder, focused: composing, onSend: send, onVoiceConversation: onVoiceConversation)
                     .background {
                         GeometryReader { proxy in
-                            ChatEdgeBackdrop(edge: .bottom, fade: 40)
-                                .frame(height: proxy.size.height + proxy.safeAreaInsets.bottom + 40)
+                            let bottom = max(containerBottomInset, proxy.safeAreaInsets.bottom)
+                            ChatEdgeBackdrop(edge: .bottom, fade: 96)
+                                .frame(height: proxy.size.height + bottom + 40)
                                 .offset(y: -40)
                         }
                         .allowsHitTesting(false)
@@ -162,7 +157,22 @@ struct ChatView: View {
                         ChatInputShield()
                             .ignoresSafeArea(.container, edges: .bottom)
                     }
-                    .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { metrics.composerTop = $0; updateBottomState() }
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                        metrics.composerTop = frame.minY
+                        composerBottom = frame.maxY
+                        updateBottomState()
+                    }
+            }
+        }
+        .overlay {
+            if snapshot.halt == nil, let composerBottom {
+                GeometryReader { proxy in
+                    let height = max(0, proxy.frame(in: .global).maxY - composerBottom)
+                    ChatInputShield()
+                        .frame(height: height)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                }
+                .ignoresSafeArea(.container, edges: .bottom)
             }
         }
         .overlayPreferenceValue(LongBubbleBounds.self) { bounds in

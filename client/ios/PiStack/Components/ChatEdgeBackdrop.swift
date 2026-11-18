@@ -13,18 +13,21 @@ struct ChatEdgeBackdrop: View {
                 if reduceTransparency {
                     Rectangle().fill(Color(uiColor: .systemBackground))
                 } else {
-                    Rectangle().fill(.regularMaterial)
+                    Rectangle().fill(.ultraThinMaterial)
                 }
             }
             .mask {
                 LinearGradient(stops: [
                     .init(color: .clear, location: 0),
-                    .init(color: .black.opacity(0.2), location: fraction * 0.25),
-                    .init(color: .black.opacity(0.65), location: fraction * 0.65),
+                    .init(color: .black.opacity(0.05), location: fraction * 0.14),
+                    .init(color: .black.opacity(0.25), location: fraction * 0.35),
+                    .init(color: .black.opacity(0.65), location: fraction * 0.62),
+                    .init(color: .black.opacity(0.92), location: fraction * 0.86),
                     .init(color: .black, location: fraction),
                     .init(color: .black, location: 1)
                 ], startPoint: edge == .top ? .bottom : .top,
                    endPoint: edge == .top ? .top : .bottom)
+                .opacity(reduceTransparency ? 1 : 0.6)
             }
         }
         .allowsHitTesting(false)
