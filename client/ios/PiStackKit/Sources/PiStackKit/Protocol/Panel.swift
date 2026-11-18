@@ -152,11 +152,13 @@ public struct PanelState: Decodable, Equatable, Sendable {
     public let widgets: [String: PanelWidget]
 
     public let spaceReceipts: [String: SpaceReceipt]
+    public let spaceUpdates: [String: SpaceUpdate]
 
-    public init(order: [String] = [], widgets: [String: PanelWidget] = [:], spaceReceipts: [String: SpaceReceipt] = [:]) {
+    public init(order: [String] = [], widgets: [String: PanelWidget] = [:], spaceReceipts: [String: SpaceReceipt] = [:], spaceUpdates: [String: SpaceUpdate] = [:]) {
         self.order = order
         self.widgets = widgets
         self.spaceReceipts = spaceReceipts
+        self.spaceUpdates = spaceUpdates
     }
 
     private struct Lenient: Decodable {
@@ -167,10 +169,11 @@ public struct PanelState: Decodable, Equatable, Sendable {
         }
     }
 
-    private enum Keys: String, CodingKey { case order, widgets, spaceReceipts }
+    private enum Keys: String, CodingKey { case order, widgets, spaceReceipts, spaceUpdates }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: Keys.self)
+        spaceUpdates = try container.decodeIfPresent([String: SpaceUpdate].self, forKey: .spaceUpdates) ?? [:]
         spaceReceipts = try container.decodeIfPresent([String: SpaceReceipt].self, forKey: .spaceReceipts) ?? [:]
         order = try container.decode([String].self, forKey: .order)
         widgets = try container.decode([String: Lenient].self, forKey: .widgets).compactMapValues(\.widget)
@@ -181,7 +184,7 @@ public struct PanelState: Decodable, Equatable, Sendable {
     public func checking(_ id: String, item index: Int, done: Bool) -> PanelState {
         var copy = widgets
         copy[id] = widgets[id]?.checking(index, done: done)
-        return PanelState(order: order, widgets: copy, spaceReceipts: spaceReceipts)
+        return PanelState(order: order, widgets: copy, spaceReceipts: spaceReceipts, spaceUpdates: spaceUpdates)
     }
 }
 

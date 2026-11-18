@@ -141,6 +141,41 @@ public struct Api: Sendable {
         _ = try await call("/api/bots/\(botId)/spaces/state", method: "PUT", query: [URLQueryItem(name: "id", value: space)], data: Data(json.utf8), failure: "保存状态失败")
     }
 
+    private func spaceDataCache(_ botId: String, space: String) -> URL {
+        let key = SHA256.hash(data: Data("\(base.absoluteString)/\(botId)/\(space)".utf8)).map { String(format: "%02x", $0) }.joined()
+        return URL.cachesDirectory.appending(path: "space-data-\(key)")
+    }
+
+    public func spaceContent(_ botId: String, space: String) async throws -> Data {
+        let cache = spaceDataCache(botId, space: space)
+        let data: Data
+        do {
+            data = try await call("/api/bots/\(botId)/spaces/refresh", query: [URLQueryItem(name: "id", value: space)], failure: "加载更新失败")
+        } catch let error as URLError {
+            if let saved = try? Data(contentsOf: cache) { return saved }
+            throw error
+        }
+        try? data.write(to: cache, options: .atomic)
+        return data
+    }
+
+    public func spaceDevice(_ botId: String, token: String, enabled: Bool) async throws {
+        _ = try await call("/api/bots/\(botId)/spaces/device", method: "POST",
+                           body: ["token": token, "action": enabled ? "register" : "remove"], failure: "无法注册更新通知")
+    }
+
+    public func spaceAction(_ botId: String, space: String, action: String, mode: SpaceUpdate.Mode? = nil, notify: Bool? = nil, version: Int? = nil) async throws {
+        struct Action: Encodable {
+            let action: String
+            let mode: SpaceUpdate.Mode?
+            let notify: Bool?
+            let version: Int?
+        }
+        _ = try await call("/api/bots/\(botId)/spaces/refresh", method: "POST",
+                           query: [URLQueryItem(name: "id", value: space)],
+                           body: Action(action: action, mode: mode, notify: notify, version: version), failure: "无法保存更新设置")
+    }
+
     public func schedules(_ id: String) async throws -> [ScheduleEntry] {
         try decode([ScheduleEntry].self, try await call("/api/bots/\(id)/schedules", failure: "加载定时任务失败"))
     }

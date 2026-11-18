@@ -93,10 +93,35 @@ export function handleApi(request: Request, host: ApiHost): Promise<Response> {
   );
 }
 
+export function spaceIngress(url: URL, env: DurableHost["env"]): "private" | "webhook" | "none" {
+  const publicOrigin = env.LULU_SPACE_WEBHOOK_ORIGIN ? URL.parse(env.LULU_SPACE_WEBHOOK_ORIGIN)?.origin : undefined;
+  if (publicOrigin === undefined) return "private";
+  const privateOrigin = env.LULU_SPACE_PRIVATE_ORIGIN ? URL.parse(env.LULU_SPACE_PRIVATE_ORIGIN)?.origin : undefined;
+  if (url.origin === publicOrigin) return "webhook";
+  return url.origin === privateOrigin ? "private" : "none";
+}
+
 async function route(request: Request, host: ApiHost, pathname: string): Promise<Response> {
+  const ingress = spaceIngress(new URL(request.url), host.env);
+  if (ingress === "none") return notFound();
+  const webhook = pathname === "/api/webhooks/perplexity";
+  if (webhook || ingress === "webhook") {
+    if (!webhook || ingress !== "webhook") return notFound();
+    if (request.method !== "POST") return json({ error: "Method not allowed" }, 405, { Allow: "POST" });
+    const query = new URL(request.url).search;
+    return host.objects.BOTS.getByName(BOT_ID).fetch("https://bot/space-webhook" + query, {
+      method: "POST", headers: request.headers, body: request.body,
+    });
+  }
   if (!pathname.startsWith(`${PREFIX}/`)) return notFound();
   const rest = pathname.slice(PREFIX.length).replace(/\/+$/, "");
   if (rest === "/ws") return botSocket(request, host);
+  if (rest === "/spaces/refresh" || rest === "/spaces/device") {
+    const action = rest === "/spaces/refresh" ? "space-refresh" : "space-device";
+    return host.objects.BOTS.getByName(BOT_ID).fetch("https://bot/" + action + new URL(request.url).search, {
+      method: request.method, headers: request.headers, body: request.body,
+    });
+  }
   if (rest === "/spaces/state") {
     if (request.method !== "GET" && request.method !== "PUT") return json({ error: "Method not allowed" }, 405, { Allow: "GET, PUT" });
     return spaceState(request, host);

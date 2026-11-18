@@ -1,3 +1,6 @@
+import { nextPushAlarm, sendSpacePushes, spaceDevice } from "../space/push.js";
+import { handleSpaceRefresh, nextSpaceAlarm, receiveSpaceEvent, refreshDueSpaces, spaceError } from "../space/refresh.js";
+import { SpaceRefreshDoc, SpaceRefreshIndex, spaceEntries, spaceStatus } from "../space/doc.js";
 import { DREAMING_TASK, DreamingTriggerDoc, reconcileDreaming } from "../memory/dreaming.js";
 import { admitPrompt, prepareInjection } from "../memory/injection.js";
 import { expireRequests } from "./deadlines.js";
@@ -73,6 +76,7 @@ export class BotSession {
   #waitTimer: ReturnType<typeof setTimeout> | undefined = undefined;
   readonly #deferred: Array<() => void> = [];
   #dirty = false;
+  #spaceWork: Promise<void> | undefined;
   #alarmUpdate: Promise<void> = Promise.resolve();
   #prompts: Promise<void> = Promise.resolve();
   #dreaming: Promise<void> = Promise.resolve();
@@ -143,7 +147,7 @@ export class BotSession {
     observeDelegateTiming(harness, telemetry.context);
     harness.observeCommits({ advance: (publication) => {
       if (publication.changes.some((change) => change.type === "document" && (change.record.kind === PanelDoc.definition.kind || change.record.kind === AssetsDoc.definition.kind))) void this.#reconcileDreaming();
-      if (publication.changes.some((change) => (change.type === "document" && (change.record.kind === CRON_KIND || change.record.kind === SANDBOX_KIND || change.record.kind === RunFamily.definition.kind || change.record.kind === ChatDoc.definition.kind || change.record.kind === DreamingTriggerDoc.definition.kind)) || (change.type === "submission") || (change.type === "task" && (change.value.kind === SANDBOX_LIFECYCLE || change.value.kind === MEMORY_UPDATE || change.value.kind === DREAMING_TASK)))) {
+      if (publication.changes.some((change) => (change.type === "document" && (change.record.kind === SpaceRefreshDoc.definition.kind || change.record.kind === SpaceRefreshIndex.definition.kind || change.record.kind === CRON_KIND || change.record.kind === SANDBOX_KIND || change.record.kind === RunFamily.definition.kind || change.record.kind === ChatDoc.definition.kind || change.record.kind === DreamingTriggerDoc.definition.kind)) || (change.type === "submission") || (change.type === "task" && (change.value.kind === SANDBOX_LIFECYCLE || change.value.kind === MEMORY_UPDATE || change.value.kind === DREAMING_TASK)))) {
         void this.#refreshAlarm().catch((error: unknown) => reportError("Schedule alarm reconciliation failed", error));
       }
     }, end: () => {} });
@@ -199,10 +203,13 @@ export class BotSession {
     );
     trackSnapshot(
       harness,
-      async (context) => ({
-        panel: (await harness.snapshot(PanelDoc, context)) ?? EMPTY_PANEL,
-        assets: (await harness.snapshot(AssetsDoc, context))?.items ?? [],
-      }),
+      async (context) => {
+        const panel = (await harness.snapshot(PanelDoc, context)) ?? EMPTY_PANEL;
+        const spaces = await spaceEntries(harness, panel.order.filter((id) => ["space", "web"].includes(panel.widgets[id]?.body.kind ?? "")));
+        const spaceUpdates = Object.fromEntries(spaces
+          .map(([id, entry]) => [id, spaceStatus(entry)]));
+        return { panel: { ...panel, spaceUpdates }, assets: (await harness.snapshot(AssetsDoc, context))?.items ?? [] };
+      },
       {
         replace: (_context, value) => {
           this.#panel = value.panel;
@@ -212,7 +219,7 @@ export class BotSession {
       },
       BACKGROUND_CONTEXT,
       this.#snapshotFailed("layout"),
-      (publication) => publication.changes.some((change) => change.type === "document" && (change.record.kind === PanelDoc.definition.kind || change.record.kind === AssetsDoc.definition.kind)),
+      (publication) => publication.changes.some((change) => change.type === "document" && (change.record.kind === PanelDoc.definition.kind || change.record.kind === AssetsDoc.definition.kind || change.record.kind === SpaceRefreshDoc.definition.kind)),
     );
     await harness.commit(async (tx) => {
       const delivery = await tx.doc(DeliveryDoc);
@@ -243,6 +250,14 @@ export class BotSession {
     const { pathname } = new URL(request.url);
     if (pathname === "/memory/sources.changed" && request.method === "POST") return this.#reconcileDreaming().then(() => new Response(null, { status: 204 }));
     if (pathname === "/memory/source") return this.#memorySource(request);
+    if (pathname === "/space-refresh" || pathname === "/space-webhook" || pathname === "/space-device") {
+      if (pathname === "/space-webhook" && request.method !== "POST") return Promise.resolve(new Response(null, { status: 405 }));
+      const handler = pathname === "/space-webhook" ? receiveSpaceEvent : pathname === "/space-device" ? spaceDevice : handleSpaceRefresh;
+      return handler(this.#harness, request, this.#host.env).then(async (response) => {
+        if (request.method === "POST") await this.#refreshAlarm();
+        return response;
+      }).catch(spaceError);
+    }
     if (pathname === "/schedules") return this.#schedulesResponse();
     if (pathname === "/mcp" || pathname.startsWith("/mcp/")) {
       const next = this.#mcpRequests.then(() => handleMcpRegistry(request, this.#host, { statuses: () => this.#mcp, reload: (name) => this.#reloadMcp(name) }));
@@ -595,6 +610,8 @@ export class BotSession {
       await expireRequests(this.#harness, this.#root, now);
       await recoverMemoryUpdates(this.#harness, this.#root, createMemoryUpdate(this.#host));
       outcome = await fireSchedules(this.#harness, parentId, selected, now);
+      this.#spaceWork ??= refreshDueSpaces(this.#harness, this.#host.env, now).then(() => sendSpacePushes(this.#harness, this.#host.env, Date.now())).finally(() => { this.#spaceWork = undefined; });
+      await this.#spaceWork;
     } catch (error) {
       reportError("Schedule run failed", error);
       await this.#serializeAlarmUpdate(() => replaceAlarm(this.#host.alarm, now + RECOVERY_ALARM_DELAY_MS));
@@ -610,7 +627,11 @@ export class BotSession {
   }
 
   #refreshAlarm(): Promise<void> {
-    return this.#serializeAlarmUpdate(async () => replaceAlarm(this.#host.alarm, await nextAlarmAt(this.#harness)));
+    return this.#serializeAlarmUpdate(async () => {
+      const [other, space, push] = await Promise.all([nextAlarmAt(this.#harness), nextSpaceAlarm(this.#harness), nextPushAlarm(this.#harness, this.#host.env)]);
+      const due = Math.min(other ?? Infinity, Math.max(Date.now() + 1000, Math.min(space ?? Infinity, push ?? Infinity)));
+      await replaceAlarm(this.#host.alarm, Number.isFinite(due) ? due : undefined);
+    });
   }
 
   #serializeAlarmUpdate(operation: () => Promise<void>): Promise<void> {
