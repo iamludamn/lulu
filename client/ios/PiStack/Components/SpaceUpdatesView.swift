@@ -65,7 +65,7 @@ struct SpaceUpdatesView: View {
                 ToolbarItem(placement: .primaryAction) { Button("设置") { settings = true } }
             }
             .sheet(isPresented: $settings, onDismiss: { Task { await load() } }) {
-                SpaceUpdateSettings(bridge: bridge, status: current)
+                SpaceUpdateSettings(bridge: bridge, status: current, providers: content?.providers ?? ["perplexity"])
             }
             .task(id: status?.version) { await load() }
         }
@@ -117,8 +117,10 @@ struct SpaceUpdatesView: View {
 struct SpaceUpdateSettings: View {
     let bridge: SpaceBridge
     let status: SpaceUpdate?
+    let providers: [String]
 
     @Environment(\.dismiss) private var dismiss
+    @State private var provider = "perplexity"
     @State private var kind = "manual"
     @State private var source = "search"
     @State private var target = ""
@@ -142,7 +144,7 @@ struct SpaceUpdateSettings: View {
                         Picker("刷新方式", selection: $kind) {
                             Text("手动刷新").tag("manual")
                             Text("定时刷新").tag("scheduled")
-                            Text("自动订阅").tag("subscription")
+                            if !providers.isEmpty { Text("自动订阅").tag("subscription") }
                         }
                     }
                     if kind == "scheduled" {
@@ -153,15 +155,24 @@ struct SpaceUpdateSettings: View {
                         LabeledContent("时区", value: zone.identifier)
                     }
                     if kind == "subscription" {
+                        if providers.count > 1 && !attached {
+                            Picker("监控服务", selection: $provider) {
+                                ForEach(providers, id: \.self) { Text(providerName($0)).tag($0) }
+                            }
+                        } else {
+                            LabeledContent("监控服务", value: providerName(provider))
+                        }
                         Picker("监控类型", selection: $source) {
                             Text("主题").tag("search")
                             Text("指定网页").tag("page")
                         }
-                        TextField(source == "search" ? "搜索主题" : "网页地址，每行一个", text: $target, axis: .vertical)
+                        TextField(source == "search" ? "搜索主题" : provider == "context" ? "网页地址" : "网页地址，每行一个", text: $target, axis: .vertical)
                             .textInputAutocapitalization(.never)
                         TextField("什么变化值得记录？", text: $goal, axis: .vertical)
                         LabeledContent("检查频率", value: "每天")
-                        Text(source == "search" ? "每次成功检查 US$0.001" : "每次成功检查按网页计费，每个 US$0.001")
+                        Text(provider == "context"
+                             ? (source == "search" ? "每次成功检查使用 2 credits" : "每次成功检查使用 1 credit")
+                             : (source == "search" ? "每次成功检查 US$0.001" : "每次成功检查按网页计费，每个 US$0.001"))
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 }
@@ -185,16 +196,22 @@ struct SpaceUpdateSettings: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(kind == "subscription" && !attached ? "启用付费订阅" : "保存") { send("configure") }
+                    Button(kind == "subscription" && !attached ? "启用订阅" : "保存") { send("configure") }
                         .disabled(busy || (kind != "manual" && target.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) ||
-                                  (kind == "subscription" && goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+                                  (kind == "subscription" && (goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                                   (provider == "context" && source == "page" && targets.count != 1))))
                 }
             }
             .onAppear(perform: populate)
         }
     }
 
+    private func providerName(_ name: String) -> String {
+        name == "context" ? "Context.dev" : "Perplexity"
+    }
+
     private func populate() {
+        provider = attached ? status?.mode.provider ?? "perplexity" : providers.first ?? "perplexity"
         if let status, status.phase != "deleted" {
             kind = status.mode.kind
             notify = status.notify
@@ -218,7 +235,7 @@ struct SpaceUpdateSettings: View {
             return .init(kind: kind, url: target, time: String(format: "%02d:%02d", parts.hour ?? 9, parts.minute ?? 0), tz: zone.identifier)
         case "subscription":
             if attached, let mode = status?.mode { return mode }
-            return .init(kind: kind, goal: goal, source: source == "search" ? .init(kind: source, query: target) : .init(kind: source, urls: targets))
+            return .init(kind: kind, provider: provider, goal: goal, source: source == "search" ? .init(kind: source, query: target) : .init(kind: source, urls: targets))
         default: return .init(kind: "manual")
         }
     }

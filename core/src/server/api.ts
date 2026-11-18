@@ -104,12 +104,13 @@ export function spaceIngress(url: URL, env: DurableHost["env"]): "private" | "we
 async function route(request: Request, host: ApiHost, pathname: string): Promise<Response> {
   const ingress = spaceIngress(new URL(request.url), host.env);
   if (ingress === "none") return notFound();
-  const webhook = pathname === "/api/webhooks/perplexity";
+  const webhook = pathname === "/api/webhooks/perplexity" || pathname === "/api/webhooks/context";
   if (webhook || ingress === "webhook") {
     if (!webhook || ingress !== "webhook") return notFound();
     if (request.method !== "POST") return json({ error: "Method not allowed" }, 405, { Allow: "POST" });
-    const query = new URL(request.url).search;
-    return host.objects.BOTS.getByName(BOT_ID).fetch("https://bot/space-webhook" + query, {
+    const query = new URL(request.url).searchParams;
+    query.set("provider", pathname.endsWith("/context") ? "context" : "perplexity");
+    return host.objects.BOTS.getByName(BOT_ID).fetch("https://bot/space-webhook?" + query, {
       method: "POST", headers: request.headers, body: request.body,
     });
   }

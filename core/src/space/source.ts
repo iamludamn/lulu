@@ -15,7 +15,7 @@ export function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-const string = (value: unknown): string => typeof value === "string" ? value.trim() : "";
+export const string = (value: unknown): string => typeof value === "string" ? value.trim() : "";
 const at = (value: unknown): number => Date.parse(string(value));
 const id = (value: unknown, prefix: string): string => {
   const text = string(value);
@@ -74,16 +74,19 @@ export function modeOf(input: unknown, hosts: string | undefined): Mode {
     return { kind: "scheduled", url: url.href, time, tz };
   }
   if (value.kind === "subscription") {
+    const provider = value.provider;
+    if (provider !== undefined && provider !== "context" && provider !== "perplexity") throw new SourceError(400, "Unknown monitor provider");
+    const selection = provider === undefined ? {} : { provider } as const;
     const goal = string(value.goal);
     const source = record(value.source);
     if (!goal || goal.length > 1000) throw new SourceError(400, "A monitoring goal is required");
     if (source.kind === "search") {
       const query = string(source.query);
-      if (query.length > 0 && query.length <= 500) return { kind: "subscription", goal, source: { kind: "search", query } };
+      if (query.length > 0 && query.length <= 500) return { kind: "subscription", ...selection, goal, source: { kind: "search", query } };
     }
     if (source.kind === "page" && Array.isArray(source.urls) && source.urls.length > 0 && source.urls.length <= 10) {
       const urls = source.urls.map(https);
-      if (urls.every((url) => url !== null)) return { kind: "subscription", goal, source: { kind: "page", urls: [...new Set(urls.map((url) => url.href))] } };
+      if (urls.every((url) => url !== null)) return { kind: "subscription", ...selection, goal, source: { kind: "page", urls: [...new Set(urls.map((url) => url.href))] } };
     }
   }
   throw new SourceError(400, "Invalid refresh mode or monitoring target");
@@ -185,13 +188,17 @@ export function deliveryOf(raw: unknown, deliveryId: string): Delivery | null {
 }
 
 export async function provider(key: string, path: string, method = "GET", body?: unknown, requestId?: string): Promise<Record<string, unknown>> {
-  const response = await fetch(`https://api.perplexity.ai/v1/monitors${path}`, {
+  return providerRequest("Perplexity", `https://api.perplexity.ai/v1/monitors${path}`, key, method, body, requestId);
+}
+
+export async function providerRequest(name: string, url: string, key: string, method: string, body?: unknown, requestId?: string): Promise<Record<string, unknown>> {
+  const response = await fetch(url, {
     method, redirect: "error", signal: AbortSignal.timeout(10_000),
     headers: { Authorization: `Bearer ${key}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...(requestId === undefined ? {} : { "Idempotency-Key": requestId }) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  if (!response.ok) throw new SourceError(response.status, `Perplexity returned ${response.status}`);
-  return record(json(await bytes(response, 2 * 1024 * 1024)));
+  if (!response.ok) throw new SourceError(response.status, `${name} returned ${response.status}`);
+  return response.status === 204 ? {} : record(json(await bytes(response, 2 * 1024 * 1024)));
 }
 
 export const monitorId = (value: unknown): string => id(value, "mon_");

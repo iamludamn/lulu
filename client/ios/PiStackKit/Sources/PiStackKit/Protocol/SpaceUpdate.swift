@@ -18,14 +18,16 @@ public struct SpaceUpdate: Codable, Equatable, Sendable {
         public var url: String?
         public var time: String?
         public var tz: String?
+        public var provider: String?
         public var goal: String?
         public var source: Source?
 
-        public init(kind: String, url: String? = nil, time: String? = nil, tz: String? = nil, goal: String? = nil, source: Source? = nil) {
+        public init(kind: String, url: String? = nil, time: String? = nil, tz: String? = nil, provider: String? = nil, goal: String? = nil, source: Source? = nil) {
             self.kind = kind
             self.url = url
             self.time = time
             self.tz = tz
+            self.provider = provider
             self.goal = goal
             self.source = source
         }
@@ -42,6 +44,7 @@ public struct SpaceUpdate: Codable, Equatable, Sendable {
     public let notify: Bool
     public let phase: String?
     public let cost: Double
+    public let credits: Int?
 
     public var hasNewContent: Bool { version > seen && mode.kind != "manual" }
 }
@@ -62,6 +65,7 @@ public struct SpaceContent: Decodable, Sendable {
         public let findings: [Finding]
     }
 
+    public let providers: [String]?
     public let status: SpaceUpdate?
     public let data: Dataset?
 }
