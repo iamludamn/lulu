@@ -50,7 +50,7 @@ struct HTMLDocument: View {
         }
         .toolbar {
             if let bridge {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
                     if bridge.preview || updates == nil || updates?.mode.kind == "manual" {
                         Button("刷新", systemImage: "arrow.clockwise") { Task { await bridge.refresh() } }
                     }
