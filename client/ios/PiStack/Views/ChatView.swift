@@ -1,11 +1,13 @@
 import PiStackKit
 import SwiftUI
+import UIKit
 
 struct ChatView: View {
     let bot: BotSummary
     let store: BotStore
     let transcription: VoiceTranscription
     let api: Api
+    let containerBottomInset: CGFloat
     @Binding var draft: String
     var composing: FocusState<Bool>.Binding
     let onKept: (Page) -> Void
@@ -13,6 +15,7 @@ struct ChatView: View {
     @Binding var reading: ChatRow?
     let onReaderFrame: (ReaderFrame) -> Void
     @State private var bottomState = ChatBottomState()
+    @State private var composerBottom: CGFloat?
     @State private var sent = 0
     @State private var fetchingEarlier = false
     @State private var floor: String?
@@ -68,6 +71,7 @@ struct ChatView: View {
                 .padding(.top, 8)
                 .frame(maxWidth: 720)
                 .frame(maxWidth: .infinity)
+                .background { ChatScrollAnchor(metrics: metrics) }
             }
             .defaultScrollAnchor(.bottom)
             .defaultScrollAnchor(bottomState.pinned ? .bottom : nil, for: .sizeChanges)
@@ -102,12 +106,17 @@ struct ChatView: View {
                     proxy.scrollTo(Self.bottom, anchor: .bottom)
                 }
             }
-            .overlay(alignment: .bottomTrailing) {
+            .overlay(alignment: .bottom) {
                 if bottomState.showJump {
                     Button {
-                        bottomState.pinned = true
-                        if reduceMotion { proxy.scrollTo(Self.bottom, anchor: .bottom) }
-                        else { withAnimation { proxy.scrollTo(Self.bottom, anchor: .bottom) } }
+                        let scrollView = metrics.scrollView
+                        scrollView?.stopScrollingAndZooming()
+                        let viewportHeight = scrollView?.bounds.height ?? 0
+                        let animate = !reduceMotion && distanceFromLatest <= viewportHeight
+                        followLatest()
+                        withAnimation(animate ? .easeOut(duration: 0.26) : nil) {
+                            proxy.scrollTo(Self.bottom, anchor: .bottom)
+                        }
                     } label: {
                         Image(systemName: "arrow.down").font(.headline).frame(width: 44, height: 44)
                     }
@@ -115,12 +124,11 @@ struct ChatView: View {
                     .buttonBorderShape(.circle)
                     .accessibilityLabel("回到最新消息")
                     .accessibilityHint("滚动到对话最底部")
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 40)
-                    .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
+                    .padding(.bottom, 12)
+                    .transition(.opacity)
                 }
             }
-            .animation(reduceMotion ? nil : .snappy, value: bottomState.showJump)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: bottomState.showJump)
         }
         .overlay { gate(rows) }
         .overlay(alignment: .top) {
@@ -141,7 +149,36 @@ struct ChatView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if snapshot.halt == nil {
                 Composer(draft: $draft, store: store, transcription: transcription, onTranscribed: transcribed, busy: busy, placeholder: placeholder, focused: composing, onSend: send, onVoiceConversation: onVoiceConversation)
-                    .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { metrics.composerTop = $0; updateBottomState() }
+                    .background {
+                        GeometryReader { proxy in
+                            let bottom = max(containerBottomInset, proxy.safeAreaInsets.bottom)
+                            ChatEdgeBackdrop(edge: .bottom, fade: 96)
+                                .frame(height: proxy.size.height + bottom + 40)
+                                .offset(y: -40)
+                        }
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                    }
+                    .background {
+                        ChatInputShield()
+                            .ignoresSafeArea(.container, edges: .bottom)
+                    }
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                        metrics.composerTop = frame.minY
+                        composerBottom = frame.maxY
+                        updateBottomState()
+                    }
+            }
+        }
+        .overlay {
+            if snapshot.halt == nil, let composerBottom {
+                GeometryReader { proxy in
+                    let height = max(0, proxy.frame(in: .global).maxY - composerBottom)
+                    ChatInputShield()
+                        .frame(height: height)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                }
+                .ignoresSafeArea(.container, edges: .bottom)
             }
         }
         .overlayPreferenceValue(LongBubbleBounds.self) { bounds in
@@ -164,10 +201,19 @@ struct ChatView: View {
         .sensoryFeedback(.success, trigger: busy) { old, new in old && !new }
     }
 
+    private func followLatest() {
+        metrics.dragging = false
+        bottomState.followLatest()
+    }
+
+    private var distanceFromLatest: CGFloat {
+        guard metrics.composerTop > 0 else { return 0 }
+        return max(0, metrics.bottomMarkerY - metrics.composerTop + 8)
+    }
+
     private func updateBottomState() {
-        let distance = metrics.composerTop > 0 ? max(0, metrics.bottomMarkerY - metrics.composerTop + 8) : 0
         var next = bottomState
-        next.update(distance: distance, userScrolling: metrics.dragging)
+        next.update(distance: distanceFromLatest, userScrolling: metrics.dragging)
         if bottomState != next { bottomState = next }
     }
 
@@ -180,7 +226,7 @@ struct ChatView: View {
 
     private func transcribed(_ text: String, sendImmediately: Bool) {
         if sendImmediately {
-            bottomState.pinned = true
+            followLatest()
             sent += 1
             store.submit(text)
         } else {
@@ -192,7 +238,7 @@ struct ChatView: View {
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        bottomState.pinned = true
+        followLatest()
         sent += 1
         store.submit(text)
         draft = ""
@@ -242,9 +288,33 @@ private struct Extent: Equatable {
 }
 
 private final class Metrics {
+    weak var scrollAnchor: UIView?
+
+    var scrollView: UIScrollView? {
+        var ancestor = scrollAnchor?.superview
+        while let view = ancestor {
+            if let scrollView = view as? UIScrollView { return scrollView }
+            ancestor = view.superview
+        }
+        return nil
+    }
+
     var extent = Extent()
     var reveal: Extent?
     var bottomMarkerY: CGFloat = 0
     var composerTop: CGFloat = 0
     var dragging = false
+}
+
+private struct ChatScrollAnchor: UIViewRepresentable {
+    let metrics: Metrics
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        metrics.scrollAnchor = view
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {}
 }
