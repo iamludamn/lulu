@@ -117,7 +117,7 @@ export async function pull(mode: Extract<Mode, { kind: "scheduled" }>, entry: Re
   const headers = new Headers({ Accept: "application/json, text/html;q=0.9, text/plain;q=0.8" });
   if (entry.etag) headers.set("If-None-Match", entry.etag);
   if (entry.modified) headers.set("If-Modified-Since", entry.modified);
-  const response = await fetch(mode.url, { headers, redirect: "error", signal: AbortSignal.timeout(10_000) });
+  const response = await fetch(mode.url, { headers, redirect: "manual", signal: AbortSignal.timeout(10_000) });
   if (response.status === 304) return {};
   if (!response.ok) throw new SourceError(response.status, `Source returned ${response.status}`);
   const data = await bytes(response);
@@ -193,7 +193,7 @@ export async function provider(key: string, path: string, method = "GET", body?:
 
 export async function providerRequest(name: string, url: string, key: string, method: string, body?: unknown, requestId?: string): Promise<Record<string, unknown>> {
   const response = await fetch(url, {
-    method, redirect: "error", signal: AbortSignal.timeout(10_000),
+    method, redirect: "manual", signal: AbortSignal.timeout(10_000),
     headers: { Authorization: `Bearer ${key}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...(requestId === undefined ? {} : { "Idempotency-Key": requestId }) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
