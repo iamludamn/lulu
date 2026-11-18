@@ -123,6 +123,12 @@ async function route(request: Request, host: ApiHost, pathname: string): Promise
   if (!pathname.startsWith(`${PREFIX}/`)) return notFound();
   const rest = pathname.slice(PREFIX.length).replace(/\/+$/, "");
   if (rest === "/ws") return botSocket(request, host);
+  if (rest === "/observability/api/v1/query") {
+    if (request.method !== "GET") return json({ error: "Method not allowed" }, 405, { Allow: "GET" });
+    const token = host.env.LULU_OBSERVABILITY_TOKEN;
+    if (!token || !await tokensMatch(bearer(request), token)) return unauthorized();
+    return host.objects.BOTS.getByName(BOT_ID).fetch("https://bot/sandbox-window" + new URL(request.url).search);
+  }
   if (rest === "/spaces/refresh" || rest === "/spaces/device") {
     const action = rest === "/spaces/refresh" ? "space-refresh" : "space-device";
     return host.objects.BOTS.getByName(BOT_ID).fetch("https://bot/" + action + new URL(request.url).search, {

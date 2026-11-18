@@ -22,6 +22,8 @@ import { CRON_KIND } from "../cron/doc.js";
 import { SANDBOX_KIND } from "../sandbox/doc.js";
 import { SANDBOX_LIFECYCLE, recoverSandboxLifecycle } from "../sandbox/lifecycle.js";
 import { createSandboxProvider } from "../sandbox/backends.js";
+import { observeSandboxActivity } from "../sandbox/activity.js";
+import { sandboxWindowQuery } from "../sandbox/report-api.js";
 import { checkItem } from "../panel/check.js";
 import { PanelDoc } from "../panel/doc.js";
 import { EMPTY_PANEL, type PanelState } from "../protocol/panel.js";
@@ -60,6 +62,7 @@ export class BotSession {
   readonly #host: DurableHost;
   #harness!: Harness;
   #root!: Conversation;
+  #accountingReady!: () => Promise<void>;
   #view!: { readonly value: ConversationView };
   #models!: Models;
   #selected: ModelRef | undefined;
@@ -162,6 +165,7 @@ export class BotSession {
     const root = await harness.root(BACKGROUND_CONTEXT, { agent: { model, thinkingLevel: "off" } });
     await root.configure({ model, tools: null }, BACKGROUND_CONTEXT);
     this.#root = root;
+    this.#accountingReady = await observeSandboxActivity(harness, root.id, telemetry.context, BACKGROUND_CONTEXT);
     this.#resumeAfterMcp = !host.catalogReady;
     if (!this.#resumeAfterMcp) harness.resume();
     const update = createMemoryUpdate(this.#host);
@@ -250,6 +254,7 @@ export class BotSession {
 
   fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
+    if (pathname === "/sandbox-window") return this.#accountingReady().then(() => sandboxWindowQuery(request, this.#harness, BACKGROUND_CONTEXT));
     if (pathname === "/memory/sources.changed" && request.method === "POST") return this.#reconcileDreaming().then(() => new Response(null, { status: 204 }));
     if (pathname === "/memory/source") return this.#memorySource(request);
     if (pathname === "/space-refresh" || pathname === "/space-webhook" || pathname === "/space-device") {

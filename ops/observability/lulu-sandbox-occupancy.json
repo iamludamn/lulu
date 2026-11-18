@@ -1,0 +1,803 @@
+{
+  "title": "Lulu sandbox occupancy",
+  "uid": "lulu-sandbox-occupancy",
+  "description": "Window-clipped application observations from the Durable accounting ledger. A separate datasource exposes the window results alongside the existing OpenTelemetry operation latency dashboards.",
+  "tags": [
+    "lulu"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 40,
+  "version": 1,
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "refresh": "",
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Window snapshot",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Subagent active time",
+      "description": "Durable generation segments, including model requests and tool waits. Queues, retry backoff, deferred polling sleeps, settled or stopped work are excluded.",
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 8,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lulu-sandbox-accounting"
+          },
+          "expr": "lulu_sandbox_window{measure=\"delegate_active_seconds\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{measure}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "N/A"
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Sandbox ready time",
+      "description": "Application-observed readiness from a successful open, through confirmed renewal, up to pause, destroy or the observed lease boundary. Excludes paused retention, startup and unknown time. Provider billing requires separate reconciliation.",
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 8,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lulu-sandbox-accounting"
+          },
+          "expr": "lulu_sandbox_window{measure=\"online_seconds\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{measure}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "N/A"
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Subagent-associated sandbox time",
+      "description": "Union of associated active segments intersected with ready time, calculated per physical resource incarnation. Overlapping delegates count once. Association is not evidence of CPU or tool execution.",
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 8,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lulu-sandbox-accounting"
+          },
+          "expr": "lulu_sandbox_window{measure=\"occupied_seconds\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{measure}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "N/A"
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Subagent-associated occupancy",
+      "description": "Subagent-associated sandbox seconds divided by ready sandbox seconds. N/A without known ready time. This measures association, not CPU or tool execution.",
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 8,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lulu-sandbox-accounting"
+          },
+          "expr": "lulu_sandbox_window{measure=\"occupancy\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{measure}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "N/A"
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Associated agent time",
+      "description": "Sum of each delegate's active intersection with its associated sandbox. Overlapping agents count separately.",
+      "gridPos": {
+        "x": 8,
+        "y": 5,
+        "w": 8,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lulu-sandbox-accounting"
+          },
+          "expr": "lulu_sandbox_window{measure=\"associated_agent_seconds\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{measure}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "N/A"
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Associated agents per online sandbox",
+      "description": "Associated agent seconds divided by ready sandbox seconds. Concurrent delegates on one sandbox can take this above one.",
+      "gridPos": {
+        "x": 16,
+        "y": 5,
+        "w": 8,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lulu-sandbox-accounting"
+          },
+          "expr": "lulu_sandbox_window{measure=\"parallelism\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{measure}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "N/A"
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "Ready time without an active subagent",
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Observed startup and resume time",
+      "description": "Application-observed provisioning and resume attempt time before the workspace is ready. Pending startup is provisional. Uncertain or failed attempts appear in the coverage row.",
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 8,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lulu-sandbox-accounting"
+          },
+          "expr": "lulu_sandbox_window{measure=\"startup_seconds\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{measure}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "N/A"
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Online with other associated work",
+      "description": "Ready time associated with active root or other non-delegate work, excluding time already counted as associated with a delegate.",
+      "gridPos": {
+        "x": 8,
+        "y": 10,
+        "w": 8,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lulu-sandbox-accounting"
+          },
+          "expr": "lulu_sandbox_window{measure=\"other_work_seconds\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{measure}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "N/A"
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Online without an observed association",
+      "description": "Ready time without an observed delegate or other generation association. This can include legitimate work, setup before first use or activity outside the instrumentation.",
+      "gridPos": {
+        "x": 16,
+        "y": 10,
+        "w": 8,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lulu-sandbox-accounting"
+          },
+          "expr": "lulu_sandbox_window{measure=\"unassociated_seconds\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{measure}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "N/A"
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "row",
+      "title": "Coverage and freshness",
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Unknown sandbox time",
+      "description": "Time with uncertain readiness after an unconfirmed operation, expired lease or workspace loss. Excluded from the denominator. Some pre-rollout resources are invisible until touched.",
+      "gridPos": {
+        "x": 0,
+        "y": 15,
+        "w": 8,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lulu-sandbox-accounting"
+          },
+          "expr": "lulu_sandbox_window{measure=\"unknown_sandbox_seconds\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{measure}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "N/A"
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Unknown subagent time",
+      "description": "Observed gap between the last persisted active observation and the next process startup. Excluded from active time. Abrupt interruption before the activity observer writes can also leave unobserved work.",
+      "gridPos": {
+        "x": 8,
+        "y": 15,
+        "w": 8,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lulu-sandbox-accounting"
+          },
+          "expr": "lulu_sandbox_window{measure=\"unknown_delegate_seconds\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{measure}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "N/A"
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Seconds within ledger coverage",
+      "description": "Selected window after instrumentation started and within retained Durable history. Does not assert every provider transition was observed.",
+      "gridPos": {
+        "x": 16,
+        "y": 15,
+        "w": 8,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lulu-sandbox-accounting"
+          },
+          "expr": "lulu_sandbox_window{measure=\"covered_seconds\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{measure}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "N/A"
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Seconds outside ledger coverage",
+      "description": "Portion of the selected window before instrumentation or the history cutoff, or after the query clock.",
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 8,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lulu-sandbox-accounting"
+          },
+          "expr": "lulu_sandbox_window{measure=\"uncovered_seconds\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{measure}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "N/A"
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "Age of last activity or ready confirmation",
+      "description": "Seconds since the latest captured generation state change or sandbox ready confirmation. A quiet system can have an old observation.",
+      "gridPos": {
+        "x": 8,
+        "y": 19,
+        "w": 8,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lulu-sandbox-accounting"
+          },
+          "expr": "lulu_sandbox_window{measure=\"observation_age_seconds\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{measure}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "N/A"
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "Open sandbox records",
+      "description": "Count of intersecting live accounting records, including provisional ready, startup and unknown records.",
+      "gridPos": {
+        "x": 16,
+        "y": 19,
+        "w": 8,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lulu-sandbox-accounting"
+          },
+          "expr": "lulu_sandbox_window{measure=\"open_sandboxes\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{measure}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "N/A"
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 19,
+      "type": "stat",
+      "title": "Open generation segments",
+      "description": "Count of intersecting provisional generation segments, including root work.",
+      "gridPos": {
+        "x": 0,
+        "y": 23,
+        "w": 8,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lulu-sandbox-accounting"
+          },
+          "expr": "lulu_sandbox_window{measure=\"open_agents\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{measure}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "N/A"
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    }
+  ]
+}
