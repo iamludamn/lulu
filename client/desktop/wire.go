@@ -68,11 +68,12 @@ func (e *entry) UnmarshalJSON(data []byte) error {
 }
 
 type viewFrame struct {
-	Reset   bool           `json:"reset"`
-	Before  *int64         `json:"before"`
-	Entries []entry        `json:"entries"`
-	Order   []jsonID       `json:"order"`
-	Docs    map[string]any `json:"docs"`
+	DeliveryReceipts bool           `json:"deliveryReceipts"`
+	Reset            bool           `json:"reset"`
+	Before           *int64         `json:"before"`
+	Entries          []entry        `json:"entries"`
+	Order            []jsonID       `json:"order"`
+	Docs             map[string]any `json:"docs"`
 }
 
 type conversation struct {

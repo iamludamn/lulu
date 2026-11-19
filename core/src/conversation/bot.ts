@@ -1,3 +1,7 @@
+import { markDeliveryCancellation, nextDeliveryAlarm, observeDelivery, reconcileDelivery } from "./delivery.js";
+import { ChatDeliveryDoc } from "./delivery-doc.js";
+import { chatDeliveryQuery } from "./delivery-report.js";
+import { SEND_TOOL } from "../protocol/send.js";
 import { nextPushAlarm, sendSpacePushes, spaceDevice } from "../space/push.js";
 import { handleSpaceRefresh, nextSpaceAlarm, receiveSpaceEvent, refreshDueSpaces, spaceError } from "../space/refresh.js";
 import { SpaceRefreshDoc, SpaceRefreshIndex, spaceEntries, spaceStatus } from "../space/doc.js";
@@ -51,7 +55,8 @@ const PROGRESS_WAIT_MS = 500;
 
 type ClientAttachment = { readonly role: "client"; readonly ready: boolean; readonly incremental?: boolean; readonly schedules?: boolean; readonly authenticated?: boolean };
 type HelloMessage = Extract<ClientMessage, { type: "hello" }>;
-type Command = Exclude<ClientMessage, HelloMessage>;
+type ReceiptMessage = Extract<ClientMessage, { type: "prompt.receipts" }>;
+type Command = Exclude<ClientMessage, HelloMessage | ReceiptMessage>;
 
 const reportError = (message: string, error: unknown, details: Readonly<Record<string, unknown>> = {}): void => {
   console.error(JSON.stringify({ message, ...details, error: error instanceof Error ? error.message : String(error) }));
@@ -166,6 +171,14 @@ export class BotSession {
     const root = await harness.root(BACKGROUND_CONTEXT, { agent: { model, thinkingLevel: "off" } });
     await root.configure({ model, tools: null }, BACKGROUND_CONTEXT);
     this.#root = root;
+    harness.observeCommits({ advance: ({ changes }) => {
+      if (changes.some((change) =>
+        (change.type === "submission" && change.value.conversationId === root.id && change.value.status === "unanswered") ||
+        (change.type === "entry" && change.value.conversationId === root.id &&
+          change.value.model?.some((message) => message.role === "toolResult" && message.toolName === SEND_TOOL && !message.isError))
+      )) void this.#updateDelivery().catch((error: unknown) => reportError("Chat delivery reconciliation failed", error));
+    }, end: () => {} });
+    if (await harness.snapshot(ChatDeliveryDoc, BACKGROUND_CONTEXT)) await this.#updateDelivery();
     this.#accountingReady = await observeSandboxActivity(harness, root.id, telemetry.context, BACKGROUND_CONTEXT);
     this.#resumeAfterMcp = !host.catalogReady;
     if (!this.#resumeAfterMcp) harness.resume();
@@ -256,6 +269,7 @@ export class BotSession {
 
   fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
+    if (pathname === "/chat-delivery-window") return chatDeliveryQuery(request, this.#harness);
     if (pathname === "/sandbox-window") return this.#accountingReady().then(() => sandboxWindowQuery(request, this.#harness, BACKGROUND_CONTEXT));
     if (pathname === "/memory/sources.changed" && request.method === "POST") return this.#reconcileDreaming().then(() => new Response(null, { status: 204 }));
     if (pathname === "/memory/source") return this.#memorySource(request);
@@ -315,6 +329,14 @@ export class BotSession {
 
     if (this.#attachmentOf(socket)?.ready !== true) {
       this.#reject(socket, 1008, "Hello required");
+      return;
+    }
+
+    if (frame.type === "prompt.receipts") {
+      await this.#updateDelivery(frame).catch((error: unknown) => {
+        reportError("Chat receipt commit failed", error);
+        socket.close(1011, "Retry delivery receipts");
+      });
       return;
     }
 
@@ -402,17 +424,26 @@ export class BotSession {
       }
       case "prompt.submit": {
         const queuedAt = Date.now();
-        return telemetry.startSpan({ name: "prompt.admission", attributes: {
+        const release = this.#host.env.LULU_RELEASE ?? "unknown";
+        return telemetry.startSpan({
+          name: "chat.delivery.received",
+          attributes: {
+            "lulu.bot.id": this.#host.name, "lulu.request.id": command.requestId, "lulu.release": release,
+            "lulu.prompt.chars": command.content.length, "lulu.prompt.when_busy": command.whenBusy,
+          },
+        }, (received) => received.startSpan({ name: "prompt.admission", attributes: {
           "lulu.bot.id": this.#host.name, "lulu.agent": "chat", "lulu.conversation.id": String(this.#root.id), "lulu.conversation.kind": "root",
           "lulu.memory.request_id": command.requestId,
-        } }, (span) => this.#inPromptOrder(() => this.#submitPrompt(socket, command, span, queuedAt)));
+        } }, (span) => this.#inPromptOrder(() => this.#submitPrompt(socket, command, { release, received, span, queuedAt }))));
       }
       case "prompt.abort":
-        if (this.#resumeAfterMcp) await this.#mcpReady;
-        await this.#root.abort(BACKGROUND_CONTEXT);
-        this.#broadcastState();
-        this.#acknowledge(socket, command.requestId);
-        return;
+        return this.#inPromptOrder(async () => {
+          if (this.#resumeAfterMcp) await this.#mcpReady;
+          await markDeliveryCancellation(this.#harness);
+          await this.#root.abort(BACKGROUND_CONTEXT);
+          this.#broadcastState();
+          this.#acknowledge(socket, command.requestId);
+        });
       case "model.select": {
         const selected: ModelRef = command.model;
         const config = await chatModelConfig(this.#models, this.#host.env, selected);
@@ -448,16 +479,25 @@ export class BotSession {
     }
   }
 
-  async #submitPrompt(socket: Socket, command: Extract<Command, { type: "prompt.submit" }>, span: TelemetrySpan, queuedAt: number): Promise<void> {
+  async #submitPrompt(socket: Socket, command: Extract<Command, { type: "prompt.submit" }>, timing: { release: string; received: TelemetrySpan; span: TelemetrySpan; queuedAt: number }): Promise<void> {
+    const { release, received, span, queuedAt } = timing;
     span.setAttributes({ "lulu.prompt.queue_ms": Date.now() - queuedAt });
     const injection = await prepareInjection(this.#host, this.#harness, command.requestId, command.content, this.#view.value, chatModelRef(this.#host.env, this.#selected), span);
     span.setAttributes({ "lulu.prompt.memory_ready_ms": Date.now() - queuedAt });
     if (this.#resumeAfterMcp) await this.#mcpReady;
-    const firstBinding = await admitPrompt(this.#harness, this.#root, this.#view.value, command, injection);
+    const { request, firstBinding } = await admitPrompt(this.#harness, this.#root, this.#view.value, command, injection, { release, span: received });
     span.setAttributes({ "lulu.prompt.admission_ms": Date.now() - queuedAt, "lulu.prompt.replay": !firstBinding, "lulu.memory.outcome": injection.outcome, "lulu.memory.selected": injection.selected.length });
+    if (request) observeDelivery(this.#host.telemetry, this.#host.name, { request, stage: "accepted", at: request.acceptedAt });
+    else received.setAttributes({ "lulu.delivery.replayed": true });
     void this.#refreshAlarm().catch((error: unknown) => reportError("Prompt alarm reconciliation failed", error));
     this.#broadcastState();
     this.#acknowledge(socket, command.requestId);
+  }
+
+  async #updateDelivery(receipt?: ReceiptMessage): Promise<void> {
+    for (const event of await reconcileDelivery(this.#harness, this.#root, Date.now(), receipt)) {
+      observeDelivery(this.#host.telemetry, this.#host.name, event);
+    }
   }
 
   #inPromptOrder<T>(task: () => Promise<T>): Promise<T> {
@@ -525,7 +565,7 @@ export class BotSession {
     const { conversation, docs, before, entries: all } = this.#view.value;
     return {
       type: "state",
-      view: { conversation, docs, before, ...(reset ? { reset: true } : {}), order: all.map((entry) => String(entry.id)), entries },
+      view: { conversation, docs, before, deliveryReceipts: true, ...(reset ? { reset: true } : {}), order: all.map((entry) => String(entry.id)), entries },
       progress: this.#progress,
       mcp: this.#mcp,
       panel: this.#panel,
@@ -638,6 +678,7 @@ export class BotSession {
     try {
       await this.#reconcileDreaming();
       await expireRequests(this.#harness, this.#root, now);
+      await this.#updateDelivery();
       await recoverMemoryUpdates(this.#harness, this.#root, createMemoryUpdate(this.#host));
       outcome = await fireSchedules(this.#harness, parentId, selected, now);
       this.#spaceWork ??= refreshDueSpaces(this.#harness, this.#host.env, now).then(() => sendSpacePushes(this.#harness, this.#host.env, Date.now())).finally(() => { this.#spaceWork = undefined; });
@@ -658,8 +699,9 @@ export class BotSession {
 
   #refreshAlarm(): Promise<void> {
     return this.#serializeAlarmUpdate(async () => {
-      const [other, space, push] = await Promise.all([nextAlarmAt(this.#harness), nextSpaceAlarm(this.#harness), nextPushAlarm(this.#harness, this.#host.env)]);
-      const due = Math.min(other ?? Infinity, Math.max(Date.now() + 1000, Math.min(space ?? Infinity, push ?? Infinity)));
+      const [other, space, push, delivery] = await Promise.all([nextAlarmAt(this.#harness), nextSpaceAlarm(this.#harness), nextPushAlarm(this.#harness, this.#host.env), nextDeliveryAlarm(this.#harness)]);
+      const serviceDeadline = Math.min(space ?? Infinity, push ?? Infinity, delivery ?? Infinity);
+      const due = Math.min(other ?? Infinity, Math.max(Date.now() + 1000, serviceDeadline));
       await replaceAlarm(this.#host.alarm, Number.isFinite(due) ? due : undefined);
     });
   }

@@ -1,3 +1,4 @@
+import { bindDelivery } from "../conversation/delivery-doc.js";
 import { InjectionBindings } from "../memory/doc.js";
 import { entryRange } from "../conversation/view.js";
 import type { Context } from "@earendil-works/chord/context";
@@ -57,6 +58,7 @@ export async function chaseDeliveries(harness: Harness, root: Conversation, entr
     }, BACKGROUND_CONTEXT);
     await harness.commit(async (tx) => {
       const id = await root.submit(tx, { type: "input", content: NUDGE_PROMPT, requestId, whenBusy: "followUp" });
+      await bindDelivery(tx, [owed.message], id);
       const bindings = await tx.doc(InjectionBindings);
       const originalRequest = bindings.requests[String(owed.message)];
       if (originalRequest !== undefined) bindings.requests[String(id)] = originalRequest;

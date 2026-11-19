@@ -1,3 +1,4 @@
+import { bindDelivery } from "../conversation/delivery-doc.js";
 import { InjectionBindings } from "../memory/doc.js";
 import { awaitWithContext, withCancel } from "@earendil-works/chord/context";
 import { REQUEST_TIMEOUT_MS } from "./limits.js";
@@ -95,6 +96,7 @@ export async function settle<I extends Settling, S extends { phase: string }>(in
     const notice = parent ? await parent.submit(tx, { type: "input", content: noticeText(short, status, input.task, text, input.token), requestId: input.noticeId }) : undefined;
     const run = await tx.doc(RunFamily, input.runId, { id: input.runId, task: input.task, description: "", origin: [], agent: "", cwd: "" });
     if (notice !== undefined) {
+      await bindDelivery(tx, run.origin, notice);
       const bindings = await tx.doc(InjectionBindings);
       const requestId = [...run.origin].reverse().map((id) => bindings.requests[String(id)]).find((id) => id !== undefined);
       if (requestId !== undefined) bindings.requests[String(notice)] = requestId;

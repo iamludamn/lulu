@@ -40,6 +40,7 @@ public struct ViewFrame: Decodable, Sendable {
     let entries: [ConversationEntry]
     let order: [String]?
     let reset: Bool?
+    let deliveryReceipts: Bool?
     let before: Int?
     let docs: [String: JSONValue]
     let conversation: [String: JSONValue]?
