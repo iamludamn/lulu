@@ -613,7 +613,7 @@ export class BotSession {
   }
 
   async #reloadMcp(name?: string): Promise<McpStatus[]> {
-    this.#botServers = await mcpStore(this.#host, this.#host.name).servers();
+    this.#botServers = await mcpStore(this.#host).servers();
     await this.#alarm.run(() => this.#reconnectMcp(name));
     return this.#mcp;
   }
