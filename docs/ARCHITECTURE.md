@@ -1,40 +1,22 @@
 # Architecture
 
-lulu runs on a Cloudflare Worker with SQLite-backed Durable Objects. The native clients use the Worker API and WebSocket. The Worker also serves the web app for MCP administration at `/mcp`.
+The Cloudflare Worker serves the API and MCP administration. Pi Durable runs in SQLite-backed Durable Objects. The native clients expose [Panel](panel-and-assets.md), [Chat](chat.md), and [Assets](panel-and-assets.md).
 
-## Runtime boundaries
+## Core APIs
 
-`apps/cf/src/worker.ts` delegates requests to `core/src/server/api.ts`. `apps/cf/src/host.ts` implements the host interfaces in `core/src/host/types.ts`: storage, alarms, WebSockets, object addressing, telemetry, and execution services. `apps/cf/src/objects.ts` exports the Cloudflare Durable Object classes.
-
-The core uses Pi's extension and tool APIs. `core/src/agent/catalog.ts` maps persisted extension names to implementations and installs the harness. Sessions persist extension and tool names rather than executable code. Use Pi's extension points and the existing feature modules when adding behavior.
-
-The Durable path must remain independent of the operating system and filesystem. Host-specific work belongs in an adapter or execution environment. The root `check` command enforces the existing ban on `node:` and `cloudflare:` imports in the core.
-
-The API is rooted at `/api/bots/main/`. WebSockets carry conversation activity. HTTP routes expose memory, schedules, artifacts, spaces, and MCP administration. See [Security](../SECURITY.md) for the access boundary for the fixed `main` bot.
-
-## State and recovery
-
-| Owner | State |
+| API | Purpose |
 | --- | --- |
-| Bot Durable Object | Conversation runtime, transcripts, scheduled work, MCP authorization |
-| Memory Durable Object | Cross-conversation memory files and processing state |
-| Artifact Durable Object | Artifact metadata and versions |
-| S3-compatible storage | Artifact bytes |
-| `LULU_MCP` KV | Encrypted MCP server configuration and legacy authorization data |
+| [`/api/bots/main/ws`](../core/src/protocol/wire.ts) | Chat, client state, and card actions. |
+| [`/api/bots/main/*`](../core/src/server/api.ts) | HTTP access to schedules, memory, artifacts, Spaces, and MCP configuration. |
+| [Pi Durable extensions](../core/src/agent/catalog.ts) | Register tools and model context. Persist recoverable state in Docs and use request IDs for replayable side effects. |
 
-Pi Durable tasks can replay. Recoverable extension state belongs in a Doc committed atomically with the transcript. Model-visible state uses `section`. Tools explicitly declare their replay behavior. External side effects need request-ID-based idempotency; in-memory flags cannot protect a retry after recovery.
+## Core entities
 
-`core/src/conversation/` coordinates submissions and bot activity. Feature modules such as `memory`, `delegate`, `cron`, `sandbox`, `artifact`, `panel`, and `send` own their data and extensions. Add to these boundaries before introducing another layer.
-
-## Feature guides
-
-| Guide | Scope |
+| Entity | Owns |
 | --- | --- |
-| [Chat](chat.md) | Messages, request identity, delivery, and WebSocket state |
-| [Panel and Assets](panel-and-assets.md) | Widgets, cards, Spaces, and artifact storage |
-| [Delegation and scheduling](execution.md) | Delegate runs, sandbox workspaces, scheduled jobs, and alarm recovery |
-| [Memory](memory.md) | Sources, dreaming, published resources, and request-scoped injection |
+| [Bot](../core/src/conversation/bot.ts) | Root conversation, transcript, and [delegation and scheduling](execution.md). |
+| [Memory](memory.md) | Published memory files, background processing, and request-scoped retrieval. |
+| [Artifact](../core/src/artifact/object.ts) | File metadata and versions. S3-compatible storage holds file contents. |
+| [MCP configuration](../core/src/agent/mcp-store.ts) | Encrypted connection configuration in Workers KV. Bot storage holds OAuth authorization. |
 
-## Integrations
-
-Pi calls the configured model provider. Workers AI supplies the memory decision model. E2B provides optional sandboxes, S3-compatible storage holds artifact bytes, and the Bot connects to MCP servers and the voice provider. See [Deployment](deployment.md) for configuration and [Observability](observability.md) for telemetry.
+[Deployment](deployment.md) · [Observability](observability.md)
