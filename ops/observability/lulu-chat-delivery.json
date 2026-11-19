@@ -1,0 +1,263 @@
+{
+  "title": "Lulu chat delivery",
+  "uid": "lulu-chat-delivery",
+  "description": "Accepted prompt cohorts from the Durable delivery ledger. The selected range groups by acceptance time, up to seven days. Outcomes reflect the latest known state, including receipts received after the selected range. Data starts when instrumentation is deployed.",
+  "tags": [
+    "lulu"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 40,
+  "version": 1,
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "P95 acceptance to first reply",
+      "description": "Nearest-rank P95 over prompts with a committed user-visible send. Interim and final sends both qualify.",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 8,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "lulu_chat_delivery_window{measure=\"first_reply_p95_seconds\",from=\"${__from}\",to=\"${__to}\",release=\"all\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "P95 acceptance to first reply"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "N/A"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "P95 acceptance to first reply by release",
+      "description": "Nearest-rank P95 over prompts with a committed user-visible send. Interim and final sends both qualify.",
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 8,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "lulu_chat_delivery_window{measure=\"first_reply_p95_seconds\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{release}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "N/A"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Confirmed final delivery",
+      "description": "Unique accepted prompts with a client receipt for the committed final reply divided by all accepted prompts in the cohort.",
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 8,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "lulu_chat_delivery_window{measure=\"final_delivery_fraction\",from=\"${__from}\",to=\"${__to}\",release=\"all\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "Confirmed final delivery"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "N/A"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Confirmed final delivery by release",
+      "description": "Unique accepted prompts with a client receipt for the committed final reply divided by all accepted prompts in the cohort.",
+      "gridPos": {
+        "x": 8,
+        "y": 5,
+        "w": 8,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "lulu_chat_delivery_window{measure=\"final_delivery_fraction\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{release}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "N/A"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Past deadline without confirmed result",
+      "description": "Accepted prompts past their deadline with no confirmed final delivery. Includes terminal failures and excludes explicit cancellations.",
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 8,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "lulu_chat_delivery_window{measure=\"overdue\",from=\"${__from}\",to=\"${__to}\",release=\"all\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "Past deadline without confirmed result"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "N/A"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Past deadline without confirmed result by release",
+      "description": "Accepted prompts past their deadline with no confirmed final delivery. Includes terminal failures and excludes explicit cancellations.",
+      "gridPos": {
+        "x": 16,
+        "y": 5,
+        "w": 8,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "lulu_chat_delivery_window{measure=\"overdue\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{release}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "N/A"
+        }
+      },
+      "options": {
+        "graphMode": "none",
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 7,
+      "type": "bargauge",
+      "title": "Accepted prompts by release and outcome",
+      "description": "Missing receipt means a final reply was committed. No result means the deadline passed without a committed final reply or a recorded terminal outcome.",
+      "gridPos": {
+        "x": 0,
+        "y": 11,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lulu-sandbox-accounting"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "lulu_chat_delivery_window{measure=\"outcome\",from=\"${__from}\",to=\"${__to}\"}",
+          "instant": true,
+          "range": false,
+          "legendFormat": "{{release}} · {{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "N/A"
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic"
+      }
+    }
+  ]
+}

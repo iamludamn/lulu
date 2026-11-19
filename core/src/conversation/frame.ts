@@ -1,4 +1,4 @@
-import type { ClientMessage } from "../protocol/wire.js";
+import type { ClientMessage, DeliveryReceipt } from "../protocol/wire.js";
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
 const isString = (value: unknown): value is string => typeof value === "string";
@@ -16,6 +16,11 @@ function parseClientMessage(value: Record<string, unknown>): ClientMessage {
     return { type, requestId, content, whenBusy };
   }
   if (type === "history.load" && isString(requestId) && Number.isSafeInteger(value.before) && Number(value.before) > 0) return { type, requestId, before: Number(value.before) };
+  if (type === "prompt.receipts" && (value.source === "live" || value.source === "snapshot" || value.source === "history") &&
+      Array.isArray(value.receipts) && value.receipts.length > 0 && value.receipts.length <= 32 &&
+      value.receipts.every((item: unknown): item is DeliveryReceipt => isRecord(item) && isString(item.requestId) && isString(item.callId))) {
+    return { type, source: value.source, receipts: value.receipts };
+  }
   if (type === "prompt.abort" && isString(requestId)) return { type, requestId };
   if (type === "model.select" && isString(requestId) && isRecord(model) && isString(model.provider) && isString(model.id)) {
     return { type, requestId, model: { provider: model.provider, id: model.id } };

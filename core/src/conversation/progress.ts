@@ -1,3 +1,4 @@
+import { ChatDeliveryDoc } from "./delivery-doc.js";
 import { RequestDeadlinesDoc } from "./deadlines.js";
 import type { Context } from "@earendil-works/chord/context";
 import { type CommitPublication, defineDoc, type Harness, type SubmissionId } from "@earendil-works/pi-durable";
@@ -158,7 +159,10 @@ export function trackProgress(
   onError: (error: unknown) => void,
 ): () => void {
   const submissions = trackSubmissions(harness);
-  const stop = trackSnapshot(harness, (ctx) => computeProgress(harness, entries, ctx, submissions.read), progress, context, onError);
+  const stop = trackSnapshot(
+    harness, (ctx) => computeProgress(harness, entries, ctx, submissions.read), progress, context, onError,
+    ({ changes }) => changes.some((change) => change.type !== "document" || change.record.kind !== ChatDeliveryDoc.definition.kind),
+  );
   return () => {
     stop();
     submissions.stop();

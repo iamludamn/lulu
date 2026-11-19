@@ -1,4 +1,5 @@
-import { defineTool, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import { ChatDeliveryDoc } from "../conversation/delivery-doc.js";
+import { defineTool, LiveDoc, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
 import { SPACE_ID } from "../protocol/panel.js";
 import type { SendCard, SendInput } from "../protocol/send.js";
 import { ARTIFACT_REF, SEND_TOOL, SendInput as SendParams } from "../protocol/send.js";
@@ -9,7 +10,7 @@ const DOCUMENT_SHAPE = /^(#{1,6} |\|.+\|\s*$)/m;
 
 export type ArtifactCheck = (name: string, version: number) => Promise<boolean>;
 
-type SendDetails = { type: string; end: boolean };
+type SendDetails = { type: string; end: boolean; requestIds?: string[] };
 
 const DESCRIPTION = [
   "Say something to the user in the Lulu chat. This is your only voice: the user only ever sees send_to_user calls, and your plain assistant text is a private scratchpad they never see.",
@@ -76,21 +77,26 @@ function fail(text: string): ToolExecutionResult<SendDetails> {
   return { output: [{ type: "text", text }], details: { type: "error", end: false }, isError: true };
 }
 
-export const createSendTool = (exists: ArtifactCheck | undefined) =>
+export const createSendTool = (exists: ArtifactCheck | undefined): ToolRegistration<typeof SendParams, SendDetails> =>
   defineTool({
     name: SEND_TOOL,
     description: DESCRIPTION,
     parameters: SendParams,
     replay: "safe",
     executionMode: "sequential",
-    execute: async (args) => {
+    execute: async (args, api, context) => {
       const input = args as SendInput;
       const refused = misuse(input) ?? (input.widget === undefined ? undefined : await missingAsset(input.widget, exists));
       if (refused !== undefined) return fail(refused);
       const end = input.end_turn === true;
+      const inputs = (await api.snapshot(LiveDoc, api.conversationId, context))?.run?.inputs ?? [];
+      const delivery = inputs.length > 0 ? await api.snapshot(ChatDeliveryDoc, context) : undefined;
+      const requestIds = delivery?.requests
+        .filter((request) => !request.final && inputs.some((id) => request.submissions.includes(id)))
+        .map((request) => request.requestId) ?? [];
       return {
         output: [{ type: "text", text: end ? "Delivered. Your turn is complete." : "Delivered." }],
-        details: { type: input.type, end },
+        details: { type: input.type, end, ...(requestIds.length > 0 ? { requestIds } : {}) },
         ...(end && { control: { terminate: true } }),
       };
     },

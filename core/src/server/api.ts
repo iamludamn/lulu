@@ -127,7 +127,9 @@ async function route(request: Request, host: ApiHost, pathname: string): Promise
     if (request.method !== "GET") return json({ error: "Method not allowed" }, 405, { Allow: "GET" });
     const token = host.env.LULU_OBSERVABILITY_TOKEN;
     if (!token || !await tokensMatch(bearer(request), token)) return unauthorized();
-    return host.objects.BOTS.getByName(BOT_ID).fetch("https://bot/sandbox-window" + new URL(request.url).search);
+    const url = new URL(request.url);
+    const path = url.searchParams.get("query")?.startsWith("lulu_chat_delivery_window{") ? "/chat-delivery-window" : "/sandbox-window";
+    return host.objects.BOTS.getByName(BOT_ID).fetch("https://bot" + path + url.search);
   }
   if (rest === "/spaces/refresh" || rest === "/spaces/device") {
     const action = rest === "/spaces/refresh" ? "space-refresh" : "space-device";
