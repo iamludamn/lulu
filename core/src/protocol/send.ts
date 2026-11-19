@@ -20,8 +20,12 @@ const AssetCard = Type.Object({
 });
 
 const ScheduleOverviewRequest = Type.Object({
-  body: Type.Object({ kind: Type.Literal("schedules") }, { additionalProperties: false }),
-}, { additionalProperties: false, description: "A Schedule Overview filled from the saved jobs by the server" });
+  kind: WidgetCard.properties.kind,
+  panel: Type.Object({
+    body: Type.Object({ kind: Type.Literal("schedules") }, { additionalProperties: false }),
+  }, { additionalProperties: false, description: "A Schedule Overview filled from the saved jobs by the server" }),
+});
+export type ScheduleOverviewRequest = Static<typeof ScheduleOverviewRequest>;
 
 export const SendInput = Type.Object({
   type: Type.Union([Type.Literal("text"), Type.Literal("widget")]),
@@ -33,13 +37,12 @@ export const SendInput = Type.Object({
 
 export const ModelSendInput = Type.Object({
   ...SendInput.properties,
-  widget: Type.Optional(Type.Union([Type.Object({ ...WidgetCard.properties, panel: ModelWidgetInput }), Type.Object({ ...WidgetCard.properties, panel: ScheduleOverviewRequest }), AssetCard], { description: "Card for type widget: a Widget for Panel or an Asset for Assets" })),
+  widget: Type.Optional(Type.Union([Type.Object({ ...WidgetCard.properties, panel: ModelWidgetInput }), ScheduleOverviewRequest, AssetCard], { description: "Card for type widget: a Widget for Panel or an Asset for Assets" })),
 });
 
 export type SendInput = Static<typeof SendInput>;
 export type ModelSendInput = Static<typeof ModelSendInput>;
-type ModelSendCard = NonNullable<ModelSendInput["widget"]>;
-export function isScheduleOverviewRequest(card: ModelSendCard | undefined): card is { kind: "panel"; panel: Static<typeof ScheduleOverviewRequest> } {
+export function isScheduleOverviewRequest(card: SendCard | ScheduleOverviewRequest | undefined): card is ScheduleOverviewRequest {
   return card?.kind === "panel" && card.panel?.body?.kind === "schedules";
 }
 

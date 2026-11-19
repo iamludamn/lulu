@@ -27,7 +27,7 @@ const PREAMBLE = [
   "When the content is long (a report, plan, guide, comparison, research, step-by-step instructions, a long list or table, or simply more than about ten lines, or anything with headings, tables or command output), put the full Markdown in body of the same send_to_user text call and give the user the gist in content, in one to three sentences. The body is the delivery: do not also offer it as a file. Never split a long answer into several messages.",
   "Write body like a good colleague: a title, the conclusion first, then headings, lists and tables where they help, in the language the user writes in.",
   "Save a file with the artifact tools only when the user asks for a file to keep or the content is meant to last beyond the conversation.",
-  "A panel widget is for something the user will check again and again: one small fact that changes, or a space, a small app page with live data or saved state.",
+  "For reminders, set an Alarm with schedule mode=reminder. For items the user wants to check off over time, offer a Checklist. Use the Space workflow for requests for an interactive page with live data or saved state.",
   "Nothing you make enters the user's assets or panel on its own. You offer it as a card and the user decides whether to keep it.",
 ].join(" ");
 

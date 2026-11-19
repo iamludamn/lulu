@@ -5,14 +5,18 @@ import { createModels } from '@earendil-works/pi-ai/models';
 import { AssistantEntry, createRegistry, createSession, defineExtension, Harness, MemoryStorage, ToolResultEntry } from '@earendil-works/pi-durable';
 import { withoutSchedules } from '../dist/conversation/compat.js';
 import { parseFrame } from '../dist/conversation/frame.js';
+import { fireSchedules, nextScheduleAlarm, scheduleEntries } from '../dist/cron/alarm.js';
 import { CronJobsDoc } from '../dist/cron/doc.js';
 import { fireDue } from '../dist/cron/engine.js';
 import { withScheduleOverview } from '../dist/cron/overview.js';
 import { ScheduleTool } from '../dist/cron/tool.js';
+import { DelegateIndex } from '../dist/delegate/runs.js';
 import { PanelDoc } from '../dist/panel/doc.js';
+import { checkItem } from '../dist/panel/check.js';
 import { SCHEDULE_WIDGET_ID } from '../dist/protocol/panel.js';
 import { SEND_TOOL } from '../dist/protocol/send.js';
 import { keepWidget } from '../dist/send/keep.js';
+import { makeOutcome, startMake } from '../dist/send/make.js';
 import { deliveredSentIn, LegacyScheduleOfferEntry } from '../dist/send/sent.js';
 import { createSendTool } from '../dist/send/tool.js';
 
@@ -103,7 +107,7 @@ test('projection reads legacy jobs, preserves all lifecycle states and blocks de
     );
   }, ctx);
   await f.execute(100, { action: 'pause', id: 'legacy-paused' });
-  await f.session.commit(tx => fireDue(tx, now, async () => {}), ctx);
+  await fireDue(f.session, now, async () => {});
   const deleted = await f.execute(1, create('Deleted'));
   await f.execute(101, { action: 'delete', id: deleted.details.id });
   await f.execute(1, create('Deleted'));
@@ -178,7 +182,7 @@ test('an accepted overview projects current jobs while the chat card stays a sna
   assert.equal((await rows()).find(row => row.id === first.details.id).state, 'paused');
   await f.execute(4, { action: 'resume', id: first.details.id });
   assert.equal((await rows()).find(row => row.id === first.details.id).state, 'active');
-  await f.session.commit(tx => fireDue(tx, scheduledFor, async () => {}), ctx);
+  await fireDue(f.session, scheduledFor, async () => {});
   const fired = (await rows()).find(row => row.id === first.details.id);
   assert.equal(fired.state, 'done');
   assert.equal(fired.lastRunAt, scheduledFor);
@@ -220,17 +224,13 @@ test('old clients receive stable entry IDs and other widgets in both live state 
   assert.equal(parseFrame('{"type":"hello","schedules":true}').schedules, true);
 });
 
-test('Pi delivers the Schedule Overview as a regular send_to_user result', async t => {
-  const steps = [
-    [toolCall('schedule', 'create', create('Daily'))],
-    [toolCall(SEND_TOOL, 'text', { type: 'text', content: 'Scheduled.' })],
-    [toolCall(SEND_TOOL, 'overview', overview)],
-  ];
+async function chatFixture(t, steps) {
   const model = { id: 'mock', provider: 'mock', api: 'openai-completions', name: 'mock', contextWindow: 100_000, maxTokens: 4_000, input: ['text'], reasoning: false, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
   const models = Object.assign(createModels(), {
     getModel: () => model,
-    streamSimple: () => {
-      const content = steps.shift() ?? assert.fail('the final card should end the turn');
+    streamSimple: (_model, context) => {
+      const step = steps.shift() ?? assert.fail('unexpected model call');
+      const content = typeof step === 'function' ? step(context) : step;
       const message = {
         role: 'assistant', content, api: model.api, provider: model.provider, model: model.id, stopReason: 'toolUse', timestamp: Date.now(),
         usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { ...model.cost, total: 0 } },
@@ -242,8 +242,18 @@ test('Pi delivers the Schedule Overview as a regular send_to_user result', async
   registry.install(defineExtension({ name: 'test-chat', tools: [ScheduleTool, createSendTool(undefined)] }));
   const harness = await Harness.open(new MemoryStorage(), { registry, models }, ctx);
   t.after(() => harness.close(ctx));
-  const root = await harness.root(ctx, { agent: { model: { provider: model.provider, modelId: model.id } } });
+  const selected = { provider: model.provider, modelId: model.id };
+  const root = await harness.root(ctx, { agent: { model: selected } });
   await root.configure({ tools: null }, ctx);
+  return { harness, root, selected };
+}
+
+test('Pi delivers the Schedule Overview as a regular send_to_user result', async t => {
+  const { harness, root } = await chatFixture(t, [
+    [toolCall('schedule', 'create', create('Daily'))],
+    [toolCall(SEND_TOOL, 'text', { type: 'text', content: 'Scheduled.' })],
+    [toolCall(SEND_TOOL, 'overview', overview)],
+  ]);
   await (await root.submit({ type: 'input', content: 'Schedule a daily update.' }, ctx)).wait(ctx);
   const { items } = await root.entries({ order: 'ascending' }, 100, undefined, ctx);
   assert.ok(items.every(entry => !LegacyScheduleOfferEntry.is(entry)));
@@ -252,4 +262,82 @@ test('Pi delivers the Schedule Overview as a regular send_to_user result', async
   assert.equal(sends[1].input.widget.panel.body.rows[0].name, 'Daily');
   await keepWidget(harness, items, 'overview', true, 'keep');
   assert.equal((await harness.snapshot(PanelDoc, ctx)).widgets[widgetId].origin, 'overview');
+});
+
+test('simultaneous Alarms wake the main conversation once per occurrence and deliver through send_to_user', async t => {
+  const scheduledFor = Math.floor(Date.now() / 60_000) * 60_000 + 120_000;
+  const at = new Date(scheduledFor).toISOString();
+  const reminder = (callId, content) => context => {
+    const user = context.messages.filter(message => message.role === 'user').at(-1);
+    assert.match(JSON.stringify(user.content), /Scheduled Alarm.*send_to_user/);
+    assert.ok(JSON.stringify(user.content).includes(content));
+    return [toolCall(SEND_TOOL, callId, { type: 'text', content, end_turn: true })];
+  };
+  const { harness, root, selected } = await chatFixture(t, [
+    [toolCall('schedule', 'once', { ...create('Pick up parcel', once(at)), mode: 'reminder', prompt: 'Pick up your parcel' })],
+    [toolCall('schedule', 'daily', { ...create('Take a break'), time: at.slice(11, 16), tz: 'UTC', mode: 'reminder', prompt: 'Take a break' })],
+    [toolCall(SEND_TOOL, 'confirmation', { type: 'text', content: 'Alarms set.' })],
+    [toolCall(SEND_TOOL, 'overview', overview)],
+    reminder('once-reminder', 'Pick up your parcel'),
+    reminder('daily-reminder', 'Take a break'),
+  ]);
+  const initial = await root.submit({ type: 'input', content: 'Set a one-time and a daily reminder.' }, ctx);
+  assert.equal((await initial.wait(ctx)).status, 'done');
+  const entries = async () => (await root.entries({ order: 'ascending' }, 100, undefined, ctx)).items;
+  await keepWidget(harness, await entries(), 'overview', true, 'keep');
+  assert.equal(await nextScheduleAlarm(harness, 0), scheduledFor);
+  assert.deepEqual(await fireSchedules(harness, root, selected, scheduledFor - 1), { fired: [], expired: [] });
+  assert.equal((await fireSchedules(harness, root, selected, scheduledFor)).fired.length, 2);
+  assert.deepEqual(await fireSchedules(harness, root, selected, scheduledFor), { fired: [], expired: [] });
+  const { jobs } = await harness.snapshot(CronJobsDoc, ctx);
+  for (const job of jobs) {
+    assert.equal((await (await harness.submission(job.lastRun.submissionId, ctx)).wait(ctx)).status, 'done');
+  }
+  assert.deepEqual((await scheduleEntries(harness)).map(row => row.lastRun), [
+    { scheduledFor, status: 'done' }, { scheduledFor, status: 'done' },
+  ]);
+  const panel = await withScheduleOverview(harness, await harness.snapshot(PanelDoc, ctx), ctx);
+  const [dailyRow, onceRow] = panel.widgets[widgetId].body.rows;
+  assert.equal(onceRow.state, 'done');
+  assert.equal(dailyRow.nextRunAt, scheduledFor + 86_400_000);
+  assert.equal(await nextScheduleAlarm(harness, scheduledFor), dailyRow.nextRunAt);
+  assert.deepEqual((await harness.snapshot(DelegateIndex, ctx))?.ids ?? [], []);
+  const transcript = await entries();
+  assert.deepEqual(transcript.filter(entry => entry.kind === 'lulu.input').map(entry => entry.data),
+    jobs.map(job => ({ kind: 'schedule_message', scheduleId: job.id, scheduledFor })));
+  assert.deepEqual(deliveredSentIn(transcript).slice(2).map(send => send.input.content), ['Pick up your parcel', 'Take a break']);
+});
+
+test('message-to-widget creates a Checklist that can be kept and checked, or explains when no items apply', async t => {
+  const text = content => ({ type: 'text', content, end_turn: true });
+  const checklist = { type: 'widget', widget: { kind: 'panel', panel: {
+    id: 'trip-checklist', title: 'Trip', size: 'm', body: { kind: 'list', items: [{ title: 'Pack your passport', done: false }] },
+  } }, end_turn: true };
+  const { harness, root } = await chatFixture(t, [
+    [toolCall(SEND_TOOL, 'packing-reply', text('Pack your passport.'))],
+    context => {
+      const input = JSON.stringify(context.messages.at(-1).content);
+      assert.match(input, /make a Checklist/);
+      assert.match(input, /Pack your passport/);
+      return [toolCall(SEND_TOOL, 'checklist', checklist)];
+    },
+    [toolCall(SEND_TOOL, 'no-tasks-reply', text('The sky is blue.'))],
+    [toolCall(SEND_TOOL, 'no-checklist', text('This reply has no tasks to check off.'))],
+  ]);
+  const submit = async content => (await root.submit({ type: 'input', content }, ctx)).wait(ctx);
+  const entries = async () => (await root.entries({ order: 'ascending' }, 100, undefined, ctx)).items;
+  const make = async origin => {
+    const request = await startMake(harness, root, await entries(), { origin, requestId: origin + '-make' });
+    assert.equal((await (await harness.submission(request.id, ctx)).wait(ctx)).status, 'done');
+    assert.deepEqual(await makeOutcome(harness, request, await entries(), ctx), { state: 'done' });
+  };
+
+  await submit('What should I pack?');
+  await make('packing-reply');
+  await keepWidget(harness, await entries(), 'checklist', true, 'keep');
+  await checkItem(harness, 'trip-checklist', 0, true);
+  assert.equal((await harness.snapshot(PanelDoc, ctx)).widgets['trip-checklist'].body.items[0].done, true);
+  await submit('What color is the sky?');
+  await make('no-tasks-reply');
+  assert.equal(deliveredSentIn(await entries()).at(-1).input.type, 'text');
 });
