@@ -1,8 +1,9 @@
 import { defineDoc } from "@earendil-works/pi-durable";
 import type { AssetItem } from "../protocol/send.js";
+import { STORED_DOC_KINDS } from "../durable-names.js";
 
 export const AssetsDoc = defineDoc<{ items: AssetItem[] }>({
-  kind: "pistack.assets",
+  kind: STORED_DOC_KINDS.assets,
   version: 1,
   scope: "session",
   checkpointWhen: () => false,
@@ -12,7 +13,7 @@ export const AssetsDoc = defineDoc<{ items: AssetItem[] }>({
 export type Nudge = { message: number; requestId: string; id: number | null };
 
 export const DeliveryDoc = defineDoc<{ since: number | null; nudges: Nudge[] }>({
-  kind: "pistack.delivery",
+  kind: STORED_DOC_KINDS.delivery,
   version: 1,
   scope: "session",
   checkpointWhen: () => false,
@@ -22,7 +23,7 @@ export const DeliveryDoc = defineDoc<{ since: number | null; nudges: Nudge[] }>(
 export type Make = { origin: string; requestId: string; id: number | null; at: number };
 
 export const MakeDoc = defineDoc<{ makes: Make[] }>({
-  kind: "pistack.make",
+  kind: STORED_DOC_KINDS.make,
   version: 1,
   scope: "session",
   checkpointWhen: () => false,

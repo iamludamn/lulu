@@ -1,7 +1,7 @@
 import { nextPushAlarm, sendSpacePushes, spaceDevice } from "../space/push.js";
 import { handleSpaceRefresh, nextSpaceAlarm, receiveSpaceEvent, refreshDueSpaces, spaceError } from "../space/refresh.js";
 import { SpaceRefreshDoc, SpaceRefreshIndex, spaceEntries, spaceStatus } from "../space/doc.js";
-import { DREAMING_TASK, DreamingTriggerDoc, reconcileDreaming } from "../memory/dreaming.js";
+import { DreamingTriggerDoc, reconcileDreaming } from "../memory/dreaming.js";
 import { admitPrompt, prepareInjection } from "../memory/injection.js";
 import { expireRequests } from "./deadlines.js";
 import { RunFamily } from "../delegate/runs.js";
@@ -17,10 +17,10 @@ import { ChatDoc, trackProgress, trackSnapshot } from "./progress.js";
 import type { EpisodeSource } from "../memory/doc.js";
 import { episodesOf } from "../memory/episodes.js";
 import type { McpStatus, ModelRef, SessionProgress } from "../protocol/contract.js";
-import { RECOVERY_ALARM_DELAY_MS, type AlarmOutcome, abortRuns, fireSchedules, nextAlarmAt, replaceAlarm, scheduleEntries } from "../cron/alarm.js";
+import { ALARM_TASK_KINDS, RECOVERY_ALARM_DELAY_MS, type AlarmOutcome, abortRuns, fireSchedules, nextAlarmAt, replaceAlarm, scheduleEntries } from "../cron/alarm.js";
 import { CRON_KIND } from "../cron/doc.js";
 import { SANDBOX_KIND } from "../sandbox/doc.js";
-import { SANDBOX_LIFECYCLE, recoverSandboxLifecycle } from "../sandbox/lifecycle.js";
+import { recoverSandboxLifecycle } from "../sandbox/lifecycle.js";
 import { createSandboxProvider } from "../sandbox/backends.js";
 import { observeSandboxActivity } from "../sandbox/activity.js";
 import { sandboxWindowQuery } from "../sandbox/report-api.js";
@@ -38,7 +38,7 @@ import { MAX_CLIENT_FRAME_CHARACTERS, type ClientMessage, type ServerMessage } f
 import { parseFrame } from "./frame.js";
 import { createChatHarnessOptions, reconnectChatMcp } from "../agent/chat.js";
 import { chatModelConfig, chatModelRef, createChatModels, durableModel } from "../agent/models.js";
-import { createMemoryUpdate, recoverMemoryUpdates, MEMORY_UPDATE } from "../memory/schedule.js";
+import { createMemoryUpdate, recoverMemoryUpdates } from "../memory/schedule.js";
 import { createHarnessTelemetry, observeDelegateTiming } from "../telemetry/agent.js";
 import { SOCKET_OPEN, type DurableHost, type Socket } from "../host/types.js";
 import { authorizeSocket } from "../server/api.js";
@@ -152,7 +152,7 @@ export class BotSession {
     observeDelegateTiming(harness, telemetry.context);
     harness.observeCommits({ advance: (publication) => {
       if (publication.changes.some((change) => change.type === "document" && (change.record.kind === PanelDoc.definition.kind || change.record.kind === AssetsDoc.definition.kind))) void this.#reconcileDreaming();
-      if (publication.changes.some((change) => (change.type === "document" && (change.record.kind === SpaceRefreshDoc.definition.kind || change.record.kind === SpaceRefreshIndex.definition.kind || change.record.kind === CRON_KIND || change.record.kind === SANDBOX_KIND || change.record.kind === RunFamily.definition.kind || change.record.kind === ChatDoc.definition.kind || change.record.kind === DreamingTriggerDoc.definition.kind)) || (change.type === "submission") || (change.type === "task" && (change.value.kind === SANDBOX_LIFECYCLE || change.value.kind === MEMORY_UPDATE || change.value.kind === DREAMING_TASK)))) {
+      if (publication.changes.some((change) => (change.type === "document" && (change.record.kind === SpaceRefreshDoc.definition.kind || change.record.kind === SpaceRefreshIndex.definition.kind || change.record.kind === CRON_KIND || change.record.kind === SANDBOX_KIND || change.record.kind === RunFamily.definition.kind || change.record.kind === ChatDoc.definition.kind || change.record.kind === DreamingTriggerDoc.definition.kind)) || (change.type === "submission") || (change.type === "task" && ALARM_TASK_KINDS.has(change.value.kind)))) {
         void this.#refreshAlarm().catch((error: unknown) => reportError("Schedule alarm reconciliation failed", error));
       }
     }, end: () => {} });

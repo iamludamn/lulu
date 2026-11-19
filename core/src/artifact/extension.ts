@@ -1,5 +1,6 @@
 import { defineExtension, section } from "@earendil-works/pi-durable";
 import { PAGE_KINDS } from "./space.js";
+import { STORED_EXTENSION_NAMES } from "../durable-names.js";
 
 const ARTIFACT_PROMPT = [
   "Save files with the `artifact` MCP tools only when the user asks for a file to keep, the content is an html page, or it is meant to last beyond the conversation; long replies go in body of a send_to_user text call instead. Files you save are stored, but saving does not put anything in the user's assets. The user only gets a file when you offer it with a send_to_user asset card using its `artifact://name@version` reference and they choose to keep it.",
@@ -13,6 +14,6 @@ const ARTIFACT_PROMPT = [
 
 export const createArtifactExtension = (enabled: boolean) =>
   defineExtension({
-    name: "pistack.artifact",
+    name: STORED_EXTENSION_NAMES.artifact,
     sections: [section("artifact", () => (enabled ? ARTIFACT_PROMPT : undefined))],
   });

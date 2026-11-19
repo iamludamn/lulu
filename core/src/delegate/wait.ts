@@ -6,6 +6,7 @@ import type { Context } from "@earendil-works/chord/context";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import type { ConversationId, EntryId, TaskRuntime } from "@earendil-works/pi-durable";
 import { RunFamily, oneLine, readRunStatus, shortId, updateRun, type RunUsage } from "./runs.js";
+import { RENAMED_TASKS } from "../durable-names.js";
 
 export interface WaitInput {
   runId: string;
@@ -104,7 +105,7 @@ export async function settle<I extends Settling, S extends { phase: string }>(in
 }
 
 export const DelegateWait = defineTask<WaitInput, WaitCheckpoint, WaitResult, object>({
-  name: "pistack.delegate.wait",
+  name: RENAMED_TASKS.delegateWait.current,
   version: 1,
   initial: () => ({ phase: "wait" }),
   phases: {

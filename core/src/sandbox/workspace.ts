@@ -24,6 +24,7 @@ export async function waitForSandbox(read: DocumentObserver, holder: Conversatio
 export function resetSandbox(binding: SandboxBinding): void {
   binding.ref = null;
   binding.backend = null;
+  delete binding.createApp;
   binding.profile = "default";
   binding.cwd = "";
   binding.epoch += 1;
@@ -64,6 +65,7 @@ export async function openSandbox(api: ToolExecutionApi, provider: SandboxProvid
       const now = Date.now();
       if (binding.backend === null) {
         binding.backend = provider.backend;
+        binding.createApp = "lulu";
         binding.profile = provider.profile;
       }
       const key = `${holder}:${binding.epoch}`;
@@ -75,7 +77,7 @@ export async function openSandbox(api: ToolExecutionApi, provider: SandboxProvid
       binding.lastUsedAt = now;
       binding.revision += 1;
       const ref = binding.ref === null ? null : JSON.parse(JSON.stringify(binding.ref)) as SandboxBinding["ref"];
-      return { epoch: binding.epoch, started: now, request: { backend: binding.backend, profile: binding.profile, key, requestId, ref, cwd: binding.cwd } };
+      return { epoch: binding.epoch, started: now, request: { backend: binding.backend, profile: binding.profile, key, requestId, createApp: binding.createApp, ref, cwd: binding.cwd } };
     }, context);
     if ("wait" in reserved) {
       await waitForSandbox(api, holder, (binding) => !binding?.operation || binding.operation.taskId !== reserved.wait || binding.error !== null, context);

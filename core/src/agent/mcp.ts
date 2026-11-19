@@ -7,6 +7,7 @@ import { McpAuthRequiredError, McpClient, StreamableHttpTransport, toLlmContent,
 import type { McpStatus } from "../protocol/contract.js";
 import type { DurableStorage, McpHostServices } from "../host/types.js";
 import { McpFileAuthProvider } from "./mcp-auth.js";
+import { STORED_EXTENSION_NAMES } from "../durable-names.js";
 
 const MAX_SERVER_DESCRIPTION_CHARS = 250;
 const MAX_SERVERS_SECTION_CHARS = 4096;
@@ -189,7 +190,7 @@ async function connectMcp(server: string, config: McpServerConfig, host: McpServ
       await client.close().catch(() => undefined);
       const message = redact(error instanceof Error ? error.message : String(error), config, headers);
       const state = error instanceof McpAuthRequiredError ? "needs-auth" : "failed";
-      console.error(`[pistack] MCP server "${server}" unavailable: ${message}`);
+      console.error(`[lulu] MCP server "${server}" unavailable: ${message}`);
       span.setAttributes({ "lulu.mcp.state": state });
       span.setStatus({ status: "error", error: { name: error instanceof Error ? error.name : "Error", message: truncate(message, MAX_ERROR_CHARS) } });
       return { config, client: undefined, tools: [], status: { name: server, state, tools: 0, error: truncate(message, MAX_ERROR_CHARS), checkedAt }, headers, auth: undefined };
@@ -247,7 +248,7 @@ function mcpHost(sessions: ReadonlyMap<string, McpSession>, host: McpServices): 
         return { name: server, url: session.config.url, headers: Object.entries(headers).map(([name, value]) => ({ name, value })) };
       }));
     },
-    extension: defineExtension({ name: "pistack.mcp", tools, sections: [serversSection(listed)] }),
+    extension: defineExtension({ name: STORED_EXTENSION_NAMES.mcp, tools, sections: [serversSection(listed)] }),
     async close() {
       const closing = [...owned];
       owned.clear();

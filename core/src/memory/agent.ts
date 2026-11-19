@@ -22,8 +22,8 @@ import type { MemoryFiles } from "./files.js";
 import { guardChanges } from "./guard.js";
 import { consolidateTask, MEMORY_RULES, rememberTask } from "./rules.js";
 import { createReadTools, createWriteTools } from "./tools.js";
+import { STORED_EXTENSION_NAMES } from "../durable-names.js";
 
-const EXTENSION = "pistack.memory-agent";
 const LOG_DEPTH = 200;
 const SUMMARY_CHARACTERS = 200;
 
@@ -98,7 +98,7 @@ export class MemoryAgent {
     const registry = createRegistry();
     registry.install(
       defineExtension({
-        name: EXTENSION,
+        name: STORED_EXTENSION_NAMES.memoryAgent,
         tools: [...createReadTools({ files: () => this.#files.files(), read: (path, version) => version === undefined ? this.#files.read(path) : this.#files.readVersion(path, version) }, this.#telemetry), ...createWriteTools(this.#files), ...createSourceTools(this.#host)],
         sections: [section("rules", () => MEMORY_RULES, { tag: false }), section("memory", () => getContext(this.#files, this.#telemetry), { tag: false })],
       }),
