@@ -22,5 +22,5 @@ export function acceptSchedule(panel: PanelState, widget: WidgetInput, origin: s
     action: alreadyKept && receipt !== undefined ? receipt.action : previous === undefined ? "add" : "update",
     requestIds: [...(receipt?.requestIds ?? []), requestId],
   };
-  if (!alreadyKept) panel.widgets[widget.id] = { ...widget, updatedAt: now, origin };
+  if (!alreadyKept) panel.widgets[widget.id] = { ...widget, body: { ...widget.body, rows: [] }, updatedAt: now, origin };
 }

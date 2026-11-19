@@ -3,7 +3,8 @@ import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { defineTool, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord/context";
 import { Type, type Static } from "typebox";
-import { ModelWidgetInput, SCHEDULE_WIDGET_ID } from "../protocol/panel.js";
+import { withScheduleOverview } from "../cron/overview.js";
+import { EMPTY_PANEL, ModelWidgetInput, SCHEDULE_WIDGET_ID } from "../protocol/panel.js";
 import { rememberSpace } from "../send/space-offers.js";
 import { PanelDoc } from "./doc.js";
 
@@ -28,7 +29,7 @@ async function update(api: ToolExecutionApi<PanelDetails>, args: PanelArgs, cont
   const widget = args.widget;
   if (!widget) return fail("update requires widget");
   const id = widget.id.trim();
-  if (id === SCHEDULE_WIDGET_ID) return fail("Scheduled task overviews are updated only when the user accepts a new schedule card.");
+  if (id === SCHEDULE_WIDGET_ID) return fail("The Schedule Overview is updated automatically when scheduled jobs change.");
   const current = await api.snapshot(PanelDoc, context);
   const previous = current?.widgets[id];
   if (previous === undefined) return fail(`${id} is not on the panel. Only the user adds widgets: offer a new one with send_to_user type widget kind panel.`);
@@ -62,8 +63,8 @@ async function remove(api: ToolExecutionApi<PanelDetails>, args: PanelArgs, cont
 }
 
 async function list(api: ToolExecutionApi<PanelDetails>, context: Context): Promise<ToolExecutionResult<PanelDetails>> {
-  const state = await api.snapshot(PanelDoc, context);
-  const widgets = (state?.order ?? []).flatMap((id) => state?.widgets[id] ?? []);
+  const state = await withScheduleOverview(api, (await api.snapshot(PanelDoc, context)) ?? EMPTY_PANEL, context);
+  const widgets = state.order.flatMap((id) => state.widgets[id] ?? []);
   return ok(widgets.length === 0 ? "Panel is empty." : JSON.stringify(widgets), "list", null);
 }
 

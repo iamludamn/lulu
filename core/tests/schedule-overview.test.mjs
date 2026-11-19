@@ -6,7 +6,7 @@ import { withoutSchedules } from '../dist/conversation/compat.js';
 import { parseFrame } from '../dist/conversation/frame.js';
 import { CronJobsDoc } from '../dist/cron/doc.js';
 import { fireDue } from '../dist/cron/engine.js';
-import { ScheduleOfferEntry } from '../dist/cron/overview.js';
+import { ScheduleOfferEntry, withScheduleOverview } from '../dist/cron/overview.js';
 import { ScheduleTool } from '../dist/cron/tool.js';
 import { PanelDoc } from '../dist/panel/doc.js';
 import { SCHEDULE_WIDGET_ID } from '../dist/protocol/panel.js';
@@ -25,6 +25,7 @@ async function fixture(t) {
   const { id } = await session.commit(tx => tx.createConversation({ ownership: { kind: 'ownerless' } }), ctx);
   const entries = async () => (await session.commit(tx => tx.scanEntries({ conversationId: id, order: 'ascending' }, 100), ctx)).items;
   const state = () => session.snapshot(PanelDoc, ctx);
+  const projected = async () => withScheduleOverview(session, await state(), ctx);
   const execute = (taskId, args, commit = session.commit.bind(session)) => ScheduleTool.execute(args, {
     taskId,
     conversationId: id,
@@ -33,7 +34,7 @@ async function fixture(t) {
   }, ctx);
   const keep = async (entry, requestId) => keepWidget(session, await entries(), origin(entry), true, requestId);
   const drop = entry => keepWidget(session, [], origin(entry), false);
-  return { session, entries, state, execute, keep, drop };
+  return { session, entries, state, projected, execute, keep, drop };
 }
 
 test('create and aggregate card commit together, roll back together and replay exactly once', async t => {
@@ -114,25 +115,18 @@ test('keep is atomic and replay-safe with a full panel, newer cards and removal'
   await assert.rejects(f.keep(a, 'keep-a'), /视图已满/);
   assert.equal((await f.state()).scheduleReceipts, undefined);
   await f.session.commit(async tx => { (await tx.doc(PanelDoc)).order.pop(); }, ctx);
-  await f.keep(a, 'keep-a');
-  const added = await f.state();
-  assert.deepEqual(added.order, [...order.slice(0, -1), widgetId]);
-  assert.equal(added.scheduleReceipts[origin(a)].action, 'add');
   await f.execute(2, create('B'));
   await f.execute(3, create('C'));
   const [, b, c] = await f.entries();
-  assert.deepEqual((await f.state()).widgets, added.widgets);
   await assert.rejects(f.keep(b, 'keep-b'), /已有新版/);
   await f.keep(c, 'keep-c');
-  const updated = await f.state();
-  assert.deepEqual(updated.order, added.order);
-  assert.equal(updated.widgets[widgetId].body.rows.length, 3);
-  assert.equal(updated.scheduleReceipts[origin(c)].action, 'update');
-  await f.keep(a, 'keep-a');
+  const added = await f.state();
+  assert.deepEqual(added.order, [...order.slice(0, -1), widgetId]);
+  assert.equal(added.scheduleReceipts[origin(c)].action, 'add');
   await f.keep(c, 'keep-c');
-  assert.deepEqual(await f.state(), updated);
+  assert.deepEqual(await f.state(), added);
   await f.drop(a);
-  assert.deepEqual(await f.state(), updated);
+  assert.deepEqual(await f.state(), added);
   await f.drop(c);
   await f.keep(c, 'keep-c');
   assert.equal((await f.state()).widgets[widgetId], undefined);
@@ -140,6 +134,36 @@ test('keep is atomic and replay-safe with a full panel, newer cards and removal'
   await f.keep(c, 're-add-c');
   assert.equal((await f.state()).scheduleReceipts[origin(c)].action, 'add');
   assert.equal((await f.session.snapshot(CronJobsDoc, ctx)).jobs.length, 3);
+});
+
+test('an accepted overview projects current jobs while the chat card stays a snapshot', async t => {
+  const f = await fixture(t);
+  const now = Date.parse('2030-05-02T00:00:00Z');
+  const scheduledFor = now + 60_000;
+  t.mock.method(Date, 'now', () => now);
+  const first = await f.execute(1, create('A', once(new Date(scheduledFor).toISOString())));
+  const [offer] = await f.entries();
+  await f.keep(offer, 'keep-a');
+  assert.deepEqual((await f.state()).widgets[widgetId].body.rows, []);
+  await f.session.commit(async tx => {
+    (await tx.doc(PanelDoc)).widgets[widgetId].body.rows = offer.data.widget.panel.body.rows;
+  }, ctx);
+  const accepted = await f.state();
+  const second = await f.execute(2, create('B'));
+  const rows = async () => (await f.projected()).widgets[widgetId].body.rows;
+  assert.deepEqual((await rows()).map(row => row.name), ['B', 'A']);
+  await f.execute(3, { action: 'pause', id: first.details.id });
+  assert.equal((await rows()).find(row => row.id === first.details.id).state, 'paused');
+  await f.execute(4, { action: 'resume', id: first.details.id });
+  assert.equal((await rows()).find(row => row.id === first.details.id).state, 'active');
+  await f.session.commit(tx => fireDue(tx, scheduledFor, async () => {}), ctx);
+  const fired = (await rows()).find(row => row.id === first.details.id);
+  assert.equal(fired.state, 'done');
+  assert.equal(fired.lastRunAt, scheduledFor);
+  await f.execute(5, { action: 'delete', id: second.details.id });
+  assert.deepEqual((await rows()).map(row => row.name), ['A']);
+  assert.deepEqual(await f.state(), accepted);
+  assert.deepEqual(await f.entries(), [offer]);
 });
 
 test('old clients receive stable entry IDs and other widgets in both live state and history', async t => {
