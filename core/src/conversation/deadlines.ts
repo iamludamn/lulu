@@ -10,14 +10,14 @@ export const RequestDeadlinesDoc = defineDoc<{ pending: { id: number; until: num
   initial: () => ({ pending: [] }),
 });
 
-export async function requestDeadlineAt(harness: Harness, now: number): Promise<number | undefined> {
+export async function requestDeadlineAt(harness: Harness): Promise<number | undefined> {
   const pending = (await harness.snapshot(RequestDeadlinesDoc, BACKGROUND_CONTEXT))?.pending ?? [];
   const finished: number[] = [];
   const deadlines: number[] = [];
   for (const item of pending) {
     const submission = await harness.submission(item.id as SubmissionId, BACKGROUND_CONTEXT);
     const record = await submission?.status(BACKGROUND_CONTEXT);
-    if (record?.status === "queued" || record?.status === "placed") deadlines.push(Math.max(now + 1000, item.until));
+    if (record?.status === "queued" || record?.status === "placed") deadlines.push(item.until);
     else finished.push(item.id);
   }
   if (finished.length > 0) await harness.commit(async (tx) => {

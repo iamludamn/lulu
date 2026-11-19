@@ -1,4 +1,4 @@
-import { DREAMING_TASK, DreamingTriggerDoc } from "../memory/dreaming.js";
+import { DreamingTriggerDoc } from "../memory/dreaming.js";
 import { DelegateIndex } from "../delegate/runs.js";
 import { REQUEST_TIMEOUT_MS } from "../delegate/limits.js";
 import { requestDeadlineAt } from "../conversation/deadlines.js";
@@ -7,19 +7,10 @@ import type { ConversationId, Harness, ModelRef } from "@earendil-works/pi-durab
 import { DefaultDelegateAgent, DelegateAgents } from "../delegate/agents.js";
 import { RunFamily } from "../delegate/runs.js";
 import { createRun } from "../delegate/spawn.js";
-import type { DurableHost } from "../host/types.js";
 import type { ScheduleEntry } from "../protocol/contract.js";
 import { CronJobsDoc } from "./doc.js";
 import { expireRuns, fireDue, nextAlarm } from "./engine.js";
-import { RENAMED_TASKS } from "../durable-names.js";
-
-export const RECOVERY_ALARM_DELAY_MS = 60_000;
-export const ALARM_TASK_KINDS: ReadonlySet<string> = new Set([
-  ...Object.values(RENAMED_TASKS.sandboxLifecycle),
-  ...Object.values(RENAMED_TASKS.memoryUpdate),
-  DREAMING_TASK,
-]);
-const SELF_ADVANCING_KINDS: ReadonlySet<string> = new Set(["running", "ready", "completing"]);
+import { WATCHDOG_MS } from "./schedule.js";
 
 export type AlarmOutcome = { fired: string[]; expired: ConversationId[] };
 
@@ -69,32 +60,22 @@ export async function scheduleEntries(harness: Harness): Promise<ScheduleEntry[]
   return entries;
 }
 
-export async function nextAlarmAt(harness: Harness): Promise<number | undefined> {
-  const { tasks } = await harness.inspect(BACKGROUND_CONTEXT);
-  const now = Date.now();
+export async function nextScheduleAlarm(harness: Harness, lastRunAt: number): Promise<number | undefined> {
   const deadlines: number[] = [];
-  for (const task of tasks) {
-    if (!SELF_ADVANCING_KINDS.has(task.state.kind)) continue;
-    const state = task.record.state;
-    const checkpoint = state.status === "running" || state.status === "pending" ? state.checkpoint : undefined;
-    if (ALARM_TASK_KINDS.has(task.record.kind) && task.state.kind === "running" && checkpoint && typeof checkpoint === "object" && !Array.isArray(checkpoint) && checkpoint.phase === "wait" && typeof checkpoint.until === "number" && checkpoint.until > now) deadlines.push(checkpoint.until);
-    else deadlines.push(now + RECOVERY_ALARM_DELAY_MS);
-  }
   const jobs = (await harness.snapshot(CronJobsDoc, BACKGROUND_CONTEXT))?.jobs ?? [];
   const scheduled = nextAlarm(jobs);
-  if (scheduled !== undefined) deadlines.push(scheduled > now ? scheduled : now + RECOVERY_ALARM_DELAY_MS);
-  for (const id of (await harness.snapshot(DelegateIndex, BACKGROUND_CONTEXT))?.ids ?? []) {
+  if (scheduled !== undefined) deadlines.push(scheduled <= lastRunAt ? lastRunAt + 60_000 : scheduled);
+  const cronRuns = new Set(jobs.flatMap((job) => job.lastRun === null ? [] : [job.lastRun.runId]));
+  const delegateIds = (await harness.snapshot(DelegateIndex, BACKGROUND_CONTEXT))?.ids ?? [];
+  for (const id of new Set([...delegateIds, ...cronRuns])) {
     const run = await harness.snapshot(RunFamily, id, BACKGROUND_CONTEXT);
-    if (run?.status === "running") deadlines.push(Math.max(now + 1000, run.deadline ?? run.startedAt + REQUEST_TIMEOUT_MS));
+    if (run?.status !== "running") continue;
+    deadlines.push(run.deadline ?? run.startedAt + REQUEST_TIMEOUT_MS);
+    if (cronRuns.has(id)) deadlines.push(run.startedAt + WATCHDOG_MS);
   }
   const dreamingRetry = (await harness.snapshot(DreamingTriggerDoc, BACKGROUND_CONTEXT))?.retryAt;
-  if (dreamingRetry != null) deadlines.push(Math.max(now + 1000, dreamingRetry));
-  const requestDeadline = await requestDeadlineAt(harness, now);
+  if (dreamingRetry != null) deadlines.push(dreamingRetry);
+  const requestDeadline = await requestDeadlineAt(harness);
   if (requestDeadline !== undefined) deadlines.push(requestDeadline);
   return deadlines.length === 0 ? undefined : Math.min(...deadlines);
-}
-
-export async function replaceAlarm(alarm: DurableHost["alarm"], timestamp: number | undefined): Promise<void> {
-  if (timestamp === undefined) await alarm.delete();
-  else await alarm.set(timestamp);
 }
