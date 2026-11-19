@@ -21,7 +21,7 @@ const widgetId = SCHEDULE_WIDGET_ID;
 const once = at => ({ kind: 'once', at });
 const daily = { kind: 'daily', time: '09:45', tz: 'Asia/Singapore' };
 const create = (name, schedule = daily) => ({ action: 'create', name, prompt: 'private task prompt', ...schedule });
-const overview = { type: 'widget', widget: { kind: 'schedule_overview' }, end_turn: true };
+const overview = { type: 'widget', widget: { kind: 'panel', panel: { body: { kind: 'schedules' } } }, end_turn: true };
 const toolCall = (name, id, args) => ({ type: 'toolCall', name, id, arguments: args });
 
 async function fixture(t) {
@@ -38,10 +38,10 @@ async function fixture(t) {
     commit,
     snapshot: session.snapshot.bind(session),
   }, ctx);
-  const send = async (callId) => {
+  const send = async (callId, recorded = overview) => {
     const result = await sendTool.execute(overview, { conversationId: id, snapshot: session.snapshot.bind(session) }, ctx);
     await session.commit(async tx => {
-      await tx.appendEntry(AssistantEntry, id, { model: [{ role: 'assistant', content: [toolCall(SEND_TOOL, callId, overview)] }] });
+      await tx.appendEntry(AssistantEntry, id, { model: [{ role: 'assistant', content: [toolCall(SEND_TOOL, callId, recorded)] }] });
       await tx.appendEntry(ToolResultEntry, id, { model: [{ role: 'toolResult', toolName: SEND_TOOL, toolCallId: callId, details: result.details, isError: result.isError ?? false }] });
     }, ctx);
     return result;
@@ -85,6 +85,8 @@ test('job creation rolls back and replays independently of message delivery', as
   assert.deepEqual(sent.input.widget.panel.body.rows.map(row => row.name), ['B', 'A']);
   assert.equal(sent.input.widget.panel.body.rows[1].schedule.at, Date.parse(input.at));
   assert.doesNotMatch(JSON.stringify(sent), /private task prompt/);
+  await f.send('legacy-schedules-card', { ...overview, widget: { kind: 'schedule_overview' } });
+  assert.deepEqual(deliveredSentIn(await f.entries()).at(-1).input.widget, sent.input.widget);
 });
 
 test('projection reads legacy jobs, preserves all lifecycle states and blocks deleted-create replays', async t => {

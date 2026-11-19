@@ -8,8 +8,8 @@ export type RunInput = { requestId: string; content: string } & (
   | ScheduleMessageSource
   | { kind: "integration"; integrationId: string; eventId: string }
   | { kind: "delegate_result"; runId: string }
-  | { kind: "delivery_retry"; messageId: number }
-  | { kind: "widget_request"; origin: string }
+  | { kind: "internal"; action: "delivery_retry"; messageId: number }
+  | { kind: "internal"; action: "widget_request"; origin: string }
 );
 
 export function inputSubmission({ requestId, content, ...source }: RunInput): InputSubmissionDraft {

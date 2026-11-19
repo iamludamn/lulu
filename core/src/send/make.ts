@@ -57,7 +57,7 @@ export async function startMake(harness: Harness, root: Conversation, entries: E
   if (make.id !== null) return make;
   const text = assistantText(entries, origin);
   if (text === undefined) throw new Error("找不到这条助手文字消息");
-  const submission = await root.submit(inputSubmission({ kind: "widget_request", origin, content: makePrompt(text), requestId: `make:${make.requestId}` }), BACKGROUND_CONTEXT);
+  const submission = await root.submit(inputSubmission({ kind: "internal", action: "widget_request", origin, content: makePrompt(text), requestId: `make:${make.requestId}` }), BACKGROUND_CONTEXT);
   const key = make.requestId;
   await harness.commit(async (tx) => {
     const item = (await tx.doc(MakeDoc)).makes.find((entry) => entry.requestId === key);

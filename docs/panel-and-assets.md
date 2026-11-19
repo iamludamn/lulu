@@ -4,7 +4,7 @@
 
 | API | Purpose |
 | --- | --- |
-| [`send_to_user`](../core/src/send/tool.ts) | Send a Widget or Asset card to Chat. Use `widget.kind: "schedule_overview"` for a card filled from saved jobs. |
+| [`send_to_user`](../core/src/send/tool.ts) | Send a Widget or Asset card to Chat. Use `widget: { kind: "panel", panel: { body: { kind: "schedules" } } }` for a card filled from saved jobs. |
 | [`widget.keep` / `widget.drop`](../core/src/send/keep.ts) | Accept or remove a card's item by `origin`. |
 | [`panel` with `action: "update"`](../core/src/panel/tool.ts) | Update an accepted ordinary Widget by ID. Space page revisions require acceptance of a newer card with the same ID. |
 | [`/artifacts/file`, `/spaces/state`, `/spaces/refresh`](../core/src/server/api.ts) | Download a file, read or save Space state, or manage Space background data. |

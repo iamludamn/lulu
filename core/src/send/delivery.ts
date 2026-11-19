@@ -59,7 +59,7 @@ export async function chaseDeliveries(harness: Harness, root: Conversation, entr
         if (!delivery.nudges.some((nudge) => nudge.requestId === requestId)) delivery.nudges.push({ message: owed.message, requestId, id: null });
       }, BACKGROUND_CONTEXT);
       await harness.commit(async (tx) => {
-        const id = await root.submit(tx, inputSubmission({ kind: "delivery_retry", messageId: owed.message, content: NUDGE_PROMPT, requestId }));
+        const id = await root.submit(tx, inputSubmission({ kind: "internal", action: "delivery_retry", messageId: owed.message, content: NUDGE_PROMPT, requestId }));
         await bindDelivery(tx, [owed.message], id);
         const bindings = await tx.doc(InjectionBindings);
         const originalRequest = bindings.requests[String(owed.message)];

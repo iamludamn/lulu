@@ -115,7 +115,7 @@ export const ScheduleTool: ToolRegistration = defineTool({
   description: [
     "Manage scheduled jobs that run a self-contained task later, or every day at a fixed time, and report the result back to this conversation.",
     "Actions: create (name, prompt, kind=once with at, or kind=daily with time and tz), list, pause, resume, delete (id or unique id prefix).",
-    "After creating a job, confirm it with send_to_user. If the user has not kept the Schedule Overview on Panel, also send a card with type widget and widget { kind: schedule_overview }. A kept overview updates automatically.",
+    "After creating a job, confirm it with send_to_user. If the user has not kept the Schedule Overview on Panel, also send a card with type widget and widget { kind: panel, panel: { body: { kind: schedules } } }. A kept overview updates automatically.",
     "Keep this machinery private: never mention job ids or internal state to the user unless they ask.",
   ].join(" "),
   parameters: ScheduleParams,
