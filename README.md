@@ -12,7 +12,7 @@ This is an early-stage, single-user project. The API uses the fixed bot ID `main
 - Maintain memory across conversations and run scheduled work.
 - Connect MCP services, including OAuth-backed services.
 - Execute work in E2B sandboxes and deliver files through S3-compatible storage.
-- Offer panels and small interactive spaces that users can choose to keep.
+- Send cards in Chat that users can accept as Widgets on Panel or files in Assets. A Space is an interactive Widget.
 - Support voice calls through the Doubao integration.
 
 Features that depend on external services require your own credentials and may incur usage charges.

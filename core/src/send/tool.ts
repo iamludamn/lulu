@@ -13,14 +13,14 @@ export type ArtifactCheck = (name: string, version: number) => Promise<boolean>;
 type SendDetails = { type: string; end: boolean; requestIds?: string[] };
 
 const DESCRIPTION = [
-  "Say something to the user in the Lulu chat. This is your only voice: the user only ever sees send_to_user calls, and your plain assistant text is a private scratchpad they never see.",
+  "Send a message to the user in Chat. Use send_to_user for every user-visible text message or card.",
   "Every acknowledgement, question, progress update and result must be its own send_to_user call. A turn that ends without one leaves the user in silence.",
   "type text is a chat bubble: a short conversational reply of a few sentences.",
   "Long or structured content (a report, plan, list, table, steps, research) goes in body of the same type text call, written as Markdown with a title, the conclusion first, then headings, lists and tables where they help. Put a one-to-three sentence gist in content that tells the user what is behind the tap: the user sees content as a short bubble and taps it to read body. The body is the delivery: do not also save it as a file or offer an asset card for it, and do not mention files, documents or saving in content. Never split long content over several messages.",
   "For a quick answer, send it once with end_turn true. For longer work, send a short acknowledgement first, do the work, then send the result with end_turn true; the acknowledgement does not deliver the result.",
   "Do not run the final call in parallel with work you still need.",
-  "type widget offers one card: kind asset offers a file the user asked to keep or an html asset you saved with the artifact tools, kind panel offers a panel widget. A space, the small app page the user keeps on their panel, is a kind panel card whose body is { kind: space, src, preview, refresh }; never offer a space as a kind asset card.",
-  "A card is only an offer. Nothing reaches the user's assets or panel until the user swipes it, and new versions of documents and spaces are offers too. A Space revision uses the same widget id and a newer artifact ref; the user swipes to replace the kept version, retaining its position and saved state. Do not claim it was updated before acceptance. Only an explicit copy gets a new id. So never say you added anything to their assets or panel; say you are offering it.",
+  "type widget sends one card to Chat. Use kind panel for a Widget the user can keep on Panel and kind asset for a file the user can keep in Assets. Send a Space as a Widget with body { kind: space, src, preview, refresh }. Send a finished HTML Asset as kind asset.",
+  "The user swipes a card to accept its Widget or Asset. New versions use the same acceptance flow. For a Space revision, reuse the Widget ID and use a newer artifact ref so acceptance retains its position and saved state. Use a new ID for an explicit copy. Describe the card as ready to accept until the user accepts it.",
   "A type widget call carries only the card and never content: send the short takeaway as its own type text call first, so the user gets the gist without opening anything. Send at most one card per call. Dispatch any outstanding additions or corrections to delegated work before sending the card. The card is the last call of the turn and carries end_turn true; never end the turn on a text that announces a card you have not sent. One short acknowledgement is enough while work runs in the background: do not send further waiting or filler messages.",
 ].join(" ");
 

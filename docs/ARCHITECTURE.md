@@ -79,21 +79,29 @@ The Bot's single alarm also supports durable-task recovery, memory-update retrie
 
 Sources: [schedule structures and time calculation](../core/src/cron/schedule.ts), [schedule tool](../core/src/cron/tool.ts), [dispatch/watchdog](../core/src/cron/engine.ts), and [alarm arbitration](../core/src/cron/alarm.ts).
 
-## Sending, artifacts, and user acceptance
+## Panel, Chat, and Assets
 
-The chat UI renders successful `send_to_user` calls, not arbitrary assistant text. A text send contains a short bubble and an optional Markdown body; a widget send offers a single card. Artifact/space cards are checked against stored references before delivery. `end_turn` terminates the model run after the send; it does not imply the user accepted a card.
+| Page | Content |
+| --- | --- |
+| **Panel** (视图) | Accepted Widgets in `PanelDoc`, including native widgets, Spaces, and the Schedule Overview. |
+| **Chat** (对话) | User messages and assistant messages. An assistant message can contain text or a card. |
+| **Assets** (资产) | Accepted files in `AssetsDoc`. An HTML Asset is a finished file. A Space is an interactive Widget that may fetch fresh data or preserve user state. |
+
+`send_to_user` sends text or a card to Chat. A text message has a short bubble and an optional Markdown body. A card offers a Widget for Panel or an Asset for Assets. An offer is part of the card interaction. The Schedule Overview card is emitted by the `schedule` tool and uses the same acceptance flow. Its rows are a snapshot. The Scheduled Tasks screen reads current job state from `CronJobsDoc` through the API.
+
+The wire format uses `type: "widget"` for a card, including when its payload is an Asset. The nested `kind: "panel"` and `kind: "asset"` select the destination. Space and Asset cards are checked against stored references before delivery. `end_turn` terminates the model run after the send.
 
 For the latest tracked user message, `DeliveryDoc` records bounded reminder submissions when a completed run produced no send. The reminders have stable request IDs and are reconciled against submissions and transcript entries. This is recovery from a silent assistant turn, not a client read receipt or proof the user saw the message.
 
 Artifacts use versioned `artifact://name@version` references. The Artifact object reserves an upload/version, stores bytes through the S3 adapter, and commits metadata after verifying the object exists. Provided request IDs map retries to the same reservation, and recommitting an upload returns its existing version. Object storage and Durable Object metadata are not one distributed transaction; preserve the reserve/upload/commit boundary when adding write paths.
 
-Card delivery and keeping are separate state changes. `widget.keep` resolves a delivered offer, then updates `AssetsDoc` or `PanelDoc`. Space revisions retain the widget ID and require acceptance; stored receipts prevent an old/retried offer from rolling back a newer accepted revision. Generating a file, delivering its card, and adding it to a user's assets or panel must not be conflated.
+Card delivery and acceptance are separate state changes. `widget.keep` resolves the delivered card by `origin` and updates `PanelDoc` or `AssetsDoc`. A Space revision retains the Widget ID and requires acceptance. Stored receipts prevent an old or retried card from rolling back a newer accepted revision.
 
 Sources: [send validation](../core/src/send/tool.ts), [delivery recovery](../core/src/send/delivery.ts), [artifact storage](../core/src/artifact/object.ts), [acceptance](../core/src/send/keep.ts), and [space receipts](../core/src/send/space-offers.ts).
 
 ## Clients and protocol
 
-`core/src/protocol/` defines the shared wire structures. The web and desktop clients implement the same assistant experience; `client/ios/PiStackKit` contains the Swift protocol and session layer. Protocol changes need corresponding client changes.
+`core/src/protocol/` defines the shared wire structures. The iOS and desktop clients expose Panel, Chat, and Assets. The web app exposes MCP administration at `/mcp`. `client/ios/PiStackKit` contains the Swift protocol and session layer.
 
 A client sends `hello` after connecting. The server replies with model configuration and a full current state. Subsequent state frames include the complete entry `order` but only changed entry bodies; consumers merge bodies by entry ID and use `order` for membership and ordering. An empty `entries` array in an update does not clear the transcript. Reconnecting and sending `hello` obtains a fresh full state, rather than replaying a durable socket-event log. Local client caches and command acknowledgements are not the authoritative conversation state.
 

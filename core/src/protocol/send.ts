@@ -7,7 +7,7 @@ export const ARTIFACT_REF = /^artifact:\/\/(.+)@(\d+)$/;
 
 export const artifactName = (ref: string): string | undefined => ARTIFACT_REF.exec(ref)?.[1];
 
-const PanelCard = Type.Object({
+const WidgetCard = Type.Object({
   kind: Type.Literal("panel"),
   panel: WidgetInput,
 });
@@ -23,13 +23,13 @@ export const SendInput = Type.Object({
   type: Type.Union([Type.Literal("text"), Type.Literal("widget")]),
   content: Type.Optional(Type.String({ description: "Message for type text only; never on type widget. Markdown renders; use real line breaks between paragraphs" })),
   body: Type.Optional(Type.String({ description: "Full Markdown for type text when the reply is long: the user sees content as a short bubble and taps it to read body" })),
-  widget: Type.Optional(Type.Union([PanelCard, AssetCard], { description: "Card for type widget" })),
+  widget: Type.Optional(Type.Union([WidgetCard, AssetCard], { description: "Card for type widget: a Widget for Panel or an Asset for Assets" })),
   end_turn: Type.Optional(Type.Boolean({ description: "true on your final send when the reply is complete; omit for acknowledgements and progress updates" })),
 });
 
 export const ModelSendInput = Type.Object({
   ...SendInput.properties,
-  widget: Type.Optional(Type.Union([Type.Object({ ...PanelCard.properties, panel: ModelWidgetInput }), AssetCard], { description: "Card for type widget" })),
+  widget: Type.Optional(Type.Union([Type.Object({ ...WidgetCard.properties, panel: ModelWidgetInput }), AssetCard], { description: "Card for type widget: a Widget for Panel or an Asset for Assets" })),
 });
 
 export type SendInput = Static<typeof SendInput>;

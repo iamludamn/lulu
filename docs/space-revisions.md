@@ -13,7 +13,7 @@ refresh preference survive an update. A copy must use a new ID and artifact path
 
 While submitting, the card stays visible and cannot submit twice. A failed
 command leaves the preview with its error and “滑动重试”. Successful offers become
-compact named receipts (“已加入视图” / “已更新”) with “打开当前视图”, which resolves
+compact named receipts (“已加入视图” / “已更新”) with “打开当前版本”, which resolves
 the panel's current artifact version. Superseded proposals show “已有新版” and have
 no keep action. Cached proposals cannot be accepted while disconnected.
 
