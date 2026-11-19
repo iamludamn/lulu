@@ -9,6 +9,6 @@ public func scheduleOfferState(_ entry: ChatEntry, panel: PanelState) -> ViewOff
     if current?.origin == entry.id, let receipt = panel.scheduleReceipts[entry.id] {
         return .accepted(receipt.action)
     }
-    guard revision == panel.scheduleRevision else { return .superseded }
-    return current == nil ? .add : .update
+    if entry.id.hasPrefix(scheduleOriginPrefix), revision != panel.scheduleRevision { return .superseded }
+    return current == nil ? .add : .superseded
 }

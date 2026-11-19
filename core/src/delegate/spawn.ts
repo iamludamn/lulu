@@ -1,5 +1,6 @@
 import { reserveDelegate, REQUEST_TIMEOUT_MS } from "./limits.js";
 import { ChatDoc } from "../conversation/progress.js";
+import type { ScheduleMessageSource } from "../conversation/input.js";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { AssistantEntry, ProviderDoc, type ConversationId, type Cursor, type EntryId, type SubmissionId, type Tx } from "@earendil-works/pi-durable";
 import { SandboxDoc } from "../sandbox/doc.js";
@@ -15,6 +16,7 @@ export interface RunStart {
   agent: string;
   presets: DelegatePresets;
   token: string | null;
+  scheduleSource?: ScheduleMessageSource;
   origin: SubmissionId[];
   parentId: ConversationId;
   cwd: string | null;
@@ -61,6 +63,16 @@ export async function createRun(tx: Tx, start: RunStart): Promise<{ runId: strin
   draft.model = start.model;
   draft.thinkingLevel = start.thinkingLevel;
   draft.token = start.token;
-  draft.waitTaskId = await tx.createTask(DelegateWait, { runId: start.runId, childId: child.id, parentId: start.parentId, task: start.task, prompt: [ChildBrief, preset.instructions, "Task:\n" + start.task].join("\n\n"), requestId: "delegate:" + start.runId + "#0", noticeId: "delegate:notice:" + start.runId + "#0", token: start.token }, { ownership: { kind: "conversation" }, conversationId: start.parentId, background: true });
+  draft.waitTaskId = await tx.createTask(DelegateWait, {
+    runId: start.runId,
+    childId: child.id,
+    parentId: start.parentId,
+    task: start.task,
+    prompt: [ChildBrief, preset.instructions, "Task:\n" + start.task].join("\n\n"),
+    requestId: "delegate:" + start.runId + "#0",
+    noticeId: "delegate:notice:" + start.runId + "#0",
+    token: start.token,
+    ...(start.scheduleSource === undefined ? {} : { scheduleSource: start.scheduleSource }),
+  }, { ownership: { kind: "conversation" }, conversationId: start.parentId, background: true });
   return { runId: start.runId, childId: child.id };
 }

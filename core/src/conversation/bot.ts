@@ -24,6 +24,7 @@ import type { McpStatus, ModelRef, SessionProgress } from "../protocol/contract.
 import { abortRuns, fireSchedules, nextScheduleAlarm, scheduleEntries } from "../cron/alarm.js";
 import { BotAlarm, RECOVERY_ALARM_DELAY_MS } from "./alarm.js";
 import { CRON_KIND } from "../cron/doc.js";
+import { withScheduleOverview } from "../cron/overview.js";
 import { SANDBOX_KIND } from "../sandbox/doc.js";
 import { recoverSandboxLifecycle, staleSandboxTimer } from "../sandbox/lifecycle.js";
 import { createSandboxProvider } from "../sandbox/backends.js";
@@ -251,7 +252,7 @@ export class BotSession {
     trackSnapshot(
       harness,
       async (context) => {
-        const panel = (await harness.snapshot(PanelDoc, context)) ?? EMPTY_PANEL;
+        const panel = await withScheduleOverview(harness, (await harness.snapshot(PanelDoc, context)) ?? EMPTY_PANEL, context);
         const spaces = await spaceEntries(harness, panel.order.filter((id) => ["space", "web"].includes(panel.widgets[id]?.body.kind ?? "")));
         const spaceUpdates = Object.fromEntries(spaces
           .map(([id, entry]) => [id, spaceStatus(entry)]));
@@ -266,7 +267,7 @@ export class BotSession {
       },
       BACKGROUND_CONTEXT,
       this.#snapshotFailed("layout"),
-      (publication) => publication.changes.some((change) => change.type === "document" && (change.record.kind === PanelDoc.definition.kind || change.record.kind === AssetsDoc.definition.kind || change.record.kind === SpaceRefreshDoc.definition.kind)),
+      (publication) => publication.changes.some((change) => change.type === "document" && (change.record.kind === PanelDoc.definition.kind || change.record.kind === AssetsDoc.definition.kind || change.record.kind === SpaceRefreshDoc.definition.kind || change.record.kind === CRON_KIND)),
     );
     await harness.commit(async (tx) => {
       const delivery = await tx.doc(DeliveryDoc);

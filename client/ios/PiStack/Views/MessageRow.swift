@@ -145,7 +145,7 @@ struct MessageRow: View, Equatable {
                         }
                         Spacer()
                         if state != .superseded {
-                            Button("打开当前视图") {
+                            Button("打开当前版本") {
                                 guard let current = store.snapshot.panel.widgets[widget.id],
                                       case .space(let ref, _, let refresh, _) = current.body,
                                       let address = ArtifactAddress(ref) else { return }

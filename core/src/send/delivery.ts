@@ -1,4 +1,5 @@
 import { bindDelivery } from "../conversation/delivery-doc.js";
+import { inputSubmission } from "../conversation/input.js";
 import { InjectionBindings } from "../memory/doc.js";
 import { entryRange } from "../conversation/view.js";
 import type { Context } from "@earendil-works/chord/context";
@@ -58,7 +59,7 @@ export async function chaseDeliveries(harness: Harness, root: Conversation, entr
         if (!delivery.nudges.some((nudge) => nudge.requestId === requestId)) delivery.nudges.push({ message: owed.message, requestId, id: null });
       }, BACKGROUND_CONTEXT);
       await harness.commit(async (tx) => {
-        const id = await root.submit(tx, { type: "input", content: NUDGE_PROMPT, requestId, whenBusy: "followUp" });
+        const id = await root.submit(tx, inputSubmission({ kind: "internal", action: "delivery_retry", messageId: owed.message, content: NUDGE_PROMPT, requestId }));
         await bindDelivery(tx, [owed.message], id);
         const bindings = await tx.doc(InjectionBindings);
         const originalRequest = bindings.requests[String(owed.message)];

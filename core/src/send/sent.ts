@@ -1,10 +1,16 @@
-import { SEND_TOOL, type SendInput } from "../protocol/send.js";
+import { defineEntry, type EntryRecord } from "@earendil-works/pi-durable";
+import { SCHEDULE_OFFER_KIND, SCHEDULE_ORIGIN_PREFIX } from "../protocol/panel.js";
+import { SEND_TOOL, isScheduleOverviewRequest, type ModelSendInput, type SendCard, type SendDetails, type SendInput } from "../protocol/send.js";
 
 export type Sent = { id: string; entry: number; input: SendInput };
+export const LegacyScheduleOfferEntry = defineEntry<{ widget: Extract<SendCard, { kind: "panel" }>; at: number }>(SCHEDULE_OFFER_KIND);
+
+type RecordedSendInput = Omit<ModelSendInput, "widget"> & { widget?: ModelSendInput["widget"] | { kind: "schedule_overview" } };
+type SendCall = { id: string; entry: number; input: RecordedSendInput };
 
 type Block = { type?: unknown; id?: unknown; name?: unknown; arguments?: unknown };
 
-type Result = { role?: unknown; toolCallId?: unknown; isError?: unknown };
+type Result = { role?: unknown; toolName?: unknown; toolCallId?: unknown; isError?: unknown; details?: SendDetails };
 
 export function refusedIn(entries: readonly { model?: unknown }[]): Set<string> {
   const refused = new Set<string>();
@@ -17,25 +23,26 @@ export function refusedIn(entries: readonly { model?: unknown }[]): Set<string> 
   return refused;
 }
 
-export function sentIn(entries: readonly { id?: unknown; kind?: unknown; model?: unknown }[], refused: ReadonlySet<string> = refusedIn(entries)): Sent[] {
-  const sent: Sent[] = [];
+export function sentIn(entries: readonly { id?: unknown; kind?: unknown; model?: unknown }[], refused: ReadonlySet<string> = refusedIn(entries)): SendCall[] {
+  const sent: SendCall[] = [];
   for (const entry of entries) {
     if (entry.kind !== "pi.assistant" || !Array.isArray(entry.model)) continue;
     for (const message of entry.model as { content?: unknown }[]) {
       if (!Array.isArray(message.content)) continue;
       for (const block of message.content as Block[]) {
-        if (block.type !== "toolCall" || block.name !== SEND_TOOL || typeof block.id !== "string" || refused.has(block.id)) continue;
-        sent.push({ id: block.id, entry: Number(entry.id), input: block.arguments as SendInput });
+        if (block.type !== "toolCall" || block.name !== SEND_TOOL || typeof block.id !== "string" || refused.has(block.id) ||
+            !block.arguments || typeof block.arguments !== "object") continue;
+        sent.push({ id: block.id, entry: Number(entry.id), input: block.arguments as RecordedSendInput });
       }
     }
   }
   return sent;
 }
 
-export const sentOf = (entries: readonly { id?: unknown; kind?: unknown; model?: unknown }[], origin: string): Sent | undefined =>
+export const sentOf = (entries: readonly { id?: unknown; kind?: unknown; model?: unknown }[], origin: string): SendCall | undefined =>
   sentIn(entries).find((sent) => sent.id === origin);
 
-const quoted = (input: SendInput): string | undefined => [input.content?.trim(), input.body?.trim()].filter((part) => part).join("\n\n") || undefined;
+const quoted = (input: Pick<ModelSendInput, "content" | "body">): string | undefined => [input.content?.trim(), input.body?.trim()].filter((part) => part).join("\n\n") || undefined;
 
 export function assistantText(entries: readonly { id?: unknown; kind?: unknown; model?: unknown }[], origin: string): string | undefined {
   const sent = sentOf(entries, origin);
@@ -50,7 +57,7 @@ export function assistantText(entries: readonly { id?: unknown; kind?: unknown; 
   return text === "" ? undefined : text;
 }
 
-export function spokenText(sent: readonly Sent[]): string {
+export function spokenText(sent: readonly SendCall[]): string {
   return sent
     .flatMap((item) => (item.input.type === "text" && typeof item.input.content === "string" ? [item.input.content.trim()] : []))
     .filter((text) => text !== "")
@@ -58,13 +65,29 @@ export function spokenText(sent: readonly Sent[]): string {
 }
 
 // An unfinished or failed send is not an actionable offer.
-export function deliveredSentIn(entries: readonly { id?: unknown; kind?: unknown; model?: unknown }[]): Sent[] {
-  const delivered = new Set<string>();
+export function deliveredSentIn(entries: readonly EntryRecord[]): Sent[] {
+  const delivered = new Map<string, Result>();
   for (const entry of entries) {
     if (entry.kind !== "pi.tool-result" || !Array.isArray(entry.model)) continue;
     for (const message of entry.model as Result[]) {
-      if (message.role === "toolResult" && message.isError !== true && typeof message.toolCallId === "string") delivered.add(message.toolCallId);
+      if (message.role === "toolResult" && message.isError !== true && typeof message.toolCallId === "string") delivered.set(message.toolCallId, message);
     }
   }
-  return sentIn(entries).filter((sent) => delivered.has(sent.id));
+  const refused = refusedIn(entries);
+  return entries.flatMap((entry): Sent[] => {
+    if (LegacyScheduleOfferEntry.is(entry) && entry.data?.widget !== undefined) {
+      return [{ id: SCHEDULE_ORIGIN_PREFIX + entry.id, entry: Number(entry.id), input: { type: "widget", widget: entry.data.widget } }];
+    }
+    return sentIn([entry], refused).flatMap(({ input: call, ...sent }): Sent[] => {
+      const result = delivered.get(sent.id);
+      if (result === undefined) return [];
+      const { widget: requested, ...input } = call;
+      if (requested?.kind === "schedule_overview" || isScheduleOverviewRequest(requested)) {
+        const widget = result.details?.widget;
+        if (result.toolName !== SEND_TOOL || widget?.kind !== "panel" || widget.panel.body.kind !== "schedules") return [];
+        return [{ ...sent, input: { ...input, widget } }];
+      }
+      return [{ ...sent, input: { ...input, ...(requested && { widget: requested }) } }];
+    });
+  });
 }

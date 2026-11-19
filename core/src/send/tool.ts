@@ -1,8 +1,9 @@
 import { ChatDeliveryDoc } from "../conversation/delivery-doc.js";
+import { scheduleOverviewCard } from "../cron/overview.js";
 import { defineTool, LiveDoc, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
 import { SCHEDULE_WIDGET_ID, SPACE_ID } from "../protocol/panel.js";
-import type { SendCard, SendInput } from "../protocol/send.js";
-import { ARTIFACT_REF, SEND_TOOL, ModelSendInput } from "../protocol/send.js";
+import type { SendCard, SendDetails } from "../protocol/send.js";
+import { ARTIFACT_REF, SEND_TOOL, isScheduleOverviewRequest, ModelSendInput } from "../protocol/send.js";
 import { assetRefProblem, spaceRefProblem, spacePreviewProblem } from "../artifact/space.js";
 
 const TEXT_LIMIT = { chars: 600, lines: 12 };
@@ -10,17 +11,16 @@ const DOCUMENT_SHAPE = /^(#{1,6} |\|.+\|\s*$)/m;
 
 export type ArtifactCheck = (name: string, version: number) => Promise<boolean>;
 
-type SendDetails = { type: string; end: boolean; requestIds?: string[] };
-
 const DESCRIPTION = [
-  "Say something to the user in the Lulu chat. This is your only voice: the user only ever sees send_to_user calls, and your plain assistant text is a private scratchpad they never see.",
+  "Send a message to the user in Chat. Use send_to_user for every user-visible text message or card.",
   "Every acknowledgement, question, progress update and result must be its own send_to_user call. A turn that ends without one leaves the user in silence.",
   "type text is a chat bubble: a short conversational reply of a few sentences.",
   "Long or structured content (a report, plan, list, table, steps, research) goes in body of the same type text call, written as Markdown with a title, the conclusion first, then headings, lists and tables where they help. Put a one-to-three sentence gist in content that tells the user what is behind the tap: the user sees content as a short bubble and taps it to read body. The body is the delivery: do not also save it as a file or offer an asset card for it, and do not mention files, documents or saving in content. Never split long content over several messages.",
   "For a quick answer, send it once with end_turn true. For longer work, send a short acknowledgement first, do the work, then send the result with end_turn true; the acknowledgement does not deliver the result.",
   "Do not run the final call in parallel with work you still need.",
-  "type widget offers one card: kind asset offers a file the user asked to keep or an html asset you saved with the artifact tools, kind panel offers a panel widget. A space, the small app page the user keeps on their panel, is a kind panel card whose body is { kind: space, src, preview, refresh }; never offer a space as a kind asset card.",
-  "A card is only an offer. Nothing reaches the user's assets or panel until the user swipes it, and new versions of documents and spaces are offers too. A Space revision uses the same widget id and a newer artifact ref; the user swipes to replace the kept version, retaining its position and saved state. Do not claim it was updated before acceptance. Only an explicit copy gets a new id. So never say you added anything to their assets or panel; say you are offering it.",
+  "type widget sends one card to Chat. Use kind panel for a Widget the user can keep on Panel and kind asset for a file the user can keep in Assets. Send a Space as a Widget with body { kind: space, src, preview, refresh }. Send a finished HTML Asset as kind asset.",
+  "Use widget { kind: panel, panel: { body: { kind: schedules } } } to offer the Schedule Overview. The server supplies the job rows. A Schedule Overview already kept on Panel updates from the saved jobs.",
+  "The user swipes a card to accept its Widget or Asset. New versions use the same acceptance flow. For a Space revision, reuse the Widget ID and use a newer artifact ref so acceptance retains its position and saved state. Use a new ID for an explicit copy. Describe the card as ready to accept until the user accepts it.",
   "A type widget call carries only the card and never content: send the short takeaway as its own type text call first, so the user gets the gist without opening anything. Send at most one card per call. Dispatch any outstanding additions or corrections to delegated work before sending the card. The card is the last call of the turn and carries end_turn true; never end the turn on a text that announces a card you have not sent. One short acknowledgement is enough while work runs in the background: do not send further waiting or filler messages.",
 ].join(" ");
 
@@ -28,7 +28,7 @@ function tooLong(content: string): boolean {
   return content.length > TEXT_LIMIT.chars || content.split("\n").filter((line) => line.trim() !== "").length > TEXT_LIMIT.lines || DOCUMENT_SHAPE.test(content);
 }
 
-function misuse(input: SendInput): string | undefined {
+function misuse(input: ModelSendInput): string | undefined {
   if (input.type === "text") {
     if (input.widget !== undefined) return "widget is only valid with type widget. Nothing was sent. Send the card as its own type widget call.";
     if (!input.content?.trim()) return "type text requires content. Nothing was sent.";
@@ -41,7 +41,8 @@ function misuse(input: SendInput): string | undefined {
   if (input.content !== undefined) return "content is only valid with type text and would be dropped from a widget. Nothing was sent, so the card has not been delivered. Send the text as its own type text call, then send the card again without content.";
   if (input.widget === undefined) return "type widget requires widget. Nothing was sent.";
   const card = input.widget;
-  if (card.kind === "panel" && card.panel.id === SCHEDULE_WIDGET_ID) return "The schedules widget is created automatically by the schedule tool.";
+  if (isScheduleOverviewRequest(card)) return undefined;
+  if (card.kind === "panel" && card.panel.id === SCHEDULE_WIDGET_ID) return "Use widget { kind: panel, panel: { body: { kind: schedules } } } to send the Schedule Overview.";
   if (card.kind === "panel" && card.panel.body.kind === "space" && !SPACE_ID.test(card.panel.id))
     return "A space widget id is the key of its saved state, so it must be letters, digits, - or _, start with a letter or digit, and be at most 64 characters. Nothing was sent. Send the card again with a valid id.";
   return undefined;
@@ -83,12 +84,20 @@ export const createSendTool = (exists: ArtifactCheck | undefined): ToolRegistrat
     name: SEND_TOOL,
     description: DESCRIPTION,
     parameters: ModelSendInput,
+    callers: ["model"],
     replay: "safe",
     executionMode: "sequential",
-    execute: async (args, api, context) => {
-      const input = args as SendInput;
-      const refused = misuse(input) ?? (input.widget === undefined ? undefined : await missingAsset(input.widget, exists));
+    execute: async (input, api, context) => {
+      const refused = misuse(input);
       if (refused !== undefined) return fail(refused);
+      let widget: SendCard | undefined;
+      if (isScheduleOverviewRequest(input.widget)) {
+        widget = await scheduleOverviewCard(api, context);
+        if (widget === undefined) return fail("The Schedule Overview is already on Panel. Send a text confirmation about the schedule.");
+      } else if (input.widget !== undefined) {
+        const problem = await missingAsset(input.widget, exists);
+        if (problem !== undefined) return fail(problem);
+      }
       const end = input.end_turn === true;
       const inputs = (await api.snapshot(LiveDoc, api.conversationId, context))?.run?.inputs ?? [];
       const delivery = inputs.length > 0 ? await api.snapshot(ChatDeliveryDoc, context) : undefined;
@@ -97,7 +106,7 @@ export const createSendTool = (exists: ArtifactCheck | undefined): ToolRegistrat
         .map((request) => request.requestId) ?? [];
       return {
         output: [{ type: "text", text: end ? "Delivered. Your turn is complete." : "Delivered." }],
-        details: { type: input.type, end, ...(requestIds.length > 0 ? { requestIds } : {}) },
+        details: { type: input.type, end, ...(requestIds.length > 0 ? { requestIds } : {}), ...(widget && { widget }) },
         ...(end && { control: { terminate: true } }),
       };
     },

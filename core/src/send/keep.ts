@@ -6,7 +6,7 @@ import { artifactName } from "../protocol/send.js";
 import { AssetsDoc } from "./doc.js";
 import { deliveredSentIn } from "./sent.js";
 import { acceptSpace, rememberSpace } from "./space-offers.js";
-import { acceptSchedule, scheduleOffer } from "./schedule-offers.js";
+import { acceptSchedule } from "./schedule-offers.js";
 import { SCHEDULE_WIDGET_ID } from "../protocol/panel.js";
 
 const MAX_PANEL_WIDGETS = 24;
@@ -39,9 +39,8 @@ export async function keepWidget(harness: Harness, entries: readonly EntryRecord
     }, BACKGROUND_CONTEXT);
     return;
   }
-  const schedules = scheduleOffer(entries, origin);
-  const offers = schedules === undefined ? deliveredSentIn(entries) : [];
-  const card = schedules === undefined ? offers.find((offer) => offer.id === origin)?.input.widget : { kind: "panel" as const, panel: schedules };
+  const offers = deliveredSentIn(entries);
+  const card = offers.find((offer) => offer.id === origin)?.input.widget;
   if (card === undefined) throw new Error("这张卡片已不在对话里");
   await harness.commit(async (tx) => {
     if (card.kind === "asset") {
@@ -54,8 +53,8 @@ export async function keepWidget(harness: Harness, entries: readonly EntryRecord
     }
     const panel = await tx.doc(PanelDoc);
     const id = card.panel.id;
-    if (schedules !== undefined && requestId !== undefined) {
-      acceptSchedule(panel, schedules, origin, requestId, Date.now());
+    if (id === SCHEDULE_WIDGET_ID && card.panel.body.kind === "schedules" && requestId !== undefined) {
+      acceptSchedule(panel, card.panel, origin, requestId, Date.now());
       if (panel.widgets[id]?.origin !== origin) return;
       addToOrder(panel.order, id);
       return;

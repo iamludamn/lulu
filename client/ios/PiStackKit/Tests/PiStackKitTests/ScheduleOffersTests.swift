@@ -60,8 +60,8 @@ private func decodePanel(_ json: String) throws -> PanelState {
      "scheduleReceipts":{"\(a.id)":{"action":"add","requestIds":["req-a"]}}}
     """)
     #expect(scheduleOfferState(a, panel: keptA) == .accepted(.add))
-    #expect(scheduleOfferState(b, panel: keptA) == .update)
-    #expect(scheduleOfferState(b, panel: keptA.checking("lulu:schedules", item: 0, done: true)) == .update)
+    #expect(scheduleOfferState(b, panel: keptA) == .superseded)
+    #expect(scheduleOfferState(b, panel: keptA.checking("lulu:schedules", item: 0, done: true)) == .superseded)
     let reconnected = try decodePanel("""
     {"order":["lulu:schedules"],"widgets":{"lulu:schedules":\(widget(2, origin: b.id))},"scheduleRevision":2,
      "scheduleReceipts":{"\(b.id)":{"action":"update","requestIds":["req-b"]}}}
@@ -83,4 +83,55 @@ private func decodePanel(_ json: String) throws -> PanelState {
     #expect(panel.list.map(\.id) == ["n"])
     #expect(panel.scheduleRevision == nil)
     #expect(panel.scheduleReceipts.isEmpty)
+}
+
+@Test func chatRendersTextAndCardsOnlyAfterSuccessfulSend() throws {
+    func call(_ id: String, _ arguments: String) -> String {
+        """
+        {"type":"toolCall","name":"send_to_user","id":"\(id)","arguments":\(arguments)}
+        """
+    }
+    func result(_ entry: Int, _ id: String, error: Bool = false, details: String = "{}") -> String {
+        """
+        {"id":\(entry),"kind":"pi.tool-result","model":[{"role":"toolResult","toolName":"send_to_user","toolCallId":"\(id)","isError":\(error),"details":\(details)}]}
+        """
+    }
+    let overview = #"{"type":"widget","widget":{"kind":"schedule_overview"},"end_turn":true}"#
+    let calls = [
+        call("text", ##"{"type":"text","content":"Summary","body":"# Details"}"##),
+        call("asset", #"{"type":"widget","widget":{"kind":"asset","ref":"artifact://report.html@1","title":"Report"}}"#),
+        call("widget", #"{"type":"widget","widget":{"kind":"panel","panel":{"id":"note","title":"Note","size":"m","body":{"kind":"note","markdown":"Saved note"}}}}"#),
+        call("schedule", overview),
+        call("failed", overview),
+        call("pending", overview),
+    ].joined(separator: ",")
+    let details = """
+    {"widget":{"kind":"panel","panel":\(widget(1))}}
+    """
+    let view = try decodeView([
+        #"{"id":1,"kind":"pi.assistant","model":[{"role":"assistant","content":[{"type":"text","text":"Unsent draft"}]}]}"#,
+        #"{"id":2,"kind":"pi.user","model":[{"role":"user","content":"Show me"}]}"#,
+        """
+        {"id":3,"kind":"pi.assistant","model":[{"role":"assistant","content":[\(calls)]}]}
+        """,
+        result(4, "text"), result(5, "asset"), result(6, "widget"),
+        result(7, "schedule", details: details), result(8, "failed", error: true, details: details),
+    ])
+    let entries = chatEntries(view, hidden: [])
+    #expect(entries.map(\.id) == ["2", "text", "asset", "widget", "schedule"])
+    #expect(entries[1].text == "Summary")
+    #expect(entries[1].body == "# Details")
+    guard case .asset? = entries[2].card, case .panel? = entries[3].card,
+          let schedule = entries.last, case .panel(let panel)? = schedule.card,
+          case .schedules = panel.body else {
+        Issue.record("A successfully sent card did not decode")
+        return
+    }
+    #expect(schedule.final)
+    #expect(scheduleOfferState(schedule, panel: PanelState()) == .add)
+    let accepted = try decodePanel("""
+    {"order":["lulu:schedules"],"widgets":{"lulu:schedules":\(widget(1, origin: schedule.id))},
+     "scheduleReceipts":{"\(schedule.id)":{"action":"add","requestIds":["keep"]}}}
+    """)
+    #expect(scheduleOfferState(schedule, panel: accepted) == .accepted(.add))
 }

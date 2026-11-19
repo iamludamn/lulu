@@ -12,7 +12,7 @@ This is an early-stage, single-user project. The API uses the fixed bot ID `main
 - Maintain memory across conversations and run scheduled work.
 - Connect MCP services, including OAuth-backed services.
 - Execute work in E2B sandboxes and deliver files through S3-compatible storage.
-- Offer panels and small interactive spaces that users can choose to keep.
+- Send cards in Chat that users can accept as Widgets on Panel or files in Assets. A Space is an interactive Widget.
 - Support voice calls through the Doubao integration.
 
 Features that depend on external services require your own credentials and may incur usage charges.
@@ -30,27 +30,12 @@ npm run build
 
 This compiles the core, web app, and desktop binary; it does not deploy or build iOS. To run the service, follow [Local development and deployment](docs/deployment.md). A model credential is needed for chat; optional integrations are listed there. No credentials are needed to compile.
 
-## Repository map
-
-| Path | Responsibility |
-| --- | --- |
-| `core/src/` | Runtime-independent agent, conversation, memory, tools, and protocol |
-| `apps/cf/` | Cloudflare Worker, Durable Object adapters, and bindings |
-| `client/web/` | React/Vite web client and MCP administration page |
-| `client/desktop/` | Go desktop client using mygo |
-| `client/ios/` | SwiftUI app and the shared PiStackKit Swift package |
-| `ops/observability/` | Collector configuration and Grafana dashboard |
-
-Some client targets and internal names still use `PiStack`; the project is called lulu.
-
 ## Documentation
 
-- [Architecture and extension boundaries](docs/ARCHITECTURE.md)
-- [Development and contributions](docs/CONTRIBUTING.md)
+- [Architecture, repository map, and feature guides](docs/ARCHITECTURE.md)
 - [Deployment and configuration](docs/deployment.md)
 - [Telemetry and operations](docs/observability.md)
 - [Security policy](SECURITY.md)
-- [Community expectations](docs/CODE_OF_CONDUCT.md)
 
 Use GitHub Issues for bugs and proposals. Maintainers may track follow-up work internally, but contributors do not need access to internal systems.
 

@@ -4,7 +4,7 @@ import { RunFamily, runIdOf, updateRun } from "../delegate/runs.js";
 import { CronJobsDoc } from "./doc.js";
 import { GRACE_MS, WATCHDOG_MS, nextRunAfter, type ScheduledJob } from "./schedule.js";
 
-export type FireStart = (tx: Tx, job: ScheduledJob, runId: string) => Promise<unknown>;
+export type FireStart = (tx: Tx, job: ScheduledJob, runId: string, scheduledFor: number) => Promise<unknown>;
 
 export async function fireDue(tx: Tx, now: number, start: FireStart): Promise<string[]> {
   const draft = await tx.doc(CronJobsDoc);
@@ -19,7 +19,7 @@ export async function fireDue(tx: Tx, now: number, start: FireStart): Promise<st
     }
     const runId = await runIdOf("cron:" + job.id + ":" + scheduledFor);
     try {
-      await start(tx, job, runId);
+      await start(tx, job, runId, scheduledFor);
     } catch (error) {
       if (error instanceof DelegateCapacityError) continue;
       throw error;

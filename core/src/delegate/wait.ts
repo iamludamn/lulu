@@ -1,4 +1,5 @@
 import { bindDelivery } from "../conversation/delivery-doc.js";
+import { inputSubmission, type ScheduleMessageSource } from "../conversation/input.js";
 import { InjectionBindings } from "../memory/doc.js";
 import { awaitWithContext, withCancel } from "@earendil-works/chord/context";
 import { REQUEST_TIMEOUT_MS } from "./limits.js";
@@ -9,15 +10,10 @@ import type { ConversationId, EntryId, TaskRuntime } from "@earendil-works/pi-du
 import { RunFamily, oneLine, readRunStatus, shortId, updateRun, type RunUsage } from "./runs.js";
 import { RENAMED_TASKS } from "../durable-names.js";
 
-export interface WaitInput {
-  runId: string;
+export interface WaitInput extends Settling {
   childId: ConversationId;
-  parentId: ConversationId;
-  task: string;
   prompt?: string;
   requestId: string;
-  noticeId: string;
-  token: string | null;
 }
 
 export interface WaitCheckpoint {
@@ -85,6 +81,7 @@ export interface Settling {
   task: string;
   noticeId: string;
   token: string | null;
+  scheduleSource?: ScheduleMessageSource;
 }
 
 export async function settle<I extends Settling, S extends { phase: string }>(input: I, runtime: TaskRuntime<I, S, WaitResult, object>, context: Context, status: "done" | "failed", text: string, usage: RunUsage | null): Promise<void> {
@@ -93,7 +90,12 @@ export async function settle<I extends Settling, S extends { phase: string }>(in
   const endedAt = runtime.now();
   await runtime.commit(async (tx) => {
     if ((await readRunStatus(tx, input.runId)) !== "running") return { status: "terminal", outcome: { status: "aborted", reason: "run no longer active" } };
-    const notice = parent ? await parent.submit(tx, { type: "input", content: noticeText(short, status, input.task, text, input.token), requestId: input.noticeId }) : undefined;
+    const source = input.scheduleSource ?? { kind: "delegate_result", runId: input.runId } as const;
+    const notice = parent ? await parent.submit(tx, inputSubmission({
+      ...source,
+      content: noticeText(short, status, input.task, text, input.token),
+      requestId: input.noticeId,
+    })) : undefined;
     const run = await tx.doc(RunFamily, input.runId, { id: input.runId, task: input.task, description: "", origin: [], agent: "", cwd: "" });
     if (notice !== undefined) {
       await bindDelivery(tx, run.origin, notice);
@@ -129,7 +131,8 @@ export const DelegateWait = defineTask<WaitInput, WaitCheckpoint, WaitResult, ob
         await settle(input, runtime, context, "failed", "Request exceeded its 15 minute deadline", null);
         return;
       }
-      const submission = await child.submit({ type: "input", content: input.prompt ?? input.task, requestId: input.requestId }, context);
+      const draft = { content: input.prompt ?? input.task, requestId: input.requestId };
+      const submission = await child.submit(input.scheduleSource === undefined ? { type: "input", ...draft } : inputSubmission({ ...draft, ...input.scheduleSource }), context);
       const waiting = withCancel(context);
       let stopTimer = (): void => {};
       let settled;
