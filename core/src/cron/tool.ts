@@ -5,6 +5,7 @@ import { Type, type Static } from "typebox";
 import { runIdOf, shortId } from "../delegate/runs.js";
 import type { Schedule } from "../protocol/contract.js";
 import { CronJobsDoc } from "./doc.js";
+import { appendScheduleOffer, scheduleRow } from "./overview.js";
 import { nextRunAfter, validTime, validTimeZone, type ScheduledJob } from "./schedule.js";
 
 const ScheduleParams = Type.Object({
@@ -65,18 +66,20 @@ async function create(api: ToolExecutionApi<ScheduleDetails>, args: ScheduleArgs
   const prompt = args.prompt?.trim();
   if (!name) return fail("create requires name");
   if (!prompt) return fail("create requires prompt");
-  const now = Date.now();
-  const schedule = scheduleOf(args, now);
-  if (typeof schedule === "string") return fail(schedule);
-  const nextRunAt = nextRunAfter(schedule, now);
   const id = await runIdOf("cron:create:" + String(api.taskId));
-  await api.commit(async (tx) => {
+  return api.commit(async (tx) => {
     const draft = await tx.doc(CronJobsDoc);
-    if (draft.jobs.some((job) => job.id === id)) return;
-    draft.jobs.push({ id, name, prompt, schedule, state: "active", nextRunAt, lastRun: null });
+    const existing = draft.jobs.find((job) => job.id === id);
+    if (existing !== undefined) return ok("scheduled " + describe(existing), "create", id);
+    if (draft.deleted?.some((row) => row.id === id)) return ok("scheduled " + shortId(id) + " (since deleted)", "create", id);
+    const now = Date.now();
+    const schedule = scheduleOf(args, now);
+    if (typeof schedule === "string") return fail(schedule);
+    const job: ScheduledJob = { id, name, prompt, schedule, state: "active", nextRunAt: nextRunAfter(schedule, now), lastRun: null };
+    draft.jobs.push(job);
+    await appendScheduleOffer(tx, api.conversationId, draft.jobs, draft.deleted ?? [], now);
+    return ok("scheduled " + describe(job), "create", id);
   }, context);
-  const job = (await api.snapshot(CronJobsDoc, context))?.jobs.find((entry) => entry.id === id);
-  return ok("scheduled " + (job ? describe(job) : shortId(id)), "create", id);
 }
 
 async function list(api: ToolExecutionApi<ScheduleDetails>, context: Context): Promise<ToolExecutionResult<ScheduleDetails>> {
@@ -97,6 +100,7 @@ async function update(api: ToolExecutionApi<ScheduleDetails>, args: ScheduleArgs
     const job = draft.jobs.find((entry) => entry.id === target.id);
     if (!job) return;
     if (args.action === "delete") {
+      draft.deleted = [...(draft.deleted ?? []), scheduleRow(job, "deleted")];
       draft.jobs.splice(draft.jobs.indexOf(job), 1);
       return;
     }
@@ -112,6 +116,7 @@ export const ScheduleTool: ToolRegistration = defineTool({
   description: [
     "Manage scheduled jobs that run a self-contained task later, or every day at a fixed time, and report the result back to this conversation.",
     "Actions: create (name, prompt, kind=once with at, or kind=daily with time and tz), list, pause, resume, delete (id or unique id prefix).",
+    "Creating a job automatically offers the user a scheduled task overview. Confirm the result in chat.",
     "Keep this machinery private: never mention job ids or internal state to the user unless they ask.",
   ].join(" "),
   parameters: ScheduleParams,

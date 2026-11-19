@@ -4,8 +4,9 @@ public struct ConversationEntry: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let kind: String
     public let model: [JSONValue]?
+    let data: JSONValue?
 
-    private enum Keys: String, CodingKey { case id, kind, model }
+    private enum Keys: String, CodingKey { case id, kind, model, data }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: Keys.self)
@@ -16,6 +17,7 @@ public struct ConversationEntry: Codable, Equatable, Identifiable, Sendable {
         }
         kind = try container.decode(String.self, forKey: .kind)
         model = try container.decodeIfPresent([JSONValue].self, forKey: .model)
+        data = kind == scheduleOfferKind ? try container.decodeIfPresent(JSONValue.self, forKey: .data) : nil
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -23,6 +25,7 @@ public struct ConversationEntry: Codable, Equatable, Identifiable, Sendable {
         try container.encode(id, forKey: .id)
         try container.encode(kind, forKey: .kind)
         try container.encodeIfPresent(model, forKey: .model)
+        try container.encodeIfPresent(data, forKey: .data)
     }
 }
 

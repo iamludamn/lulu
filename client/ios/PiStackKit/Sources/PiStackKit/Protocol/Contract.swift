@@ -72,7 +72,7 @@ public struct MemoryListing: Codable, Sendable {
     public let commits: [MemoryCommit]
 }
 
-public enum Schedule: Decodable, Sendable {
+public enum Schedule: Decodable, Equatable, Sendable {
     case once(at: Double)
     case daily(time: String, tz: String)
 
@@ -82,7 +82,8 @@ public enum Schedule: Decodable, Sendable {
         let container = try decoder.container(keyedBy: Keys.self)
         switch try container.decode(String.self, forKey: .kind) {
         case "once": self = .once(at: try container.decode(Double.self, forKey: .at))
-        default: self = .daily(time: try container.decode(String.self, forKey: .time), tz: try container.decode(String.self, forKey: .tz))
+        case "daily": self = .daily(time: try container.decode(String.self, forKey: .time), tz: try container.decode(String.self, forKey: .tz))
+        default: throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "Unknown schedule kind")
         }
     }
 }
