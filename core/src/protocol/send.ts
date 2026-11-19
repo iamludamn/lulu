@@ -19,6 +19,10 @@ const AssetCard = Type.Object({
   summary: Type.Optional(Type.String({ description: "One line on what the file holds" })),
 });
 
+const ScheduleOverviewRequest = Type.Object({
+  kind: Type.Literal("schedule_overview"),
+}, { description: "A Schedule Overview filled from the saved jobs by the server" });
+
 export const SendInput = Type.Object({
   type: Type.Union([Type.Literal("text"), Type.Literal("widget")]),
   content: Type.Optional(Type.String({ description: "Message for type text only; never on type widget. Markdown renders; use real line breaks between paragraphs" })),
@@ -29,10 +33,12 @@ export const SendInput = Type.Object({
 
 export const ModelSendInput = Type.Object({
   ...SendInput.properties,
-  widget: Type.Optional(Type.Union([Type.Object({ ...WidgetCard.properties, panel: ModelWidgetInput }), AssetCard], { description: "Card for type widget: a Widget for Panel or an Asset for Assets" })),
+  widget: Type.Optional(Type.Union([Type.Object({ ...WidgetCard.properties, panel: ModelWidgetInput }), AssetCard, ScheduleOverviewRequest], { description: "Card for type widget: a Widget, an Asset, or the Schedule Overview" })),
 });
 
 export type SendInput = Static<typeof SendInput>;
+export type ModelSendInput = Static<typeof ModelSendInput>;
 export type SendCard = NonNullable<SendInput["widget"]>;
+export type SendDetails = { type: string; end: boolean; requestIds?: string[]; widget?: SendCard };
 
 export type AssetItem = { origin: string; ref: string; title: string; summary?: string; savedAt: number };

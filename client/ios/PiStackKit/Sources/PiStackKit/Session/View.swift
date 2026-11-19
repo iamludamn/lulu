@@ -53,16 +53,16 @@ func messageTime(_ model: [JSONValue]?) -> Date? {
     return nil
 }
 
-func sentEntries(_ model: [JSONValue]?, position: Double, time: Date?, delivered: Set<String>) -> [ChatEntry] {
+func sentEntries(_ model: [JSONValue]?, position: Double, time: Date?, delivered: [String: JSONValue]) -> [ChatEntry] {
     var entries: [ChatEntry] = []
     for message in model ?? [] {
         for block in message["content"]?.array ?? [] where block["type"]?.string == "toolCall" && block["name"]?.string == sendTool {
-            guard let id = block["id"]?.string, delivered.contains(id), let input = block["arguments"] else { continue }
+            guard let id = block["id"]?.string, let result = delivered[id], let input = block["arguments"] else { continue }
             let final = input["end_turn"] == .bool(true)
             if input["type"]?.string == "text", let content = input["content"]?.string, !content.isEmpty {
                 let body = input["body"]?.string.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
                 entries.append(ChatEntry(id: id, position: position, role: .assistant, text: content, body: body, card: nil, time: time, final: final))
-            } else if let card = sentCard(input["widget"]) {
+            } else if input["type"]?.string == "widget", let card = sentCard(result["details"]?["widget"] ?? input["widget"]) {
                 entries.append(ChatEntry(id: id, position: position, role: .assistant, text: "", body: nil, card: card, time: time, final: final))
             }
         }
@@ -83,11 +83,13 @@ func sentCard(_ widget: JSONValue?) -> SentCard? {
     }
 }
 
-func deliveredCalls(_ view: ConversationView?) -> Set<String> {
-    var delivered = Set<String>()
+func deliveredCalls(_ view: ConversationView?) -> [String: JSONValue] {
+    var delivered: [String: JSONValue] = [:]
     for entry in view?.entries ?? [] where entry.kind == "pi.tool-result" {
-        for message in entry.model ?? [] where message["role"]?.string == "toolResult" && message["isError"] != .bool(true) {
-            if let id = message["toolCallId"]?.string { delivered.insert(id) }
+        for message in entry.model ?? [] where message["role"]?.string == "toolResult" && message["toolName"]?.string == sendTool {
+            if let id = message["toolCallId"]?.string {
+                delivered[id] = message["isError"] == .bool(true) ? nil : message
+            }
         }
     }
     return delivered
@@ -96,41 +98,26 @@ func deliveredCalls(_ view: ConversationView?) -> Set<String> {
 public func chatEntries(_ view: ConversationView?, hidden: [String]) -> [ChatEntry] {
     let skipped = Set(hidden)
     let delivered = deliveredCalls(view)
-    var result: [ChatEntry] = []
-    var turn: [ConversationEntry] = []
-    func close(fallback: Bool) {
-        let sent = turn.flatMap { entry -> [ChatEntry] in
-            let position = Double(entry.id) ?? .infinity
-            if entry.kind == scheduleOfferKind {
-                guard case .panel(let widget)? = sentCard(entry.data?["widget"]), case .schedules = widget.body else { return [] }
-                let time: Date?
-                if case .number(let milliseconds)? = entry.data?["at"] { time = Date(timeIntervalSince1970: milliseconds / 1000) }
-                else { time = nil }
-                return [ChatEntry(id: scheduleOriginPrefix + entry.id, position: position, role: .assistant, text: "", body: nil, card: .panel(widget), time: time, final: false)]
-            }
-            return sentEntries(entry.model, position: position, time: messageTime(entry.model), delivered: delivered)
-        }
-        if !sent.isEmpty {
-            result += sent
-        } else if fallback, let last = turn.last(where: { !messageText($0.model).isEmpty }) {
-            result.append(ChatEntry(id: last.id, position: Double(last.id) ?? .infinity, role: .assistant, text: messageText(last.model), body: nil, card: nil, time: messageTime(last.model), final: false))
-        }
-        turn = []
-    }
-    for entry in view?.entries ?? [] where !skipped.contains(entry.id) {
+    return (view?.entries ?? []).flatMap { entry -> [ChatEntry] in
+        guard !skipped.contains(entry.id) else { return [] }
+        let position = Double(entry.id) ?? .infinity
         switch entry.kind {
         case "pi.user":
-            close(fallback: true)
             let text = messageText(entry.model)
-            if !text.isEmpty { result.append(ChatEntry(id: entry.id, position: Double(entry.id) ?? .infinity, role: .user, text: text, body: nil, card: nil, time: messageTime(entry.model), final: false)) }
-        case "pi.assistant", scheduleOfferKind:
-            turn.append(entry)
+            guard !text.isEmpty else { return [] }
+            return [ChatEntry(id: entry.id, position: position, role: .user, text: text, body: nil, card: nil, time: messageTime(entry.model), final: false)]
+        case "pi.assistant":
+            return sentEntries(entry.model, position: position, time: messageTime(entry.model), delivered: delivered)
+        case scheduleOfferKind:
+            guard case .panel(let widget)? = sentCard(entry.data?["widget"]), case .schedules = widget.body else { return [] }
+            let time: Date?
+            if case .number(let milliseconds)? = entry.data?["at"] { time = Date(timeIntervalSince1970: milliseconds / 1000) }
+            else { time = nil }
+            return [ChatEntry(id: scheduleOriginPrefix + entry.id, position: position, role: .assistant, text: "", body: nil, card: .panel(widget), time: time, final: false)]
         default:
-            break
+            return []
         }
     }
-    close(fallback: false)
-    return result
 }
 
 public func timeline(_ entries: [ChatEntry], _ messages: [MessageProgress]) -> [TimelineItem] {

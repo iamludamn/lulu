@@ -15,4 +15,4 @@
 | --- | --- |
 | Conversation | `conversationId`. Owns the transcript. |
 | User Message | `requestId` ties retries to the same request. The Submission ID tracks whether Pi placed and answered it. |
-| Assistant Message | The text or card delivered to Chat. Tool delivery uses a `callId`; transcript entries have their own entry IDs. |
+| Assistant Message | Text or a card delivered by a successful `send_to_user` call. Its `callId` identifies the message. |
