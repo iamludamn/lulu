@@ -6,7 +6,7 @@
 | --- | --- |
 | [`send_to_user`](../core/src/send/tool.ts) | Send a card to Chat. The user can accept its Widget or Asset. The `schedule` tool emits Schedule Overview cards. |
 | [`widget.keep` / `widget.drop`](../core/src/send/keep.ts) | Accept or remove a card's item by `origin`. |
-| [`panel.update`](../core/src/panel/tool.ts) | Update an accepted ordinary Widget by ID. Space page revisions require acceptance of a newer card with the same ID. |
+| [`panel` with `action: "update"`](../core/src/panel/tool.ts) | Update an accepted ordinary Widget by ID. Space page revisions require acceptance of a newer card with the same ID. |
 | [`/artifacts/file`, `/spaces/state`, `/spaces/refresh`](../core/src/server/api.ts) | Download a file, read or save Space state, or manage Space background data. |
 
 ## Core entities
