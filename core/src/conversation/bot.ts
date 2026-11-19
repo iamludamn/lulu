@@ -13,7 +13,7 @@ import { entryRange, HISTORY_PAGE_SIZE, observeView } from "./view.js";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { type Conversation, type ConversationView, type EntryId, CompactionEntry, Harness, type Registry, type Storage } from "@earendil-works/pi-durable";
-import type { TelemetrySpan } from "@earendil-works/pi-telemetry";
+import type { TelemetryContext, TelemetrySpan } from "@earendil-works/pi-telemetry";
 import type { McpHost, McpServerConfig } from "../agent/mcp.js";
 import { handleMcpRegistry } from "../agent/mcp-registry.js";
 import { mcpStore } from "../agent/mcp-store.js";
@@ -40,6 +40,7 @@ import { AsrSessions } from "../voice/asr.js";
 import { VoiceSession } from "./voice.js";
 import { MAX_CLIENT_FRAME_CHARACTERS, type ClientMessage, type ServerMessage } from "../protocol/wire.js";
 import { parseFrame } from "./frame.js";
+import { withoutSchedules } from "./compat.js";
 import { createChatHarnessOptions, reconnectChatMcp } from "../agent/chat.js";
 import { chatModelConfig, chatModelRef, createChatModels, durableModel } from "../agent/models.js";
 import { createMemoryUpdate, recoverMemoryUpdates } from "../memory/schedule.js";
@@ -52,7 +53,7 @@ const MODEL_KEY = "model";
 const STATE_INTERVAL_MS = 50;
 const PROGRESS_WAIT_MS = 500;
 
-type ClientAttachment = { readonly role: "client"; readonly ready: boolean; readonly incremental?: boolean; readonly authenticated?: boolean };
+type ClientAttachment = { readonly role: "client"; readonly ready: boolean; readonly incremental?: boolean; readonly schedules?: boolean; readonly authenticated?: boolean };
 type HelloMessage = Extract<ClientMessage, { type: "hello" }>;
 type ReceiptMessage = Extract<ClientMessage, { type: "prompt.receipts" }>;
 type Command = Exclude<ClientMessage, HelloMessage | ReceiptMessage>;
@@ -196,6 +197,7 @@ export class BotSession {
     });
     trackProgress(
       harness,
+      root.id,
       {
         pending: () => {
           this.#awaiting = true;
@@ -319,7 +321,7 @@ export class BotSession {
     }
 
     if (frame.type === "hello") {
-      const next = this.#hello(socket, attachment, frame.incremental === true);
+      const next = this.#hello(socket, attachment, frame);
       this.#handshakes.set(socket, next);
       await next;
       return;
@@ -341,7 +343,10 @@ export class BotSession {
     try {
       await this.#host.telemetry.startSpan(
         { name: `bot.command ${frame.type}`, attributes: { "lulu.bot.id": this.#host.name, "lulu.command": frame.type } },
-        () => this.#handle(socket, frame),
+        (span) => {
+          if (frame.type === "prompt.submit") span.setAttributes({ "lulu.prompt.chars": frame.content.length, "lulu.prompt.when_busy": frame.whenBusy });
+          return this.#handle(socket, frame, span);
+        },
       );
     } catch (error) {
       reportError("Bot command failed", error, { command: frame.type });
@@ -369,9 +374,9 @@ export class BotSession {
     return attachment;
   }
 
-  async #hello(socket: Socket, attachment: ClientAttachment, incremental: boolean): Promise<boolean> {
+  async #hello(socket: Socket, attachment: ClientAttachment, hello: HelloMessage): Promise<boolean> {
     const config = await this.#config();
-    this.#host.sockets.attach(socket, { ...attachment, ready: true, incremental } satisfies ClientAttachment);
+    this.#host.sockets.attach(socket, { ...attachment, ready: true, incremental: hello.incremental === true, schedules: hello.schedules === true } satisfies ClientAttachment);
     this.#send(socket, { type: "models", config });
     this.#send(socket, this.#stateMessage(undefined, true));
     return true;
@@ -383,7 +388,7 @@ export class BotSession {
     for (const [requestId, maker] of this.#makers) if (maker.socket === socket) this.#makers.delete(requestId);
   }
 
-  async #handle(socket: Socket, command: Command): Promise<void> {
+  async #handle(socket: Socket, command: Command, telemetry: TelemetryContext = this.#host.telemetry): Promise<void> {
     switch (command.type) {
       case "asr.start":
         await this.#asr.start(socket, command.requestId);
@@ -418,14 +423,18 @@ export class BotSession {
         return;
       }
       case "prompt.submit": {
+        const queuedAt = Date.now();
         const release = this.#host.env.LULU_RELEASE ?? "unknown";
-        return this.#host.telemetry.startSpan({
+        return telemetry.startSpan({
           name: "chat.delivery.received",
           attributes: {
             "lulu.bot.id": this.#host.name, "lulu.request.id": command.requestId, "lulu.release": release,
             "lulu.prompt.chars": command.content.length, "lulu.prompt.when_busy": command.whenBusy,
           },
-        }, (span) => this.#inPromptOrder(() => this.#submitPrompt(socket, command, release, span)));
+        }, (received) => received.startSpan({ name: "prompt.admission", attributes: {
+          "lulu.bot.id": this.#host.name, "lulu.agent": "chat", "lulu.conversation.id": String(this.#root.id), "lulu.conversation.kind": "root",
+          "lulu.memory.request_id": command.requestId,
+        } }, (span) => this.#inPromptOrder(() => this.#submitPrompt(socket, command, { release, received, span, queuedAt }))));
       }
       case "prompt.abort":
         return this.#inPromptOrder(async () => {
@@ -448,7 +457,7 @@ export class BotSession {
       }
       case "widget.keep":
       case "widget.drop":
-        await keepWidget(this.#harness, await entryRange(this.#root, 0, undefined, BACKGROUND_CONTEXT), command.origin, command.type === "widget.keep");
+        await keepWidget(this.#harness, command.type === "widget.keep" ? await entryRange(this.#root, 0, undefined, BACKGROUND_CONTEXT) : [], command.origin, command.type === "widget.keep", command.requestId);
         this.#acknowledge(socket, command.requestId);
         return;
       case "layout.order":
@@ -470,12 +479,16 @@ export class BotSession {
     }
   }
 
-  async #submitPrompt(socket: Socket, command: Extract<Command, { type: "prompt.submit" }>, release: string, span: TelemetrySpan): Promise<void> {
-    const injection = await prepareInjection(this.#host, this.#harness, command.requestId, command.content, this.#view.value, chatModelRef(this.#host.env, this.#selected));
+  async #submitPrompt(socket: Socket, command: Extract<Command, { type: "prompt.submit" }>, timing: { release: string; received: TelemetrySpan; span: TelemetrySpan; queuedAt: number }): Promise<void> {
+    const { release, received, span, queuedAt } = timing;
+    span.setAttributes({ "lulu.prompt.queue_ms": Date.now() - queuedAt });
+    const injection = await prepareInjection(this.#host, this.#harness, command.requestId, command.content, this.#view.value, chatModelRef(this.#host.env, this.#selected), span);
+    span.setAttributes({ "lulu.prompt.memory_ready_ms": Date.now() - queuedAt });
     if (this.#resumeAfterMcp) await this.#mcpReady;
-    const request = await admitPrompt(this.#harness, this.#root, this.#view.value, command, injection, { release, span });
+    const { request, firstBinding } = await admitPrompt(this.#harness, this.#root, this.#view.value, command, injection, { release, span: received });
+    span.setAttributes({ "lulu.prompt.admission_ms": Date.now() - queuedAt, "lulu.prompt.replay": !firstBinding, "lulu.memory.outcome": injection.outcome, "lulu.memory.selected": injection.selected.length });
     if (request) observeDelivery(this.#host.telemetry, this.#host.name, { request, stage: "accepted", at: request.acceptedAt });
-    else span.setAttributes({ "lulu.delivery.replayed": true });
+    else received.setAttributes({ "lulu.delivery.replayed": true });
     void this.#refreshAlarm().catch((error: unknown) => reportError("Prompt alarm reconciliation failed", error));
     this.#broadcastState();
     this.#acknowledge(socket, command.requestId);
@@ -642,7 +655,13 @@ export class BotSession {
     if (message.type === "state" && this.#attachmentOf(socket)?.incremental !== true) {
       message = { ...message, mcp: message.mcp.map((server) => server.state === "idle" ? { ...server, state: "failed", error: "Preparing tools" } : server) };
     }
-    socket.send(JSON.stringify(message));
+    if (this.#attachmentOf(socket)?.schedules !== true) message = withoutSchedules(message);
+    try {
+      socket.send(JSON.stringify(message));
+    } catch (error) {
+      reportError("Socket delivery failed", error);
+      this.#reject(socket, 1011, "Reconnect to recover state");
+    }
   }
 
   #reject(socket: Socket, code: number, reason: string): void {

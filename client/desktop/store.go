@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -237,7 +238,7 @@ func (s *store) session(ctx context.Context, client *http.Client) (bool, websock
 		s.sock = sock
 		s.snap.loadingHistory = false
 		s.snap.historyRequest = ""
-		s.transmit(obj{"type": "hello", "incremental": true})
+		s.transmit(obj{"type": "hello", "incremental": true, "schedules": true})
 		for _, r := range s.snap.requests {
 			if r.state == requestSending {
 				s.transmit(r.command.frame)
@@ -307,6 +308,9 @@ func (s *store) receive(msg *serverMessage, d decodedState) {
 		s.snap.mcp = msg.MCP
 		s.snap.panel = d.panel
 		s.snap.assets = d.assets
+		s.snap.requests = slices.DeleteFunc(s.snap.requests, func(r request) bool {
+			return r.command.kind == cmdKeep && slices.Contains(d.panel.ScheduleReceipts[r.command.origin].RequestIDs, r.command.requestID)
+		})
 		if s.sock != nil {
 			s.sock.deliveryReceipts = msg.View.DeliveryReceipts
 			if msg.View.Reset {

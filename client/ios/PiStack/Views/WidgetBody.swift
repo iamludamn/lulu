@@ -38,6 +38,21 @@ struct WidgetBody: View {
             WeatherBody(city: city, size: widget.size)
         case .actions(let buttons):
             actions(buttons)
+        case .schedules(_, let rows):
+            VStack(alignment: .leading, spacing: 6) {
+                if rows.isEmpty {
+                    Text("暂无定时任务").font(.subheadline).foregroundStyle(.secondary)
+                }
+                ForEach(rows.prefix(2)) { row in
+                    HStack(spacing: 8) {
+                        Text(row.name).font(.subheadline.weight(.medium)).lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text(row.state.label).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Label("共 \(rows.count) 项 · 查看详情", systemImage: "chevron.up")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         case .unknown:
             Text("客户端暂不支持这种组件").font(.footnote).foregroundStyle(.secondary)
         }

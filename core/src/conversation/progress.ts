@@ -1,12 +1,12 @@
-import { ChatDeliveryDoc } from "./delivery-doc.js";
 import { RequestDeadlinesDoc } from "./deadlines.js";
 import type { Context } from "@earendil-works/chord/context";
-import { type CommitPublication, defineDoc, type Harness, type SubmissionId } from "@earendil-works/pi-durable";
+import { type CommitPublication, type ConversationId, defineDoc, type Harness, type SubmissionId, type TaskId } from "@earendil-works/pi-durable";
 import type { MessageProgress, MessageState, SessionProgress, SubtaskProgress } from "../protocol/contract.js";
-import { DelegateIndex, RunFamily, type RunDoc } from "../delegate/runs.js";
 import { owedDeliveries, type Entries } from "../send/delivery.js";
 import { DeliveryDoc, MakeDoc } from "../send/doc.js";
-import { readSubmission, trackSubmissions, type SubmissionReader } from "./submissions.js";
+import { refusedIn, sentIn } from "../send/sent.js";
+import { ProgressRuns } from "./progress-runs.js";
+import { trackSubmissions, type SubmissionReader } from "./submissions.js";
 import { STORED_DOC_KINDS } from "../durable-names.js";
 
 export type ChatMessage = { requestId: string; id: number | null; text: string; after: number | null; at?: number; deadline?: number; error?: string };
@@ -23,24 +23,12 @@ export const ChatDoc = defineDoc<ChatState>({
 
 const LIVE_TASK_STATES = new Set(["pending", "running", "waiting", "completing"]);
 
-async function subtasksOf(harness: Harness, runs: readonly RunDoc[], message: SubmissionId, context: Context): Promise<SubtaskProgress[]> {
-  const subtasks: SubtaskProgress[] = [];
-  for (const run of runs) {
-    if (!run.origin.includes(message) || run.status === "closed" || run.status === "failed") continue;
-    const task = run.waitTaskId ? await harness.getTask(run.waitTaskId, context) : undefined;
-    subtasks.push({ id: run.id, description: run.description, running: task !== undefined && LIVE_TASK_STATES.has(task.state.status) });
-  }
-  return subtasks;
-}
-
-async function noticePending(read: SubmissionReader, runs: readonly RunDoc[], message: SubmissionId, context: Context): Promise<boolean> {
-  for (const run of runs) {
-    if (!run.origin.includes(message) || run.noticeId === null) continue;
-    const record = await read(run.noticeId, context);
-    if (record?.status === "queued" || record?.status === "placed") return true;
-  }
-  return false;
-}
+type ProgressInterest = {
+  chatIds: Set<SubmissionId>;
+  candidates: Set<SubmissionId>;
+  submissions: Set<SubmissionId>;
+  tasks: Set<TaskId>;
+};
 
 function stateOf(status: string | undefined, pending: boolean): MessageState {
   if (status === undefined || status === "queued") return "todo";
@@ -48,28 +36,47 @@ function stateOf(status: string | undefined, pending: boolean): MessageState {
   return "done";
 }
 
-export async function computeProgress(
+async function computeProgress(
   harness: Harness,
-  entries: () => Entries,
+  entries: Entries,
   context: Context,
-  read: SubmissionReader = (id, ctx) => readSubmission(harness, id, ctx),
+  read: SubmissionReader,
+  index: ProgressRuns,
+  interest: ProgressInterest,
 ): Promise<SessionProgress> {
+  const runNotices = await index.hiddenEntries(read, context);
+  const readTracked: SubmissionReader = (id, ctx) => {
+    interest.submissions.add(id);
+    return read(id, ctx);
+  };
   const chat = await harness.snapshot(ChatDoc, context);
-  const index = await harness.snapshot(DelegateIndex, context);
-  const runs = (await Promise.all((index?.ids ?? []).map((id) => harness.snapshot(RunFamily, id, context)))).filter((run): run is RunDoc => run !== undefined);
-  const owed = new Set((await owedDeliveries(harness, entries(), context, read)).map((item) => item.message));
+  for (const { id } of chat?.messages ?? []) {
+    if (id !== null) interest.chatIds.add(id as SubmissionId);
+  }
+  const owed = new Set((await owedDeliveries(harness, entries, context, readTracked)).map((item) => item.message));
   const messages: MessageProgress[] = [];
-  const oldest = Number(entries()[0]?.id ?? 0);
+  const oldest = Number(entries[0]?.id ?? 0);
   const pendingRequests = new Set(((await harness.snapshot(RequestDeadlinesDoc, context))?.pending ?? []).map((item) => item.id));
-  const active = new Set(runs.filter((run) => run.status === "running").flatMap((run) => run.origin));
   for (const message of chat?.messages ?? []) {
     if (message.id === null) continue;
     const id = message.id as SubmissionId;
-    if (message.after !== null && message.after < oldest && !pendingRequests.has(message.id) && !active.has(id) && message !== chat?.messages.at(-1)) continue;
-    const record = await read(id, context);
-    if ((record?.status === "done" || record?.status === "unanswered") && record.entry !== undefined && Number(record.entry) < oldest && !runs.some((run) => run.status === "running" && run.origin.includes(id))) continue;
-    const subtasks = await subtasksOf(harness, runs, id, context);
-    const pending = subtasks.some((subtask) => subtask.running) || (await noticePending(read, runs, id, context));
+    const runs = [...index.forSubmission(id)];
+    const active = runs.some((run) => run.status === "running");
+    const pendingNotice = runs.some((run) => index.noticePending(run.noticeId));
+    const pendingDelivery = owed.has(message.id);
+    const keep = active || pendingNotice || pendingDelivery;
+    if (!keep && message.after !== null && message.after < oldest && !pendingRequests.has(message.id) && message !== chat?.messages.at(-1)) continue;
+    interest.candidates.add(id);
+    const record = await readTracked(id, context);
+    if (!keep && (record?.status === "done" || record?.status === "unanswered") && record.entry !== undefined && Number(record.entry) < oldest) continue;
+    const subtasks: SubtaskProgress[] = [];
+    for (const run of runs) {
+      if (run.status === "closed" || run.status === "failed") continue;
+      if (run.waitTaskId !== null) interest.tasks.add(run.waitTaskId);
+      const task = run.waitTaskId === null ? undefined : await harness.getTask(run.waitTaskId, context);
+      subtasks.push({ id: run.id, description: run.description, running: task !== undefined && LIVE_TASK_STATES.has(task.state.status) });
+    }
+    const pending = pendingNotice || subtasks.some((subtask) => subtask.running);
     messages.push({
       id: message.id,
       requestId: message.requestId,
@@ -78,28 +85,23 @@ export async function computeProgress(
       answer: record?.answer ? String(record.answer) : null,
       text: message.text,
       after: message.after,
-      state: message.error ? "done" : owed.has(message.id) ? "processing" : stateOf(record?.status, pending),
+      state: message.error ? "done" : pendingDelivery ? "processing" : stateOf(record?.status, pending),
       error: message.error ?? (record?.status === "unanswered" && record.reason !== "aborted" ? record.reason : null),
       subtasks,
     });
   }
   const hiddenEntries: string[] = [];
-  for (const run of runs) {
-    if (run.noticeId === null) continue;
-    const record = await read(run.noticeId, context);
-    if (record?.entry !== undefined) hiddenEntries.push(String(record.entry));
-  }
   for (const nudge of (await harness.snapshot(DeliveryDoc, context))?.nudges ?? []) {
     if (nudge.id === null) continue;
-    const record = await read(nudge.id as SubmissionId, context);
+    const record = await readTracked(nudge.id as SubmissionId, context);
     if (record?.entry !== undefined) hiddenEntries.push(String(record.entry));
   }
   for (const make of (await harness.snapshot(MakeDoc, context))?.makes ?? []) {
     if (make.id === null) continue;
-    const record = await read(make.id as SubmissionId, context);
+    const record = await readTracked(make.id as SubmissionId, context);
     if (record?.entry !== undefined) hiddenEntries.push(String(record.entry));
   }
-  return { messages, hiddenEntries };
+  return { messages, hiddenEntries: hiddenEntries.length === 0 ? runNotices : [...runNotices, ...hiddenEntries] };
 }
 
 export function trackSnapshot<T>(
@@ -153,16 +155,43 @@ export function trackSnapshot<T>(
 
 export function trackProgress(
   harness: Harness,
+  root: ConversationId,
   progress: { replace(context: Context, value: SessionProgress): void; pending?(): void },
   entries: () => Entries,
   context: Context,
   onError: (error: unknown) => void,
 ): () => void {
   const submissions = trackSubmissions(harness);
-  const stop = trackSnapshot(
-    harness, (ctx) => computeProgress(harness, entries, ctx, submissions.read), progress, context, onError,
-    ({ changes }) => changes.some((change) => change.type !== "document" || change.record.kind !== ChatDeliveryDoc.definition.kind),
-  );
+  const index = new ProgressRuns();
+  let interest: ProgressInterest = { chatIds: new Set(), candidates: new Set(), submissions: new Set(), tasks: new Set() };
+  let oldest: unknown;
+  const stop = trackSnapshot(harness, async (ctx) => {
+    await index.load(harness, ctx);
+    const view = entries();
+    oldest = view[0]?.id;
+    interest = { chatIds: new Set(), candidates: new Set(), submissions: new Set(), tasks: new Set() };
+    return computeProgress(harness, view, ctx, submissions.read, index, interest);
+  }, progress, context, onError, (publication) => {
+    const runsChanged = index.advance(publication, (run) => run.origin.some((id) =>
+      interest.candidates.has(id) || (interest.chatIds.has(id) && (run.status === "running" || index.noticePending(run.noticeId))),
+    ));
+    return runsChanged || publication.changes.some((change) => {
+      switch (change.type) {
+        case "submission":
+          return interest.submissions.has(change.value.id);
+        case "task":
+          return interest.tasks.has(change.value.id);
+        case "entry":
+          return change.value.conversationId === root &&
+            (oldest !== entries()[0]?.id || sentIn([change.value]).length > 0 || refusedIn([change.value]).size > 0);
+        case "document":
+          return change.record.kind === ChatDoc.definition.kind || change.record.kind === RequestDeadlinesDoc.definition.kind ||
+            change.record.kind === DeliveryDoc.definition.kind || change.record.kind === MakeDoc.definition.kind;
+        default:
+          return false;
+      }
+    });
+  });
   return () => {
     stop();
     submissions.stop();

@@ -82,20 +82,46 @@ const Actions = Type.Object({
   }),
 });
 
+const Schedules = Type.Object({
+  kind: Type.Literal("schedules"),
+  revision: Type.Integer({ minimum: 1 }),
+  rows: Type.Array(Type.Object({
+    id: Type.String(),
+    name: Type.String(),
+    schedule: Type.Union([
+      Type.Object({ kind: Type.Literal("once"), at: Type.Number() }),
+      Type.Object({ kind: Type.Literal("daily"), time: Type.String(), tz: Type.String() }),
+    ]),
+    state: enumOf(["active", "paused", "done", "missed", "deleted"] as const),
+    nextRunAt: Type.Union([Type.Number(), Type.Null()]),
+    lastRunAt: Type.Optional(Type.Number()),
+  })),
+});
+
 export const SPACE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
-export const WidgetInput = Type.Object({
+export const SCHEDULE_WIDGET_ID = "lulu:schedules";
+export const SCHEDULE_OFFER_KIND = "lulu.schedules.offer";
+export const SCHEDULE_ORIGIN_PREFIX = "schedules:";
+
+const modelBodies = [Stat, Gauge, Chart, List, Timeline, Note, Media, Space, Weather, Actions] as const;
+
+export const ModelWidgetInput = Type.Object({
   id: Type.String({ description: "Stable kebab-case id of letters, digits, - and _, at most 64 characters; the user's panel keeps one widget per id" }),
   size: enumOf(["s", "m", "l"] as const, "s = 1x1, m = 2x1, l = 2x2"),
   title: Type.String(),
   icon: Type.Optional(Type.String({ description: "SF Symbol name, e.g. figure.run" })),
   tone: Type.Optional(Tone),
-  body: Type.Union([Stat, Gauge, Chart, List, Timeline, Note, Media, Space, Weather, Actions]),
+  body: Type.Union([...modelBodies]),
 });
 
+export const WidgetInput = Type.Object({ ...ModelWidgetInput.properties, body: Type.Union([...modelBodies, Schedules]) });
 export type WidgetInput = Static<typeof WidgetInput>;
+export type SchedulesBody = Static<typeof Schedules>;
+export type ScheduleRow = SchedulesBody["rows"][number];
 export type Widget = WidgetInput & { updatedAt: number; origin?: string };
 export type SpaceReceipt = { id: string; version: number; action: "add" | "update"; refresh?: "manual" | "open" | "daily" };
+export type ScheduleReceipt = { action: "add" | "update"; requestIds: string[] };
 export type MonitorProvider = "context" | "perplexity";
 export type SpaceStatus = {
   mode: { kind: "manual" } | { kind: "scheduled"; url: string; time: string; tz: string } | {
@@ -113,6 +139,13 @@ export type SpaceStatus = {
   cost: number;
   credits?: number;
 };
-export type PanelState = { order: string[]; widgets: Record<string, Widget>; spaceReceipts?: Record<string, SpaceReceipt>; spaceUpdates?: Record<string, SpaceStatus> };
+export type PanelState = {
+  order: string[];
+  widgets: Record<string, Widget>;
+  spaceReceipts?: Record<string, SpaceReceipt>;
+  spaceUpdates?: Record<string, SpaceStatus>;
+  scheduleRevision?: number;
+  scheduleReceipts?: Record<string, ScheduleReceipt>;
+};
 
 export const EMPTY_PANEL: PanelState = { order: [], widgets: {} };

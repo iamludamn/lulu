@@ -11,7 +11,7 @@ export function parseFrame(text: string): ClientMessage {
 
 function parseClientMessage(value: Record<string, unknown>): ClientMessage {
   const { type, requestId, content, whenBusy, model } = value;
-  if (type === "hello") return { type, incremental: value.incremental === true };
+  if (type === "hello") return { type, incremental: value.incremental === true, schedules: value.schedules === true };
   if (type === "prompt.submit" && isString(requestId) && isString(content) && (whenBusy === "steer" || whenBusy === "followUp")) {
     return { type, requestId, content, whenBusy };
   }

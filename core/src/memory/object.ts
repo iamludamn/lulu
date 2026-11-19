@@ -1,5 +1,4 @@
 import { retrieveMemory, type RetrievalInput } from "./retrieval.js";
-import { memoryResources } from "./resources.js";
 import type { TelemetrySpan } from "@earendil-works/pi-telemetry";
 import type { Models } from "@earendil-works/pi-ai/models";
 import type { Storage } from "@earendil-works/pi-durable";
@@ -27,7 +26,7 @@ export class MemoryObject {
   readonly #files: MemoryFiles;
   readonly #models: Models;
   #storage!: Storage;
-  #retrievalStorage!: Storage;
+  #openRetrievalStorage!: () => Promise<Storage>;
   #retrieval: Promise<unknown> = Promise.resolve();
   #chain: Promise<unknown> = Promise.resolve();
   #announcements: Promise<void> = Promise.resolve();
@@ -38,9 +37,9 @@ export class MemoryObject {
     this.#models = createChatModels(host.env);
   }
 
-  async start(storage: Storage, retrievalStorage: Storage): Promise<void> {
+  async start(storage: Storage, openRetrievalStorage: () => Promise<Storage>): Promise<void> {
     this.#storage = storage;
-    this.#retrievalStorage = retrievalStorage;
+    this.#openRetrievalStorage = openRetrievalStorage;
     if ((await this.#files.commits(1)).length > 0) return;
     await migrateLegacy(legacySource(this.#host.storage), this.#files);
     await this.#files.commit("初始化记忆\n\nrequestId: migrate");
@@ -51,11 +50,20 @@ export class MemoryObject {
     if (pathname === "/retrieve" && request.method === "POST") {
       const input = await request.json() as RetrievalInput;
       if (!input.requestId || !Array.isArray(input.catalog) || !Array.isArray(input.turns) || !input.model?.provider || !input.model.modelId) return new Response(null, { status: 400 });
-      const run = this.#retrieval.then(() => retrieveMemory(this.#retrievalStorage, this.#models, this.#files, input, this.#host.telemetry));
+      const run = this.#retrieval.then(async () => retrieveMemory(await this.#openRetrievalStorage(), this.#models, this.#files, input, this.#host.telemetry));
       this.#retrieval = run.catch(() => undefined);
       return Response.json(await run);
     }
-    if (pathname === "/catalog") return Response.json(memoryResources(await this.#files.published()));
+    if (pathname === "/catalog") {
+      const telemetry = this.#host.telemetry;
+      const traceparent = request.headers.get("traceparent");
+      const parent = (traceparent === null ? undefined : telemetry.propagation?.extract({ traceparent })) ?? telemetry;
+      return memorySpan(parent, "memory.catalog", { "lulu.bot.id": this.#host.name }, async (span) => {
+        const { resources, cacheHit, fileReads, sqlRowsRead } = await this.#files.publishedCatalog();
+        span.setAttributes({ "lulu.memory.catalog.cache_hit": cacheHit, "lulu.memory.catalog.file_reads": fileReads, "lulu.memory.catalog.sql_rows_read": sqlRowsRead, "lulu.memory.resources": resources.length });
+        return Response.json(resources);
+      });
+    }
     if (pathname === "/context") {
       const snapshot = await this.#files.published();
       return new Response(await getContext({ files: async () => Object.keys(snapshot.files), read: async (path) => snapshot.files[path] }, this.#host.telemetry));

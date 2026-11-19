@@ -1,15 +1,15 @@
 import { archiveRefresh } from "../space/doc.js";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Harness } from "@earendil-works/pi-durable";
+import type { EntryRecord, Harness } from "@earendil-works/pi-durable";
 import { PanelDoc } from "../panel/doc.js";
 import { artifactName } from "../protocol/send.js";
 import { AssetsDoc } from "./doc.js";
 import { deliveredSentIn } from "./sent.js";
 import { acceptSpace, rememberSpace } from "./space-offers.js";
+import { acceptSchedule, scheduleOffer } from "./schedule-offers.js";
+import { SCHEDULE_WIDGET_ID } from "../protocol/panel.js";
 
 const MAX_PANEL_WIDGETS = 24;
-
-type Entries = readonly { id?: unknown; kind?: unknown; model?: unknown }[];
 
 const arranged = <T>(current: readonly T[], ids: readonly string[], keyOf: (item: T) => string): T[] => {
   const rank = new Map(ids.map((id, index) => [id, index]));
@@ -23,7 +23,7 @@ export async function orderCards(harness: Harness, ids: readonly string[]): Prom
   }, BACKGROUND_CONTEXT);
 }
 
-export async function keepWidget(harness: Harness, entries: Entries, origin: string, keep: boolean): Promise<void> {
+export async function keepWidget(harness: Harness, entries: readonly EntryRecord[], origin: string, keep: boolean, requestId?: string): Promise<void> {
   if (!keep) {
     await harness.commit(async (tx) => {
       const panel = await tx.doc(PanelDoc);
@@ -39,8 +39,9 @@ export async function keepWidget(harness: Harness, entries: Entries, origin: str
     }, BACKGROUND_CONTEXT);
     return;
   }
-  const offers = deliveredSentIn(entries);
-  const card = offers.find((offer) => offer.id === origin)?.input.widget;
+  const schedules = scheduleOffer(entries, origin);
+  const offers = schedules === undefined ? deliveredSentIn(entries) : [];
+  const card = schedules === undefined ? offers.find((offer) => offer.id === origin)?.input.widget : { kind: "panel" as const, panel: schedules };
   if (card === undefined) throw new Error("这张卡片已不在对话里");
   await harness.commit(async (tx) => {
     if (card.kind === "asset") {
@@ -53,16 +54,26 @@ export async function keepWidget(harness: Harness, entries: Entries, origin: str
     }
     const panel = await tx.doc(PanelDoc);
     const id = card.panel.id;
+    if (schedules !== undefined && requestId !== undefined) {
+      acceptSchedule(panel, schedules, origin, requestId, Date.now());
+      if (panel.widgets[id]?.origin !== origin) return;
+      addToOrder(panel.order, id);
+      return;
+    }
+    if (id === SCHEDULE_WIDGET_ID || card.panel.body.kind === "schedules") throw new Error("无效的定时任务卡片");
     const isSpace = ["space", "web"].includes(card.panel.body.kind);
     if (isSpace) {
       acceptSpace(panel, card.panel, origin, offers, Date.now());
     } else if (["space", "web"].includes(panel.widgets[id]?.body.kind ?? "")) {
       throw new Error("不能将 Space 替换为其他组件，请使用新的 ID");
     }
-    if (!panel.order.includes(id)) {
-      if (panel.order.length >= MAX_PANEL_WIDGETS) throw new Error("视图已满，先移除一个组件");
-      panel.order.push(id);
-    }
+    addToOrder(panel.order, id);
     if (!isSpace) panel.widgets[id] = { ...card.panel, updatedAt: Date.now(), origin };
   }, BACKGROUND_CONTEXT);
+}
+
+function addToOrder(order: string[], id: string): void {
+  if (order.includes(id)) return;
+  if (order.length >= MAX_PANEL_WIDGETS) throw new Error("视图已满，先移除一个组件");
+  order.push(id);
 }

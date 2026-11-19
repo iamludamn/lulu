@@ -57,7 +57,8 @@ func (a *app) widgetCard(c *ui.Context, p palette, w *widget) {
 	glass(card, p, 26).Clip()
 	address, isPage := parseArtifact(w.Body.Src)
 	isPage = isPage && w.Body.Kind == "web"
-	if isPage {
+	isSchedules := w.Body.Kind == "schedules"
+	if isPage || isSchedules {
 		clickable(card)
 	}
 	if card.Hovered() {
@@ -76,5 +77,8 @@ func (a *app) widgetCard(c *ui.Context, p palette, w *widget) {
 	})
 	if isPage && card.Clicked() {
 		a.viewer.show(address, w.Title, w.ID)
+	}
+	if isSchedules && card.Clicked() {
+		a.openScheduleOverview(w.Body.Schedules)
 	}
 }

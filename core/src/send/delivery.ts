@@ -3,7 +3,7 @@ import { InjectionBindings } from "../memory/doc.js";
 import { entryRange } from "../conversation/view.js";
 import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Conversation, Harness, SubmissionId } from "@earendil-works/pi-durable";
+import type { Conversation, Harness, SubmissionId, SubmissionRecord } from "@earendil-works/pi-durable";
 import { ChatDoc } from "../conversation/progress.js";
 import { readSubmission, type SubmissionReader } from "../conversation/submissions.js";
 import { DeliveryDoc } from "./doc.js";
@@ -18,10 +18,9 @@ export const NUDGE_PROMPT =
 
 export type Entries = readonly { id?: unknown; kind?: unknown; model?: unknown }[];
 
-export type Owed = { message: number; requestId: string };
+export type Owed = { message: number; requestId: string | null };
 
-async function silent(harness: Harness, read: SubmissionReader, id: number, entries: Entries, context: Context): Promise<boolean> {
-  const record = await read(id as SubmissionId, context);
+async function silent(harness: Harness, record: SubmissionRecord | undefined, entries: Entries, context: Context): Promise<boolean> {
   if (record?.status !== "done") return false;
   const from = Number(record.entry);
   const to = Number(record.answer);
@@ -43,23 +42,27 @@ export async function owedDeliveries(
   const chain = (delivery?.nudges ?? []).filter((nudge) => nudge.message === message.id);
   const last = chain.at(-1);
   if (last !== undefined && last.id === null) return [{ message: message.id, requestId: last.requestId }];
-  if (chain.length >= MAX_NUDGES || !(await silent(harness, read, last?.id ?? message.id, entries, context))) return [];
+  const record = await read((last?.id ?? message.id) as SubmissionId, context);
+  if (last !== undefined && (record?.status === "queued" || record?.status === "placed")) return [{ message: message.id, requestId: null }];
+  if (chain.length >= MAX_NUDGES || !(await silent(harness, record, entries, context))) return [];
   return [{ message: message.id, requestId: `nudge:${message.id}#${chain.length}` }];
 }
 
 export async function chaseDeliveries(harness: Harness, root: Conversation, entries: Entries): Promise<void> {
   for (const owed of await owedDeliveries(harness, entries, BACKGROUND_CONTEXT)) {
+    const { requestId } = owed;
+    if (requestId === null) continue;
     await harness.commit(async (tx) => {
       const delivery = await tx.doc(DeliveryDoc);
-      if (!delivery.nudges.some((nudge) => nudge.requestId === owed.requestId)) delivery.nudges.push({ message: owed.message, requestId: owed.requestId, id: null });
+      if (!delivery.nudges.some((nudge) => nudge.requestId === requestId)) delivery.nudges.push({ message: owed.message, requestId, id: null });
     }, BACKGROUND_CONTEXT);
     await harness.commit(async (tx) => {
-      const id = await root.submit(tx, { type: "input", content: NUDGE_PROMPT, requestId: owed.requestId, whenBusy: "followUp" });
+      const id = await root.submit(tx, { type: "input", content: NUDGE_PROMPT, requestId, whenBusy: "followUp" });
       await bindDelivery(tx, [owed.message], id);
       const bindings = await tx.doc(InjectionBindings);
-      const requestId = bindings.requests[String(owed.message)];
-      if (requestId !== undefined) bindings.requests[String(id)] = requestId;
-      const nudge = (await tx.doc(DeliveryDoc)).nudges.find((item) => item.requestId === owed.requestId);
+      const originalRequest = bindings.requests[String(owed.message)];
+      if (originalRequest !== undefined) bindings.requests[String(id)] = originalRequest;
+      const nudge = (await tx.doc(DeliveryDoc)).nudges.find((item) => item.requestId === requestId);
       if (nudge !== undefined) nudge.id = Number(id);
     }, BACKGROUND_CONTEXT);
     harness.resume();

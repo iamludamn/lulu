@@ -9,7 +9,7 @@ export type ReceiptSource = "live" | "snapshot" | "history";
 export type DeliveryReceipt = { requestId: string; callId: string };
 
 export type ClientMessage =
-  | { type: "hello"; incremental?: boolean }
+  | { type: "hello"; incremental?: boolean; schedules?: boolean }
   | { type: "history.load"; requestId: string; before: number }
   | { type: "prompt.submit"; requestId: string; content: string; whenBusy: BusyMode }
   | { type: "prompt.abort"; requestId: string }
