@@ -1,6 +1,15 @@
 # Architecture
 
-The Cloudflare Worker serves the API and MCP administration. Pi Durable runs in SQLite-backed Durable Objects. The native clients expose [Panel](panel-and-assets.md), [Chat](chat.md), and [Assets](panel-and-assets.md).
+lulu is a self-hosted personal AI assistant for persistent conversations, memory, delegated work, and scheduled tasks. The native clients expose [Panel](panel-and-assets.md), [Chat](chat.md), and [Assets](panel-and-assets.md).
+
+## Repository map
+
+| Path | Responsibility |
+| --- | --- |
+| [`core/`](../core) | Runtime-independent assistant logic built on Pi Durable, plus the shared protocol. |
+| [`apps/cf/`](../apps/cf) | Cloudflare Worker API and SQLite-backed Durable Objects that host the core. |
+| [`client/`](../client) | iOS and desktop apps, plus the web MCP administration UI. The iOS code retains the PiStack target and package names. |
+| [`ops/observability/`](../ops/observability) | Telemetry collection and Grafana dashboards. |
 
 ## Core APIs
 

@@ -30,22 +30,9 @@ npm run build
 
 This compiles the core, web app, and desktop binary; it does not deploy or build iOS. To run the service, follow [Local development and deployment](docs/deployment.md). A model credential is needed for chat; optional integrations are listed there. No credentials are needed to compile.
 
-## Repository map
-
-| Path | Responsibility |
-| --- | --- |
-| `core/src/` | Runtime-independent agent, conversation, memory, tools, and protocol |
-| `apps/cf/` | Cloudflare Worker, Durable Object adapters, and bindings |
-| `client/web/` | React/Vite web client and MCP administration page |
-| `client/desktop/` | Go desktop client using mygo |
-| `client/ios/` | SwiftUI app and the shared PiStackKit Swift package |
-| `ops/observability/` | Collector configuration and Grafana dashboard |
-
-Some client targets and internal names still use `PiStack`; the project is called lulu.
-
 ## Documentation
 
-- [Architecture and feature guides](docs/ARCHITECTURE.md)
+- [Architecture, repository map, and feature guides](docs/ARCHITECTURE.md)
 - [Deployment and configuration](docs/deployment.md)
 - [Telemetry and operations](docs/observability.md)
 - [Security policy](SECURITY.md)
