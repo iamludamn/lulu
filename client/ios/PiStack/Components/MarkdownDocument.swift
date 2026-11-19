@@ -2,7 +2,7 @@ import SwiftUI
 
 struct MarkdownDocument: View {
     let title: String
-    var cached: () -> String? = { nil }
+    var cached: () async -> String? = { nil }
     let load: () async throws -> String
 
     var body: some View {

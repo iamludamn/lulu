@@ -6,6 +6,8 @@ struct ChatRow: Identifiable, Equatable {
 
     enum Footer: Equatable {
         case read
+        case queued, sending, delivered
+        case unconfirmed(requestId: String)
         case generating
         case failed(requestId: String?)
     }
@@ -16,6 +18,7 @@ struct ChatRow: Identifiable, Equatable {
     var body: String?
     var card: SentCard?
     var spaceOffer: SpaceOfferState?
+    var keepConfirmed = false
     var offerError: String?
     var offerAvailable = true
     var footer: Footer?
@@ -32,11 +35,10 @@ struct ChatRow: Identifiable, Equatable {
 private let stampGap: TimeInterval = 15 * 60
 private let noticeLabel: [String: String] = ["abort": "停止请求", "model": "切换模型", "keep": "收藏", "drop": "移除", "makeWidget": "做成组件", "order": "调整排布", "check": "勾选"]
 
-func keptOrigins(_ snapshot: BotStore.Snapshot) -> Set<String> {
+private func keptOrigins(_ snapshot: BotStore.Snapshot) -> Set<String> {
     var kept = Set(snapshot.panel.widgets.values.compactMap(\.origin) + snapshot.assets.map(\.origin))
     for request in snapshot.requests where request.state == .sending {
         switch request.command.kind {
-        case .keep(let origin): kept.insert(origin)
         case .drop(let origin): kept.remove(origin)
         default: break
         }
@@ -45,23 +47,26 @@ func keptOrigins(_ snapshot: BotStore.Snapshot) -> Set<String> {
 }
 
 private func awaiting(_ snapshot: BotStore.Snapshot, entries: [ChatEntry]) -> Bool {
-    let sending = snapshot.requests.contains { request in
-        guard snapshot.link == .online, request.state == .sending, case .submit = request.command.kind else { return false }
+    guard snapshot.link == .online else { return false }
+    if snapshot.requests.contains(where: { request in
+        guard request.state == .acknowledged, case .submit = request.command.kind else { return false }
         return true
-    }
-    if sending { return true }
-    let latestFinal = entries.lazy.filter(\.final).map(\.position).filter { !$0.isNaN }.max()
+    }) { return true }
     let messages = snapshot.progress?.messages ?? []
     let busy = live(of: snapshot.view).busy
-    return messages.contains { message in
+    var latestPlaced: Double?
+    for message in messages {
         let latest = message.id == messages.last?.id
-        guard message.error == nil, message.state != .done || (busy && latest) else { return false }
-        guard let placed = message.entry.flatMap({ Double($0) }) else { return true }
-        return latestFinal.map { !($0 > placed) } ?? true
+        guard message.error == nil, message.state != .done || (busy && latest) else { continue }
+        guard let placed = message.entry.flatMap({ Double($0) }), !placed.isNaN else { return true }
+        latestPlaced = max(latestPlaced ?? placed, placed)
     }
+    guard let latestPlaced else { return false }
+    let latestFinal = entries.lazy.filter(\.final).map(\.position).filter { !$0.isNaN }.max()
+    return latestFinal.map { !($0 > latestPlaced) } ?? true
 }
 
-func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
+func chatRows(_ snapshot: BotStore.Snapshot, entries: [ChatEntry], keeping: Set<String>) -> [ChatRow] {
     var rows: [ChatRow] = []
     var last: Date?
     let kept = keptOrigins(snapshot)
@@ -77,7 +82,7 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
         if request.state == .failed { status.error = request.error }
         keepRequests[origin] = status
     }
-    let entries = chatEntries(snapshot.view, hidden: snapshot.progress?.hiddenEntries ?? [])
+    let cardOrigins = Set(entries.lazy.filter { $0.card != nil }.map(\.id))
     let spaceStates = spaceOfferStates(entries, panel: snapshot.panel)
     let messages = snapshot.progress?.messages ?? []
     let submitted = Set(messages.compactMap(\.requestId))
@@ -91,13 +96,14 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
     for item in timeline(entries, messages) {
         switch item {
         case .entry(let entry):
-            if entry.card != nil && spaceStates[entry.id] == nil && kept.contains(entry.id) { continue }
+            if entry.card != nil && spaceStates[entry.id] == nil && kept.contains(entry.id) && !keeping.contains(entry.id) { continue }
             stamp(entry.time, before: entry.id)
             var row = ChatRow(id: entry.id, role: entry.role == .user ? .user : .assistant, text: entry.text)
             row.body = entry.body
             row.card = entry.card
             row.spaceOffer = spaceStates[entry.id]
-            if row.spaceOffer != nil {
+            if row.card != nil {
+                row.keepConfirmed = row.spaceOffer == nil && kept.contains(entry.id)
                 row.offerAvailable = snapshot.link == .online
                 row.sending = keepRequests[entry.id]?.sending ?? false
                 row.offerError = keepRequests[entry.id]?.error
@@ -110,11 +116,19 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
             var row = ChatRow(id: item.id, role: .user, text: message.text)
             if message.error != nil {
                 row.footer = .failed(requestId: nil)
+            } else if message.state == .todo {
+                row.footer = .delivered
             } else {
-                row.read = message.state != .todo
+                row.read = true
             }
             rows.append(row)
         }
+    }
+    func appendNotice(_ request: BotStore.Request, _ kind: String) {
+        guard request.state == .failed else { return }
+        var row = ChatRow(id: request.id, role: .system, text: "\(noticeLabel[kind] ?? "操作")失败：\(request.error ?? "")")
+        row.notice = request.id
+        rows.append(row)
     }
     for request in snapshot.requests {
         switch request.command.kind {
@@ -122,26 +136,30 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
             if request.state != .failed && submitted.contains(request.id) { continue }
             stamp(request.at, before: request.id)
             var row = ChatRow(id: request.id, role: .user, text: text)
-            row.sending = request.state == .sending
-            if request.state == .failed { row.footer = .failed(requestId: request.id) }
+            switch request.state {
+            case .sending: row.footer = snapshot.link == .online ? .sending : .queued
+            case .acknowledged: row.footer = .delivered
+            case .failed:
+                row.footer = request.error == nil ? .unconfirmed(requestId: request.id) : .failed(requestId: request.id)
+            }
             rows.append(row)
-        case .abort: rows.append(notice(request, "abort"))
-        case .selectModel: rows.append(notice(request, "model"))
+        case .abort: appendNotice(request, "abort")
+        case .selectModel: appendNotice(request, "model")
         case .keep(let origin):
-            if spaceStates[origin] == nil { rows.append(notice(request, "keep")) }
-        case .drop: rows.append(notice(request, "drop"))
-        case .makeWidget: rows.append(notice(request, "makeWidget"))
-        case .order: rows.append(notice(request, "order"))
-        case .check: rows.append(notice(request, "check"))
+            if !cardOrigins.contains(origin) && !kept.contains(origin) { appendNotice(request, "keep") }
+        case .drop: appendNotice(request, "drop")
+        case .makeWidget: appendNotice(request, "makeWidget")
+        case .order: appendNotice(request, "order")
+        case .check: appendNotice(request, "check")
         }
     }
-    rows = rows.filter { $0.role != .system || $0.notice != nil }
     if let last = rows.lastIndex(where: { $0.role == .user }), rows[last].footer == nil, rows[last].read {
         rows[last].footer = .read
     }
     if awaiting(snapshot, entries: entries) {
         let running = subtasks(of: snapshot.progress).filter(\.running)
-        let text = running.count > 1 ? "\(running.count) 个任务进行中" : running.first?.description ?? ""
+        let description = running.first?.description ?? ""
+        let text = running.count > 1 ? "\(running.count) 个任务进行中" : description.isEmpty ? "正在准备回复…" : description
         var row = ChatRow(id: "live", role: .assistant, text: text)
         row.typing = true
         rows.append(row)
@@ -151,12 +169,6 @@ func chatRows(_ snapshot: BotStore.Snapshot) -> [ChatRow] {
         rows[index].tail = next != rows[index].role
     }
     return rows
-}
-
-private func notice(_ request: BotStore.Request, _ kind: String) -> ChatRow {
-    var row = ChatRow(id: request.id, role: .system, text: "\(noticeLabel[kind] ?? "操作")失败：\(request.error ?? "")")
-    if request.state == .failed { row.notice = request.id }
-    return row
 }
 
 private func stampText(_ date: Date) -> String {

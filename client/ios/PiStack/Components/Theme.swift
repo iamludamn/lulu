@@ -19,6 +19,21 @@ extension View {
     }
 }
 
+struct PressHighlight<Highlight: Shape>: ButtonStyle {
+    let shape: Highlight
+    let amount: Double
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .overlay {
+                shape.fill(Color.primary.opacity(configuration.isPressed ? amount : 0))
+                    .allowsHitTesting(false)
+            }
+            .animation(configuration.isPressed || reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
 extension Tone {
     var color: Color {
         switch self {

@@ -13,14 +13,16 @@ struct TypingBubble: View {
             let beat = reduced ? 0 : 0.5 - 0.5 * cos(time * 2 * .pi)
             HStack(spacing: 8) {
                 TypingDots(time: time, reduced: reduced)
-                if !text.isEmpty {
-                    Text(text).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
-                        .animation(.snappy, value: text)
-                }
+                Text(text)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .contentTransition(.opacity)
             }
             .padding(.horizontal, 13)
             .padding(.vertical, 13.5)
             .frosted(20)
+            .animation(.easeInOut(duration: 0.18), value: text)
             .scaleEffect(1 + 0.04 * swell)
             .background(alignment: .bottomLeading) {
                 ZStack(alignment: .bottomLeading) {
@@ -39,7 +41,7 @@ struct TypingBubble: View {
             else { withAnimation(.spring(duration: 0.4, bounce: 0.3)) { shown = true } }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("助手正在输入")
+        .accessibilityLabel(text)
     }
 
     private func tail(_ size: CGFloat) -> some View {

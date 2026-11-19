@@ -126,7 +126,7 @@ func linkified(_ text: AttributedString) -> AttributedString {
     return result
 }
 
-struct MarkdownText: View {
+struct MarkdownText: View, Equatable {
     let text: String
     var selectable = false
     var document = false

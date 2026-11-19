@@ -1,3 +1,4 @@
+import CryptoKit
 import PiStackKit
 import WebKit
 
@@ -12,20 +13,36 @@ final class SpaceBridge: NSObject, WKScriptMessageHandlerWithReply {
     private static let script = #"""
     (function(){
     var h=window.webkit.messageHandlers.lulu,native=window.fetch.bind(window);
+    var refreshRequests = null;
+    function post(message) {
+    var pending = h.postMessage(message);
+    if (refreshRequests) refreshRequests.push(pending);
+    return pending;
+    }
     function dec(t){var s=atob(t),a=new Uint8Array(s.length);for(var i=0;i<s.length;i++)a[i]=s.charCodeAt(i);return a;}
     var lulu=window.lulu={fetchedAt:null,
     state:{get:function(){return h.postMessage({op:"get"}).then(function(t){return t==null?null:JSON.parse(t)});},
     set:function(v){return h.postMessage({op:"set",value:JSON.stringify(v)});}},
-    data:{get:function(){return h.postMessage({op:"data"}).then(function(t){return JSON.parse(t);});},
+    data:{get:function(){return post({op:"data"}).then(function(t){return JSON.parse(t);});},
     presented:function(v){return h.postMessage({op:"seen",value:v});}},
-    refresh:function(){return h.postMessage({op:"refresh"});}};
+    refresh:function(){return h.postMessage({op:"refresh"});},
+    _refreshData:async function(){
+    var pending = refreshRequests = [];
+    try {
+    window.dispatchEvent(new Event("luludatachange"));
+    for (var i = 0; i < pending.length; i++) {
+    try { await pending[i]; } catch (_) {}
+    }
+    return pending.length > 0;
+    } finally { refreshRequests = null; }
+    }};
     window.fetch=function(input,init){
     var req;
     try{req=new Request(input,init);}catch(e){return Promise.reject(e);}
     var u=new URL(req.url);
     if(u.protocol!=="http:"&&u.protocol!=="https:")return native(input,init);
     var headers={};req.headers.forEach(function(v,k){headers[k]=v;});
-    return h.postMessage({op:"fetch",url:req.url,method:req.method,headers:headers}).then(function(r){
+    return post({op:"fetch",url:req.url,method:req.method,headers:headers}).then(function(r){
     lulu.fetchedAt=r.at;
     var empty=r.status===204||r.status===205||r.status===304;
     var res=new Response(empty?null:dec(r.body),{status:r.status,statusText:r.text,headers:r.headers});
@@ -49,6 +66,10 @@ final class SpaceBridge: NSObject, WKScriptMessageHandlerWithReply {
     private let fetcher: SpaceFetcher
     private weak var view: WKWebView?
     private var html = ""
+    @MainActor private var managedDigest: SHA256.Digest?
+    @MainActor private var requests: [URLRequest: Data] = [:]
+    @MainActor private var document = UUID()
+    @MainActor private var refreshing = false
     @MainActor private var providedVersion = 0
     @MainActor private var scheduledURL: String?
 
@@ -84,7 +105,7 @@ final class SpaceBridge: NSObject, WKScriptMessageHandlerWithReply {
         guard let data = body["data"] as? [String: Any], let value = data["value"] else {
             throw ApiError.message("等待首次定时更新")
         }
-        let encoded = try JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed])
+        let encoded = try JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed, .sortedKeys])
         return ["status": 200, "text": "OK", "headers": ["Content-Type": "application/json"], "body": encoded.base64EncodedString(), "at": data["updatedAt"] ?? NSNull()]
     }
 
@@ -104,17 +125,69 @@ final class SpaceBridge: NSObject, WKScriptMessageHandlerWithReply {
         controller.addUserScript(WKUserScript(source: Self.script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
     }
 
+    @MainActor
     func attach(_ view: WKWebView, html: String) {
         self.view = view
         self.html = html
+        document = UUID()
+        requests.removeAll()
+        managedDigest = nil
     }
 
     @MainActor
+    func invalidateFetches() async { await fetcher.invalidate() }
+
+    @MainActor
     func refresh() async {
+        guard !refreshing, let view else { return }
+        refreshing = true
+        defer { refreshing = false }
+        let document = self.document
+        let previous = requests
+        let previousData = managedDigest
         await fetcher.invalidate()
-        view?.loadHTMLString(html, baseURL: nil)
+        guard !Task.isCancelled, self.document == document else { return }
+        let handled = (try? await view.callAsyncJavaScript("return await window.lulu._refreshData()", arguments: [:], in: nil, contentWorld: .page)) as? Bool
+        guard handled != true else { return }
+
+        var changed = false
+        if let previousData, !Task.isCancelled, self.document == document,
+           let data = try? await managedValue(), SHA256.hash(data: data) != previousData {
+            changed = true
+        }
+        for (request, old) in previous {
+            guard !Task.isCancelled, self.document == document else { return }
+            if let response = try? await fetch(request),
+               let next = fingerprint(response), next != old {
+                changed = true
+            }
+        }
+        guard changed, !Task.isCancelled, self.document == document else { return }
+        attach(view, html: html)
+        view.loadHTMLString(html, baseURL: nil)
     }
 
+    @MainActor
+    private func managedValue() async throws -> Data {
+        let body = try await managed()
+        return try JSONSerialization.data(withJSONObject: body["data"] ?? NSNull(), options: [.fragmentsAllowed, .sortedKeys])
+    }
+
+    @MainActor
+    private func fetch(_ request: URLRequest) async throws -> [String: Any] {
+        if let url = request.url, let snapshot = try await managedResponse(url) { return snapshot }
+        return try await fetcher.respond(to: request)
+    }
+
+    private func fingerprint(_ response: [String: Any]) -> Data? {
+        guard let status = response["status"] as? Int, let body = response["body"] as? String else { return nil }
+        var digest = SHA256()
+        digest.update(data: Data("\(status):".utf8))
+        digest.update(data: Data(body.utf8))
+        return Data(digest.finalize())
+    }
+
+    @MainActor
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) async -> (Any?, String?) {
         guard message.frameInfo.isMainFrame, let body = message.body as? [String: Any] else { return (nil, "bad message") }
         do {
@@ -132,8 +205,9 @@ final class SpaceBridge: NSObject, WKScriptMessageHandlerWithReply {
                 return (nil, nil)
             case "data":
                 if preview { return ("null", nil) }
-                let body = try await managed()
-                let bytes = try JSONSerialization.data(withJSONObject: body["data"] ?? NSNull(), options: [.fragmentsAllowed])
+                let document = self.document
+                let bytes = try await managedValue()
+                if self.document == document { managedDigest = SHA256.hash(data: bytes) }
                 return (String(decoding: bytes, as: UTF8.self), nil)
             case "seen":
                 if let version = body["value"] as? Int { try await seen(version) }
@@ -144,10 +218,17 @@ final class SpaceBridge: NSObject, WKScriptMessageHandlerWithReply {
                       (body["method"] as? String)?.uppercased() == "GET" else {
                     return (nil, "Space data requests require a public HTTPS GET")
                 }
-                if let snapshot = try await managedResponse(url) { return (snapshot, nil) }
                 var request = URLRequest(url: url)
                 for (name, value) in body["headers"] as? [String: String] ?? [:] { request.setValue(value, forHTTPHeaderField: name) }
-                return (try await fetcher.respond(to: request), nil)
+                let document = self.document
+                do {
+                    let response = try await fetch(request)
+                    if self.document == document { requests[request] = fingerprint(response) }
+                    return (response, nil)
+                } catch {
+                    if self.document == document, requests[request] == nil { requests[request] = Data() }
+                    throw error
+                }
             case "refresh":
                 await refresh()
                 return (nil, nil)

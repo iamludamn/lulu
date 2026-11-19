@@ -7,9 +7,10 @@ struct MessageRow: View, Equatable {
     let botId: String
     let api: Api
     let expanded: Bool
-    let onRead: (String) -> Void
+    let onRead: (ChatRow) -> Void
     let onOpen: (ArtifactAddress, String) -> Void
     let onKept: (Page) -> Void
+    let holdKeepRow: (Bool) -> Void
     @Environment(\.openSpace) private var openSpace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -66,7 +67,7 @@ struct MessageRow: View, Equatable {
                 .clipped()
                 .accessibilityHidden(!isRead)
                 .animation(.easeOut(duration: reduceMotion ? 0.15 : 0.45), value: isRead)
-            if case .failed = row.footer { status }
+            if !isRead { status }
         }
     }
 
@@ -78,11 +79,11 @@ struct MessageRow: View, Equatable {
                 Text(linkified(AttributedString(row.text)))
             } else if let full = row.body {
                 VStack(alignment: .leading, spacing: 8) {
-                    MarkdownText(text: row.text, airy: true)
+                    MarkdownText(text: row.text, airy: true).equatable()
                     LongHint(length: readingLength(full))
                 }
             } else {
-                MarkdownText(text: row.text, airy: true)
+                MarkdownText(text: row.text, airy: true).equatable()
             }
         }
         .lineSpacing(3)
@@ -96,10 +97,10 @@ struct MessageRow: View, Equatable {
                 content.background { shape.fill(.clear).glassEffect(.clear, in: shape) }
             } else if row.body != nil {
                 content.frosted(20)
-                    .longReplyHighlight(radius: 20, key: "pistack.longReply.read.\(api.base.absoluteString).\(botId).\(row.id)") { onRead(row.id) }
+                    .longReplyHighlight(radius: 20, key: "pistack.longReply.read.\(api.base.absoluteString).\(botId).\(row.id)") { onRead(row) }
                     .contentShape(shape)
                     .opacity(expanded ? 0 : 1)
-                    .anchorPreference(key: LongBubbleBounds.self, value: .bounds) { [row.id: $0] }
+                    .anchorPreference(key: LongBubbleBounds.self, value: .bounds) { expanded ? [row.id: $0] : [:] }
             } else {
                 content.frosted(20)
             }
@@ -186,6 +187,7 @@ struct MessageRow: View, Equatable {
             kept(destination: .assets, label: "收进资产", symbol: "tray.and.arrow.down") {
                 Button { address.map { onOpen($0, source) } } label: { assetFace(address, title: title, summary: summary) }
                     .buttonStyle(.plain)
+                    .artifactDownloadFeedback(source)
                     .artifactSource(source, radius: 22)
             }
         }
@@ -193,13 +195,27 @@ struct MessageRow: View, Equatable {
 
     private func kept<Content: View>(destination: Page, label: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
         let card = content()
-        return SwipeToKeep(destination: destination, onLand: { onKept(destination) }, onKeep: { store.keep(row.id) }) { send in
+        let enabled = row.offerAvailable && !row.sending && !row.keepConfirmed
+        return SwipeToKeep(
+            destination: destination,
+            onLand: { onKept(destination) },
+            onKeep: { store.keep(row.id) },
+            holdRow: holdKeepRow,
+            sending: row.sending,
+            confirmed: row.keepConfirmed,
+            enabled: enabled
+        ) { send in
             VStack(spacing: 8) {
                 card.contextMenu {
                     Button(label, systemImage: symbol, action: send)
+                        .disabled(!enabled)
                 }
-                if destination == .panel {
-                    Label("滑动加入视图", systemImage: "arrow.left")
+                .accessibilityAction(named: label) { if enabled { send() } }
+                if let error = row.offerError, !row.keepConfirmed {
+                    Text("\(error) · \(row.offerAvailable ? "滑动重试" : "连接后重试")")
+                        .font(.caption).foregroundStyle(.red)
+                } else if destination == .panel {
+                    Label(row.offerAvailable ? "滑动加入视图" : "连接后可滑动", systemImage: "arrow.left")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -258,20 +274,29 @@ struct MessageRow: View, Equatable {
         switch row.footer {
         case .read:
             Text("已读").font(.caption2.weight(.medium)).foregroundStyle(.secondary).padding(.horizontal, 8)
+        case .queued, .sending, .delivered:
+            let label = row.footer == .queued ? "等待连接后发送" : row.footer == .sending ? "正在发送…" : "已送达"
+            Text(label).font(.caption2.weight(.medium)).foregroundStyle(.secondary).padding(.horizontal, 8)
         case .generating, nil:
             EmptyView()
         case .failed(let requestId):
-            HStack(spacing: 6) {
-                Image(systemName: "exclamationmark.circle.fill")
-                Text("未送达")
-                if let requestId {
-                    Button("重试") { store.retry(requestId) }.fontWeight(.semibold)
-                }
-            }
-            .font(.caption)
-            .foregroundStyle(.red)
-            .padding(.horizontal, 8)
+            failedStatus("未送达", requestId: requestId)
+        case .unconfirmed(let requestId):
+            failedStatus("发送未确认", requestId: requestId)
         }
+    }
+
+    private func failedStatus(_ label: String, requestId: String?) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.circle.fill")
+            Text(label)
+            if let requestId {
+                Button("重试") { store.retry(requestId) }.fontWeight(.semibold)
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.red)
+        .padding(.horizontal, 8)
     }
 
     private var notice: some View {

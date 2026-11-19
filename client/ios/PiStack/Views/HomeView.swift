@@ -1,3 +1,4 @@
+import Observation
 import PiStackKit
 import SwiftUI
 import UIKit
@@ -19,13 +20,13 @@ enum Page: Int, CaseIterable, Identifiable {
 struct HomeView: View {
     let bot: BotSummary
     let api: Api
-    @State private var store: BotStore
+    let store: BotStore
     @State private var page = Page.panel
     @State private var draft: ChatDraft
     @State private var inspector = false
     @State private var landed: Page?
     @State private var targets: [Page: CGPoint] = [:]
-    @State private var pull: (page: Page, progress: CGFloat)?
+    @State private var keepFeedback = KeepFeedback()
     @State private var barBottom: CGFloat = 0
     @State private var veiled = false
     @State private var reading: ChatRow?
@@ -38,10 +39,10 @@ struct HomeView: View {
     @FocusState private var composing: Bool
     @Environment(\.scenePhase) private var phase
 
-    init(bot: BotSummary, api: Api, token: String) {
+    init(bot: BotSummary, api: Api, store: BotStore) {
         self.bot = bot
         self.api = api
-        _store = State(initialValue: BotStore(botId: bot.id, server: api.base, token: token))
+        self.store = store
         _draft = State(initialValue: ChatDraft(botId: bot.id))
     }
 
@@ -57,13 +58,12 @@ struct HomeView: View {
             .opacity(veiled ? 0 : 1)
             .environment(\.keepTargets, targets)
             .environment(\.topInset, barBottom)
-            .environment(\.keepPull) { page, progress in pull = progress > 0 ? (page, progress) : nil }
+            .environment(\.keepPull, keepFeedback.update)
             .ignoresSafeArea(.container, edges: [.top, .bottom])
             .scrollEdgeEffectHidden(true, for: [.top, .bottom])
-            .scaleEffect(voiceOpen && !reduceMotion ? 0.98 : 1)
             .allowsHitTesting(!voiceOpen)
             .accessibilityHidden(voiceOpen)
-            if page == .chat && !voiceOpen {
+            if page == .chat {
                 GeometryReader { proxy in
                     let controlsBottom = max(0, barBottom - proxy.frame(in: .global).minY)
                     ChatEdgeBackdrop(edge: .top, fade: 80)
@@ -76,15 +76,18 @@ struct HomeView: View {
             topBar
                 .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { barBottom = $0 }
                 .frame(maxHeight: .infinity, alignment: .top)
-                .opacity(voiceOpen ? 0 : 1)
-                .scaleEffect(voiceOpen && !reduceMotion ? 0.98 : 1)
                 .allowsHitTesting(!voiceOpen)
                 .accessibilityHidden(voiceOpen)
-            if voiceOpen {
-                voiceTranscript
-                    .transition(.opacity)
-                    .zIndex(1)
-            }
+            VoicePresentation(
+                isPresented: voiceOpen,
+                duration: reduceMotion ? 0.15 : 0.22,
+                atmosphere: voiceOpen ? VoiceAtmosphere(muted: voice.muted, audioLevel: { voice.audioLevel(at: $0) }) : nil,
+                controls: voiceOpen ? voiceTranscript : nil
+            )
+            .ignoresSafeArea()
+            .allowsHitTesting(voiceOpen)
+            .accessibilityHidden(!voiceOpen)
+            .zIndex(1)
         }
         .background {
             WindowBottomInsetReader { bottomInset = $0 }
@@ -107,29 +110,47 @@ struct HomeView: View {
                 .ignoresSafeArea()
             }
         }
-        .overlay {
-            if store.snapshot.view == nil && !store.snapshot.hasReceivedState && store.snapshot.link != .offline && store.snapshot.halt == nil {
-                LoadingScreen()
-                    .transition(.opacity)
-                    .zIndex(1)
-            }
-        }
-        .animation(.easeInOut(duration: 0.3), value: store.snapshot.hasReceivedState)
         .artifactViewer(botId: bot.id, api: api, panel: store.snapshot.panel)
         .sheet(isPresented: $inspector) { InspectorView(store: store, botId: bot.id, api: api) }
         .sensoryFeedback(.selection, trigger: page)
         .task { store.start(); await SpacePush.shared.connect(api: api, botId: bot.id) }
+        .task(id: voiceOpen) {
+            if voiceOpen { await voice.start(store) }
+        }
         .onDisappear { draft.flush(); transcription.cancel(); voice.stop(); store.stop() }
+        .onChange(of: store.snapshot.halt) { _, halt in
+            guard halt != nil else { return }
+            composing = false
+            reading = nil
+            readerFrame = nil
+        }
         .onChange(of: phase) { _, next in
-            if next == .active { store.start() } else if next == .background { draft.flush(); voice.stop(); voiceOpen = false; store.stop() }
+            if next == .active {
+                store.start()
+            } else if next == .background {
+                draft.flush()
+                voice.stop()
+                voiceOpen = false
+                store.stop()
+                if transcription.recording { transcription.cancel() }
+            }
         }
     }
 
     @ViewBuilder
     private func content(_ item: Page) -> some View {
+        if store.snapshot.halt == .notFound {
+            ContentUnavailableView("lulu 不存在", systemImage: "questionmark.bubble")
+        } else {
+            pageContent(item)
+        }
+    }
+
+    @ViewBuilder
+    private func pageContent(_ item: Page) -> some View {
         switch item {
         case .panel:
-            if !store.snapshot.hasReceivedState && store.snapshot.link == .offline {
+            if store.snapshot.view == nil && store.snapshot.link == .offline {
                 connectionUnavailable
             } else {
                 PanelView(widgets: store.snapshot.panel.list, spaceUpdates: store.snapshot.panel.spaceUpdates, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onCheck: store.check, onCompose: fadeToChat)
@@ -137,11 +158,11 @@ struct HomeView: View {
         case .chat:
             ChatView(bot: bot, store: store, transcription: transcription, api: api, containerBottomInset: bottomInset, draft: Binding(get: { draft.text }, set: { draft.text = $0 }), composing: $composing, onKept: land, onVoiceConversation: {
                 composing = false
-                withAnimation(voiceTransition) { voiceOpen = true }
+                voiceOpen = true
             },
                      reading: $reading, onReaderFrame: { readerFrame = $0 })
         case .assets:
-            if !store.snapshot.hasReceivedState && store.snapshot.link == .offline {
+            if store.snapshot.view == nil && store.snapshot.link == .offline {
                 connectionUnavailable
             } else {
                 AssetsView(items: store.snapshot.assets, botId: bot.id, api: api, onDrop: store.drop, onOrder: store.reorderAssets)
@@ -171,9 +192,7 @@ struct HomeView: View {
             .disabled(page != .panel)
             .accessibilityLabel("添加组件")
             Spacer()
-            PageSwitcher(page: page, landed: landed, pull: pull, onTarget: { targets[$0] = $1 }) { next in
-                withAnimation(.snappy) { page = next }
-            }
+            PageSwitcher(page: page, landed: landed, keepFeedback: keepFeedback, onTarget: { targets[$0] = $1 }, select: selectPage)
             .opacity(transcription.recording ? 0 : 1)
             .allowsHitTesting(!transcription.recording)
             .accessibilityHidden(transcription.recording)
@@ -191,83 +210,77 @@ struct HomeView: View {
                     .padding(3)
                     .background { Circle().fill(.clear).glassEffect(.regular, in: .circle) }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressHighlight(shape: Circle(), amount: 0.24))
             .accessibilityLabel("设置")
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
     }
 
-    private var voiceTransition: Animation {
-        .easeInOut(duration: reduceMotion ? 0.2 : 0.55)
-    }
+    private var voiceStatus: String { voice.muted && voice.ready ? "已静音" : voice.status }
 
     private var voiceTranscript: some View {
-        ZStack {
-            VoiceAtmosphere(muted: voice.muted, audioLevel: { voice.audioLevel(at: $0) })
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
-            GeometryReader { proxy in
-                VStack {
-                    Text("lu")
-                        .font(.system(size: 27, weight: .medium, design: .rounded))
-                        .tracking(0.5)
-                        .foregroundStyle(Color(red: 0.18, green: 0.29, blue: 0.38))
-                        .padding(.top, 16)
-                        .frame(maxWidth: .infinity)
-                    Spacer()
-                }
-                ScrollViewReader { scroll in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(voice.lines) { line in
-                                CallTranscriptRow(mine: line.mine, text: line.text)
-                                    .id(line.id)
-                            }
-                        }
-                    }
-                    .defaultScrollAnchor(.bottom)
-                    .onChange(of: voice.lines.count) { _, _ in
-                        if let last = voice.lines.last { scroll.scrollTo(last.id, anchor: .bottom) }
-                    }
-                }
-                .padding(.horizontal, 28)
-                .frame(height: proxy.size.height * 0.36)
-                .position(x: proxy.size.width / 2, y: proxy.size.height * 0.36)
-                Text(voice.muted && voice.ready ? "已静音" : voice.status)
-                    .font(.system(size: 20, weight: .regular))
-                    .foregroundStyle(Color(red: 0.20, green: 0.32, blue: 0.40))
-                    .position(x: proxy.size.width / 2, y: proxy.size.height * 0.655)
-                VStack {
-                    Spacer()
-                    HStack(spacing: 48) {
-                        Button { voice.setMuted(!voice.muted) } label: {
-                            Image(systemName: voice.muted ? "mic.fill" : "mic.slash")
-                                .font(.system(size: 28, weight: .light))
-                                .frame(width: 72, height: 72)
-                                .modifier(VoiceGlassCircle())
-                        }
-                        .accessibilityLabel(voice.muted ? "取消静音" : "静音")
-                        .disabled(!voice.ready)
-                        Button { voice.stop(); withAnimation(voiceTransition) { voiceOpen = false } } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 25, weight: .light))
-                                .frame(width: 72, height: 72)
-                                .modifier(VoiceGlassCircle())
-                        }
-                        .accessibilityLabel("关闭语音对话")
-                    }
+        GeometryReader { proxy in
+            VStack {
+                Text("lu")
+                    .font(.system(size: 27, weight: .medium, design: .rounded))
+                    .tracking(0.5)
+                    .foregroundStyle(Color(red: 0.18, green: 0.29, blue: 0.38))
+                    .padding(.top, 16)
                     .frame(maxWidth: .infinity)
-                    .foregroundStyle(Color(red: 0.22, green: 0.34, blue: 0.43))
-                    .buttonStyle(.plain)
-                    .padding(.bottom, 70)
+                Spacer()
+            }
+            ScrollViewReader { scroll in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(voice.lines) { line in
+                            CallTranscriptRow(mine: line.mine, text: line.text)
+                                .id(line.id)
+                        }
+                    }
                 }
+                .defaultScrollAnchor(.bottom)
+                .onChange(of: voice.lines.count) { _, _ in
+                    if let last = voice.lines.last { scroll.scrollTo(last.id, anchor: .bottom) }
+                }
+            }
+            .padding(.horizontal, 28)
+            .frame(height: proxy.size.height * 0.36)
+            .position(x: proxy.size.width / 2, y: proxy.size.height * 0.36)
+            Text(voiceStatus)
+                .font(.system(size: 20, weight: .regular))
+                .contentTransition(.opacity)
+                .animation(.easeInOut(duration: 0.18), value: voiceStatus)
+                .foregroundStyle(Color(red: 0.20, green: 0.32, blue: 0.40))
+                .position(x: proxy.size.width / 2, y: proxy.size.height * 0.655)
+            VStack {
+                Spacer()
+                HStack(spacing: 48) {
+                    Button { voice.setMuted(!voice.muted) } label: {
+                        Image(systemName: voice.muted ? "mic.fill" : "mic.slash")
+                            .font(.system(size: 28, weight: .light))
+                            .frame(width: 72, height: 72)
+                            .modifier(VoiceGlassCircle())
+                    }
+                    .accessibilityLabel(voice.muted ? "取消静音" : "静音")
+                    .disabled(!voice.ready)
+                    Button { voice.stop(); voiceOpen = false } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 25, weight: .light))
+                            .frame(width: 72, height: 72)
+                            .modifier(VoiceGlassCircle())
+                    }
+                    .buttonStyle(PressHighlight(shape: Circle(), amount: 0.24))
+                    .accessibilityLabel("关闭语音对话")
+                }
+                .frame(maxWidth: .infinity)
+                .foregroundStyle(Color(red: 0.22, green: 0.34, blue: 0.43))
+                .buttonStyle(.plain)
+                .padding(.bottom, 70)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea(.container, edges: .bottom)
-        .task { await voice.start(store) }
-        .onDisappear { voice.stop() }
     }
 
     private func land(_ target: Page) {
@@ -278,47 +291,37 @@ struct HomeView: View {
         }
     }
 
+    private func selectPage(_ next: Page) {
+        guard page != next else { return }
+        withAnimation(reduceMotion ? nil : .snappy) { page = next }
+    }
+
     private func fadeToChat() {
-        withAnimation(.snappy) { page = .chat }
+        selectPage(.chat)
     }
 
     private func send(_ text: String) {
-        withAnimation(.snappy) { page = .chat }
+        selectPage(.chat)
         store.submit(text)
     }
 
     private func compose(_ text: String) {
-        withAnimation(.snappy) { page = .chat }
+        selectPage(.chat)
         if draft.text.isEmpty { draft.text = text }
         composing = true
     }
 }
 
-private struct LoadingScreen: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var breathing = false
+@Observable
+private final class KeepFeedback {
+    private(set) var pull: (page: Page, progress: CGFloat)?
 
-    var body: some View {
-        ZStack {
-            Wallpaper()
-            ZStack {
-                ForEach(0..<5) { index in
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .stroke(.white.opacity(0.9 - Double(index) * 0.13), lineWidth: 2)
-                        .frame(width: 66 + CGFloat(index) * 13, height: 66 + CGFloat(index) * 13)
-                        .rotationEffect(.degrees(Double(index) * 12))
-                }
-                Circle().fill(.white.opacity(0.8)).frame(width: 40, height: 40)
-            }
-            .scaleEffect(breathing && !reduceMotion ? 1.06 : (reduceMotion ? 1 : 0.94))
-            .opacity(breathing || reduceMotion ? 1 : 0.7)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .ignoresSafeArea()
-        .accessibilityElement(children: .combine)
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { breathing = true }
+    func update(_ page: Page, _ progress: CGFloat) {
+        if progress > 0 {
+            guard pull?.page != page || pull?.progress != progress else { return }
+            pull = (page, progress)
+        } else if pull != nil {
+            pull = nil
         }
     }
 }
@@ -326,12 +329,14 @@ private struct LoadingScreen: View {
 private struct PageSwitcher: View {
     let page: Page
     let landed: Page?
-    let pull: (page: Page, progress: CGFloat)?
+    let keepFeedback: KeepFeedback
     let onTarget: (Page, CGPoint) -> Void
     let select: (Page) -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var pill
 
     var body: some View {
+        let pull = keepFeedback.pull
         HStack(spacing: 2) {
             ForEach(Page.allCases) { item in
                 let drawn = pull?.page == item ? pull?.progress ?? 0 : 0
@@ -343,7 +348,11 @@ private struct PageSwitcher: View {
                         .frame(height: 36)
                         .background {
                             if item == page {
-                                Capsule().fill(Color.primary.opacity(0.72)).matchedGeometryEffect(id: "pill", in: pill)
+                                if reduceMotion {
+                                    Capsule().fill(Color.primary.opacity(0.72))
+                                } else {
+                                    Capsule().fill(Color.primary.opacity(0.72)).matchedGeometryEffect(id: "pill", in: pill)
+                                }
                             } else if drawn > 0 {
                                 Capsule()
                                     .fill(Color.lift.opacity(0.3 + 0.7 * drawn))
@@ -351,9 +360,9 @@ private struct PageSwitcher: View {
                             }
                         }
                         .contentShape(.capsule)
-                        .scaleEffect(item == landed ? 1.18 : 1 + 0.1 * drawn)
-                        .animation(.spring(duration: 0.35, bounce: 0.55), value: landed)
-                        .animation(.snappy(duration: 0.15), value: drawn >= 1)
+                        .scaleEffect(reduceMotion ? 1 : item == landed ? 1.18 : 1 + 0.1 * drawn)
+                        .animation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.55), value: landed)
+                        .animation(reduceMotion ? nil : .snappy(duration: 0.15), value: drawn >= 1)
                         .onGeometryChange(for: CGPoint.self) { proxy in
                             let frame = proxy.frame(in: .global)
                             return CGPoint(x: frame.midX, y: frame.midY)
@@ -365,7 +374,7 @@ private struct PageSwitcher: View {
         }
         .padding(4)
         .background { Capsule().fill(.clear).glassEffect(.regular, in: .capsule) }
-        .animation(.snappy(duration: 0.3), value: page)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.3), value: page)
     }
 }
 

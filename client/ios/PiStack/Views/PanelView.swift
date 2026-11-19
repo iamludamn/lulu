@@ -1,5 +1,6 @@
 import PiStackKit
 import SwiftUI
+import UIKit.UIGestureRecognizerSubclass
 
 struct PanelView: View {
     let widgets: [PanelWidget]
@@ -184,6 +185,11 @@ private struct WidgetCard: View {
                 .accessibilityLabel(widget.title)
                 .accessibilityValue(update?.hasNewContent == true ? "有新内容" : "")
                 .buttonStyle(.plain)
+                .overlay {
+                    SpacePressFeedback()
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
                 .artifactSource("space-\(widget.id)", radius: 26)
         } else {
             card
@@ -193,5 +199,119 @@ private struct WidgetCard: View {
     private var space: (ArtifactAddress, SpaceRefresh)? {
         guard case .space(let src, _, let refresh, _) = widget.body, let page = ArtifactAddress(src) else { return nil }
         return (page, refresh)
+    }
+}
+
+
+private struct SpacePressFeedback: UIViewRepresentable {
+    func makeUIView(context: Context) -> Surface { Surface(frame: .zero) }
+    func updateUIView(_ view: Surface, context: Context) {}
+    static func dismantleUIView(_ view: Surface, coordinator: ()) { view.detach() }
+
+    final class Surface: UIView {
+        private lazy var observer = TouchObserver(self)
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isUserInteractionEnabled = false
+            backgroundColor = UIColor.label.withAlphaComponent(0.12)
+            layer.cornerRadius = 26
+            layer.cornerCurve = .continuous
+            alpha = 0
+        }
+
+        required init?(coder: NSCoder) { nil }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            attach()
+        }
+
+        override func didMoveToSuperview() {
+            super.didMoveToSuperview()
+            attach()
+        }
+
+        private func attach() {
+            var ancestor = superview
+            while let view = ancestor, !(view is UIScrollView) {
+                ancestor = view.superview
+            }
+            let target = window == nil ? nil : ancestor ?? window
+            guard observer.view !== target else { return }
+            detach()
+            target?.addGestureRecognizer(observer)
+        }
+
+        func detach() {
+            observer.view?.removeGestureRecognizer(observer)
+            setPressed(false)
+        }
+
+        func setPressed(_ pressed: Bool, animated: Bool = false) {
+            if animated && !UIAccessibility.isReduceMotionEnabled {
+                UIView.animate(withDuration: 0.09, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]) {
+                    self.alpha = 0
+                }
+            } else {
+                layer.removeAllAnimations()
+                alpha = pressed ? 1 : 0
+            }
+        }
+    }
+
+    final class TouchObserver: UIGestureRecognizer {
+        private weak var surface: Surface?
+        private var origin: CGPoint?
+
+        init(_ surface: Surface) {
+            self.surface = surface
+            super.init(target: nil, action: nil)
+            cancelsTouchesInView = false
+            delaysTouchesBegan = false
+            delaysTouchesEnded = false
+        }
+
+        override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+        override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+            guard origin == nil, let surface, let touch = touches.first,
+                  surface.window === touch.window, view?.bounds.contains(touch.location(in: view)) == true else {
+                finish()
+                return
+            }
+            let point = touch.location(in: surface)
+            guard surface.bounds.contains(point) else {
+                finish()
+                return
+            }
+            origin = point
+            surface.setPressed(true)
+        }
+
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+            guard let surface, let origin, let point = touches.first?.location(in: surface) else { return }
+            if !surface.bounds.contains(point) || hypot(point.x - origin.x, point.y - origin.y) >= 10 { finish() }
+        }
+
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) { finish(released: true) }
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { finish() }
+
+        override func reset() {
+            clear()
+            super.reset()
+        }
+
+        private func finish(released: Bool = false) {
+            clear(released: released)
+            state = .failed
+        }
+
+        private func clear(released: Bool = false) {
+            guard origin != nil else { return }
+            origin = nil
+            surface?.setPressed(false, animated: released)
+        }
     }
 }

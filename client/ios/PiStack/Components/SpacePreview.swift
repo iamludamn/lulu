@@ -8,22 +8,46 @@ struct SpacePreview: View {
     let botId: String
     let api: Api
     @State private var page: Page?
+    @State private var refreshes = 0
+    @State private var failed: Request?
+    @State private var loading: Request?
+
+    private struct Source: Hashable {
+        let reference: String
+        let legacy: Bool
+    }
+
+    private struct Request: Hashable {
+        let source: Source
+        let refresh: Int
+    }
 
     private struct Page {
-        let html: String
+        var source: Source
+        var html: String
         let bridge: SpaceBridge?
     }
 
-    private var reference: String { preview ?? src }
-    @State private var refreshes = 0
-    @State private var failed = false
+    private var request: Request {
+        Request(source: Source(reference: preview ?? src, legacy: preview == nil), refresh: refreshes)
+    }
 
     var body: some View {
+        let request = self.request
         ZStack {
             if let page {
-                HTMLPage(html: page.html, bridge: page.bridge, interactive: false)
-                    .id("\(reference)#\(refreshes)")
-            } else if failed {
+                let refreshing = loading == request && request.refresh > 0
+                HTMLPage(html: page.html, bridge: page.bridge, interactive: false, showLoading: !refreshing)
+                    .overlay(alignment: .topTrailing) {
+                        if refreshing {
+                            ProgressView().padding(10).background(.regularMaterial, in: Circle()).padding(12)
+                        } else if failed == request && (request.refresh > 0 || page.source != request.source) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .accessibilityLabel("刷新失败")
+                                .padding(10).background(.regularMaterial, in: Circle()).padding(12)
+                        }
+                    }
+            } else if failed == request {
                 Label("页面无法加载", systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.secondary)
             } else {
                 ProgressView()
@@ -41,34 +65,53 @@ struct SpacePreview: View {
                 .padding(12)
                 .allowsHitTesting(false)
         }
-        .task(id: "\(reference)#\(refreshes)") { await load() }
-        .onReceive(NotificationCenter.default.publisher(for: .spaceRefresh)) { if $0.object as? String == id { refreshes += 1 } }
+        .task(id: request) { await load(request) }
+        .onReceive(NotificationCenter.default.publisher(for: .spaceRefresh)) {
+            guard $0.object as? String == id, loading != request || refreshes == 0 else { return }
+            refreshes += 1
+        }
     }
 
-    private func load() async {
-        guard !Task.isCancelled else { return }
-        page = nil
-        failed = false
-        guard let address = ArtifactAddress(reference) else {
-            failed = true
+    private func load(_ request: Request) async {
+        guard !Task.isCancelled, request == self.request else { return }
+        loading = request
+        failed = nil
+        defer { if loading == request { loading = nil } }
+        guard let address = ArtifactAddress(request.source.reference) else {
+            failed = request
             return
         }
-        if page == nil, let html = api.cachedArtifactText(botId, name: address.name, version: address.version) {
-            page = Page(html: html, bridge: preview == nil ? SpaceBridge(botId: botId, space: id, refresh: nil, preview: true, api: api) : nil)
+        if page == nil {
+            let cached = await api.loadCachedArtifactText(botId, address: address)
+            guard !Task.isCancelled, request == self.request else { return }
+            if let cached { page = makePage(cached, source: request.source) }
         }
         do {
             let html = try await api.artifactText(botId, name: address.name, version: address.version)
-            guard !Task.isCancelled else { return }
-            // Legacy pages need the same read-only preview bridge as before covers
-            // existed. Dedicated static covers deliberately have no bridge.
-            let bridge = preview == nil
-                ? SpaceBridge(botId: botId, space: id, refresh: refreshes > 0 ? .open : nil, preview: true, api: api)
-                : nil
-            page = Page(html: html, bridge: bridge)
-            failed = false
+            guard !Task.isCancelled, request == self.request else { return }
+            if page?.source.legacy == request.source.legacy {
+                page?.source = request.source
+                if page?.html != html {
+                    if request.refresh > 0 { await page?.bridge?.invalidateFetches() }
+                    guard !Task.isCancelled, request == self.request else { return }
+                    page?.html = html
+                } else if request.refresh > 0 {
+                    await page?.bridge?.refresh()
+                }
+            } else {
+                page = makePage(html, source: request.source, fresh: request.refresh > 0)
+            }
         } catch {
-            guard !Task.isCancelled else { return }
-            failed = true
+            guard !Task.isCancelled, request == self.request else { return }
+            failed = request
+            if request.refresh > 0, page?.source == request.source { await page?.bridge?.refresh() }
         }
+    }
+
+    private func makePage(_ html: String, source: Source, fresh: Bool = false) -> Page {
+        let bridge = source.legacy
+            ? SpaceBridge(botId: botId, space: id, refresh: fresh ? .open : nil, preview: true, api: api)
+            : nil
+        return Page(source: source, html: html, bridge: bridge)
     }
 }

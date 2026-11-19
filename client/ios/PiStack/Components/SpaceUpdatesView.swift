@@ -10,7 +10,8 @@ struct SpaceUpdatesView: View {
     @State private var value: String?
     @State private var issue: String?
     @State private var settings = false
-    @State private var loading = false
+    @State private var loading: UUID?
+    @State private var pulls = 0
 
     private var current: SpaceUpdate? { status ?? content?.status }
 
@@ -30,7 +31,7 @@ struct SpaceUpdatesView: View {
                         }
                     }
                     if let issue { Text(issue).foregroundStyle(.orange) }
-                    if loading { ProgressView() }
+                    if loading != nil && pulls == 0 { ProgressView() }
                 }
                 if let content = content?.data {
                     if let time = content.updatedAt {
@@ -57,7 +58,7 @@ struct SpaceUpdatesView: View {
                     }
                 }
             }
-            .refreshable { await load() }
+            .refreshable { await load(pull: true) }
             .navigationTitle("Space 更新")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -68,6 +69,7 @@ struct SpaceUpdatesView: View {
                 SpaceUpdateSettings(bridge: bridge, status: current, providers: content?.providers ?? ["perplexity"])
             }
             .task(id: status?.version) { await load() }
+            .onDisappear { loading = nil }
         }
     }
 
@@ -92,11 +94,19 @@ struct SpaceUpdatesView: View {
         }
     }
 
-    private func load() async {
-        loading = true
-        defer { loading = false }
+    private func load(pull: Bool = false) async {
+        guard !Task.isCancelled else { return }
+        let request = UUID()
+        loading = request
+        issue = nil
+        if pull { pulls += 1 }
+        defer {
+            if loading == request { loading = nil }
+            if pull { pulls -= 1 }
+        }
         do {
             let raw = try await bridge.api.spaceContent(bridge.botId, space: bridge.space)
+            guard !Task.isCancelled, loading == request else { return }
             let content = try JSONDecoder().decode(SpaceContent.self, from: raw)
             let object = (try JSONSerialization.jsonObject(with: raw) as? [String: Any])?["data"] as? [String: Any]
             if let text = object?["value"] as? String {
@@ -109,6 +119,7 @@ struct SpaceUpdatesView: View {
             self.content = content
             issue = nil
         } catch {
+            guard !Task.isCancelled, loading == request else { return }
             issue = error.localizedDescription
         }
     }

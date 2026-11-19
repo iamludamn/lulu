@@ -17,9 +17,9 @@ struct ChatView: View {
     @State private var bottomState = ChatBottomState()
     @State private var composerBottom: CGFloat?
     @State private var sent = 0
-    @State private var fetchingEarlier = false
+    @State private var keeping: Set<String> = []
     @State private var floor: String?
-    @State private var position = ScrollPosition()
+    @State private var revealAnchor: RevealAnchor?
     @State private var metrics = Metrics()
     @Environment(\.topInset) private var topInset
     @Environment(\.openArtifact) private var openArtifact
@@ -30,38 +30,37 @@ struct ChatView: View {
     private static let suggestions = ["今天有什么安排？", "把我关心的数据做成组件", "总结一下你记住了我什么"]
 
     private var snapshot: BotStore.Snapshot { store.snapshot }
-    private var busy: Bool { live(of: snapshot.view).busy }
-    private var reconnecting: Bool { snapshot.link == .offline && snapshot.halt == nil }
+    private var busy: Bool { snapshot.link == .online && live(of: snapshot.view).busy }
+    private var reconnecting: Bool { snapshot.link == .offline }
 
     var body: some View {
-        let rows = chatRows(snapshot)
-        let start = floor.flatMap { id in rows.firstIndex { $0.id == id } } ?? max(0, rows.count - Self.page)
+        let rows = chatRows(snapshot, entries: store.transcriptEntries, keeping: keeping)
+        let start = startIndex(in: rows)
+        let firstMessage = firstHistoryRowID(in: rows, startingAt: start)
+        let measuredRow = revealAnchor?.id ?? firstMessage
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 4) {
                     if start > 0 || snapshot.view?.before != nil {
-                        Button {
-                            if start > 0 { revealEarlier(rows, start) } else {
-                                floor = rows.first?.id
-                                fetchingEarlier = true
-                                store.loadEarlier()
-                            }
-                        } label: {
-                            Text("更早的消息")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .id("earlier")
-                        .disabled(store.loadingHistory)
+                        historyControl(rows, start: start, firstMessage: firstMessage)
                     }
                     ForEach(rows[start...]) { row in
-                        MessageRow(row: row, store: store, botId: bot.id, api: api, expanded: row.id == reading?.id, onRead: { id in reading = rows.first { $0.id == id } }, onOpen: openArtifact, onKept: onKept)
+                        MessageRow(row: row, store: store, botId: bot.id, api: api, expanded: row.id == reading?.id, onRead: { reading = $0 }, onOpen: openArtifact, onKept: onKept) { hold in
+                            if hold { keeping.insert(row.id) }
+                            else { keeping.remove(row.id) }
+                        }
                             .equatable()
                             .padding(.bottom, row.tail && row.id != rows.last?.id ? 12 : 0)
-                            .transition(.opacity.animation(.easeOut(duration: 0.2)))
+                            .background {
+                                if row.id == measuredRow {
+                                    Color.clear
+                                        .allowsHitTesting(false)
+                                        .onGeometryChange(for: RevealAnchor.self) { proxy in
+                                            RevealAnchor(id: row.id, y: proxy.frame(in: .global).minY)
+                                        } action: { anchor in updateRevealAnchor(anchor) }
+                                }
+                            }
+                            .transition(reduceMotion ? .identity : .opacity.animation(.easeOut(duration: 0.2)))
                     }
                     Color.clear.frame(height: 1)
                         .id(Self.bottom)
@@ -74,30 +73,23 @@ struct ChatView: View {
                 .background { ChatScrollAnchor(metrics: metrics) }
             }
             .defaultScrollAnchor(.bottom)
-            .defaultScrollAnchor(bottomState.pinned ? .bottom : nil, for: .sizeChanges)
-            .scrollPosition($position)
+            .defaultScrollAnchor(revealAnchor == nil && bottomState.pinned ? .bottom : nil, for: .sizeChanges)
             .scrollClipDisabled()
             .contentMargins(.top, topInset, for: .scrollContent)
             .contentMargins(.bottom, 0, for: .scrollContent)
             .scrollDismissesKeyboard(.interactively)
             .onScrollPhaseChange { _, phase in
                 metrics.dragging = phase == .interacting || phase == .decelerating
+                if phase == .interacting { revealAnchor = nil }
             }
-            .onScrollGeometryChange(for: Extent.self) { Extent(offset: $0.contentOffset.y + $0.contentInsets.top, height: $0.contentSize.height) } action: { _, extent in
-                if let reveal = metrics.reveal, extent.height != reveal.height {
-                    metrics.reveal = nil
-                    position.scrollTo(y: reveal.offset + extent.height - reveal.height)
-                }
-                metrics.extent = extent
-            }
+            .onChange(of: composing.wrappedValue) { _, _ in revealAnchor = nil }
             .onChange(of: rows.count > Self.page, initial: true) { _, long in
-                if long, floor == nil { floor = rows[rows.count - Self.page].id }
+                if long, floor == nil { floor = firstMessage }
             }
-            .onChange(of: snapshot.view?.entries.first?.id) {
-                guard fetchingEarlier else { return }
-                fetchingEarlier = false
-                let start = floor.flatMap { id in rows.firstIndex { $0.id == id } } ?? 0
-                if start > 0 { revealEarlier(rows, start) }
+            .onChange(of: store.historyLoad) { previous, current in
+                guard previous == .loading else { return }
+                if current == .idle, start > 0 { revealEarlier(rows, start) }
+                if case .failed = current { revealAnchor = nil }
             }
             .onChange(of: sent) {
                 Task {
@@ -132,9 +124,9 @@ struct ChatView: View {
         }
         .overlay { gate(rows) }
         .overlay(alignment: .top) {
-            if reconnecting {
+            if reconnecting && (snapshot.view != nil || !rows.isEmpty) {
                 HStack(spacing: 6) {
-                    ProgressView().controlSize(.mini)
+                    Image(systemName: "wifi.exclamationmark")
                     Text("正在重连…")
                 }
                 .font(.caption.weight(.medium))
@@ -145,7 +137,7 @@ struct ChatView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .animation(.snappy, value: reconnecting)
+        .animation(reduceMotion ? nil : .snappy, value: reconnecting)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if snapshot.halt == nil {
                 Composer(draft: $draft, store: store, transcription: transcription, onTranscribed: transcribed, busy: busy, placeholder: placeholder, focused: composing, onSend: send, onVoiceConversation: onVoiceConversation)
@@ -202,6 +194,7 @@ struct ChatView: View {
     }
 
     private func followLatest() {
+        revealAnchor = nil
         metrics.dragging = false
         bottomState.followLatest()
     }
@@ -219,9 +212,38 @@ struct ChatView: View {
 
     private var placeholder: String { "给 \(bot.name) 发消息" }
 
+    private func startIndex(in rows: [ChatRow]) -> Int {
+        guard let floor, let index = rows.firstIndex(where: { $0.id == floor }) else {
+            return max(0, rows.count - Self.page)
+        }
+        return index > 0 && rows[index - 1].role == .stamp ? index - 1 : index
+    }
+
+    private func firstHistoryRowID(in rows: [ChatRow], startingAt index: Int) -> String? {
+        rows[index...].first { $0.role != .stamp && !$0.typing }?.id
+    }
+
     private func revealEarlier(_ rows: [ChatRow], _ start: Int) {
-        metrics.reveal = metrics.extent
-        floor = rows[max(0, start - Self.page)].id
+        floor = firstHistoryRowID(in: rows, startingAt: max(0, start - Self.page))
+    }
+
+    private func preserveMessage(_ id: String?) {
+        guard let anchor = metrics.visibleAnchor, anchor.id == id else { return }
+        metrics.scrollView?.stopScrollingAndZooming()
+        revealAnchor = anchor
+    }
+
+    private func updateRevealAnchor(_ anchor: RevealAnchor) {
+        metrics.visibleAnchor = anchor
+        guard let revealAnchor, revealAnchor.id == anchor.id, let scroll = metrics.scrollView else { return }
+        let shift = anchor.y - revealAnchor.y
+        guard abs(shift) >= 0.5 else { return }
+        let minimum = -scroll.adjustedContentInset.top
+        let maximum = max(minimum, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
+        let offset = scroll.contentOffset
+        let target = min(maximum, max(minimum, offset.y + shift))
+        guard abs(target - offset.y) >= 0.5 else { return }
+        scroll.setContentOffset(CGPoint(x: offset.x, y: target), animated: false)
     }
 
     private func transcribed(_ text: String, sendImmediately: Bool) {
@@ -244,16 +266,59 @@ struct ChatView: View {
         draft = ""
     }
 
+    private func historyControl(_ rows: [ChatRow], start: Int, firstMessage: String?) -> some View {
+        let history = store.historyLoad
+        let remote = start == 0
+        return VStack(spacing: 6) {
+            Button {
+                if remote {
+                    store.loadEarlier()
+                    guard store.historyLoad == .loading else { return }
+                    preserveMessage(firstMessage)
+                    floor = firstMessage
+                } else {
+                    preserveMessage(firstMessage)
+                    revealEarlier(rows, start)
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    if remote, history == .loading {
+                        ProgressView().controlSize(.mini)
+                        Text("正在加载更早的消息…")
+                    } else if remote, case .failed = history {
+                        Text("重试加载更早的消息")
+                    } else {
+                        Text("更早的消息")
+                    }
+                }
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+            }
+            .buttonStyle(.glass)
+            .tint(.primary)
+            .disabled(remote && history == .loading)
+            if remote, case .failed(let reason) = history {
+                Text("早期消息加载失败：\(reason)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+    }
+
     @ViewBuilder
     private func gate(_ rows: [ChatRow]) -> some View {
-        switch snapshot.halt {
-        case .notFound:
-            ContentUnavailableView("bot 不存在", systemImage: "questionmark.bubble")
-        case nil:
-            if snapshot.view == nil {
-                ProgressView()
-            } else if rows.isEmpty {
+        if rows.isEmpty {
+            if snapshot.view != nil {
                 welcome
+            } else if reconnecting {
+                ContentUnavailableView {
+                    Label("暂时无法连接 lulu", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text("正在尝试重新连接。")
+                }
+                .allowsHitTesting(false)
             }
         }
     }
@@ -282,9 +347,9 @@ struct ChatView: View {
     }
 }
 
-private struct Extent: Equatable {
-    var offset: CGFloat = 0
-    var height: CGFloat = 0
+private struct RevealAnchor: Equatable {
+    let id: String
+    let y: CGFloat
 }
 
 private final class Metrics {
@@ -299,8 +364,7 @@ private final class Metrics {
         return nil
     }
 
-    var extent = Extent()
-    var reveal: Extent?
+    var visibleAnchor: RevealAnchor?
     var bottomMarkerY: CGFloat = 0
     var composerTop: CGFloat = 0
     var dragging = false

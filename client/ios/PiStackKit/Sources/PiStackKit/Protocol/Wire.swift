@@ -1,6 +1,6 @@
 import Foundation
 
-public struct ConversationEntry: Codable, Identifiable, Sendable {
+public struct ConversationEntry: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let kind: String
     public let model: [JSONValue]?
@@ -30,6 +30,7 @@ public struct ConversationView: Codable, Sendable {
     public let entries: [ConversationEntry]
     public let docs: [String: JSONValue]
     public var before: Int? = nil
+    var conversation: [String: JSONValue]? = nil
 }
 
 public struct ViewFrame: Decodable, Sendable {
@@ -38,13 +39,35 @@ public struct ViewFrame: Decodable, Sendable {
     let reset: Bool?
     let before: Int?
     let docs: [String: JSONValue]
+    let conversation: [String: JSONValue]?
 
     func applied(to view: ConversationView?) -> ConversationView? {
-        var known = Dictionary(uniqueKeysWithValues: (reset == true ? [] : view?.entries ?? []).map { ($0.id, $0) })
+        let replacesView = reset == true || conversation != view?.conversation
+        if !replacesView, entries.isEmpty, order == nil {
+            return ConversationView(entries: view?.entries ?? [], docs: docs, before: view?.before, conversation: conversation)
+        }
+        var known = Dictionary(uniqueKeysWithValues: (replacesView ? [] : view?.entries ?? []).map { ($0.id, $0) })
         for entry in entries { known[entry.id] = entry }
-        if let order, !order.allSatisfy({ known[$0] != nil }) { return nil }
-        let merged = known.values.sorted { (Int($0.id) ?? 0) < (Int($1.id) ?? 0) }
-        return ConversationView(entries: merged, docs: docs, before: reset == true ? before : view?.before)
+        let window: [ConversationEntry]
+        if let order {
+            window = order.compactMap { known.removeValue(forKey: $0) }
+            guard window.count == order.count else { return nil }
+        } else {
+            window = known.values.sorted { (Int($0.id) ?? 0) < (Int($1.id) ?? 0) }
+            if !replacesView {
+                return ConversationView(entries: window, docs: docs, before: view?.before, conversation: conversation)
+            }
+        }
+        if let view, let before, !window.isEmpty, conversation?["id"] != nil, conversation == view.conversation,
+           let boundary = view.entries.firstIndex(where: { $0.id == String(before) }),
+           boundary + 1 < view.entries.endIndex,
+           zip(view.entries.dropFirst(boundary + 1), window).allSatisfy({ cached, incoming in
+               replacesView ? cached == incoming : cached.id == incoming.id
+           }) {
+            return ConversationView(entries: Array(view.entries.prefix(through: boundary)) + window,
+                                    docs: docs, before: view.before, conversation: conversation)
+        }
+        return ConversationView(entries: window, docs: docs, before: before, conversation: conversation)
     }
 }
 
