@@ -40,6 +40,7 @@ interface Env {
   readonly LULU_MCP: KVNamespace;
   readonly MCP_ENCRYPTION_KEY?: string;
   readonly MCP_ADMIN_TOKEN?: string;
+  readonly CF_VERSION_METADATA?: { readonly id: string };
   readonly OTEL_EXPORTER_OTLP_ENDPOINT?: string;
   readonly OTEL_EXPORTER_OTLP_HEADERS?: string;
   readonly OTEL_SERVICE_NAME?: string;

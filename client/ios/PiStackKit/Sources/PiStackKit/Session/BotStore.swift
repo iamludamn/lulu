@@ -68,6 +68,8 @@ public final class BotStore {
     @ObservationIgnored private var restoration: Task<Void, Never>?
     private var saving: Task<Void, Never>?
     private var latestState: Data?
+    private var deliveryReceipts = false
+    private var receiptedCalls = Set<String>()
     private var task: URLSessionWebSocketTask?
     private var timer: Task<Void, Never>?
     private var attempts = 0
@@ -271,7 +273,9 @@ public final class BotStore {
             guard self.task === task else { return }
             self.closed(task)
         }
-        transmit(["type": "hello", "incremental": true])
+        deliveryReceipts = false
+        receiptedCalls.removeAll()
+        transmit(["type": "hello", "incremental": true, "schedules": true])
         Task { await listen(task) }
     }
 
@@ -349,11 +353,19 @@ public final class BotStore {
             snapshot.panel = panel
             snapshot.assets = assets
             snapshot.hasReceivedState = true
+            deliveryReceipts = view.deliveryReceipts == true
+            if view.reset == true || !view.entries.isEmpty {
+                receiptFinals(in: applied, source: view.reset == true ? "snapshot" : "live")
+            }
             if !snapshot.requests.isEmpty {
                 let submitted = Set(progress.messages.compactMap(\.requestId))
                 for id in submitted { submitTimers.removeValue(forKey: id)?.cancel() }
                 snapshot.requests.removeAll {
                     if case .submit = $0.command.kind { return submitted.contains($0.id) }
+                    if case .keep(let origin) = $0.command.kind, panel.scheduleReceipts[origin]?.requestIds.contains($0.id) == true {
+                        keepTimers.removeValue(forKey: $0.id)?.cancel()
+                        return true
+                    }
                     return false
                 }
             }
@@ -375,6 +387,7 @@ public final class BotStore {
             cachedTranscriptEntries = nil
             snapshot.view = ConversationView(entries: entries + view.entries, docs: view.docs,
                                              before: before, conversation: view.conversation)
+            if let applied = snapshot.view { receiptFinals(in: applied, source: "history") }
             finishHistory(nil)
             persist()
         case .models(let config): snapshot.models = config
@@ -408,6 +421,30 @@ public final class BotStore {
             } else {
                 snapshot.requests.remove(at: index)
             }
+        }
+    }
+
+    private func receiptFinals(in view: ConversationView, source: String) {
+        guard deliveryReceipts else { return }
+        var pending: [String: [String]] = [:]
+        for entry in view.entries where entry.kind == "pi.tool-result" {
+            for message in entry.model ?? [] {
+                guard message["toolName"]?.string == sendTool, message["isError"] != .bool(true),
+                      let callId = message["toolCallId"]?.string, !receiptedCalls.contains(callId),
+                      let details = message["details"], details["end"] == .bool(true),
+                      let ids = details["requestIds"]?.array?.compactMap(\.string), !ids.isEmpty else { continue }
+                pending[callId] = ids
+            }
+        }
+        guard !pending.isEmpty else { return }
+        var receipts: [[String: String]] = []
+        for entry in chatEntries(view, hidden: snapshot.progress?.hiddenEntries ?? []) where entry.final {
+            guard let ids = pending[entry.id], receiptedCalls.insert(entry.id).inserted else { continue }
+            receipts.append(contentsOf: ids.map { ["requestId": $0, "callId": entry.id] })
+        }
+        for start in stride(from: 0, to: receipts.count, by: 32) {
+            let batch = Array(receipts[start..<min(start + 32, receipts.count)])
+            transmit(["type": "prompt.receipts", "source": source, "receipts": batch])
         }
     }
 

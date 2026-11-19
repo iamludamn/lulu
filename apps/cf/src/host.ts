@@ -40,7 +40,7 @@ const connect: DurableHost["connect"] = async (url, headers, handlers) => {
 export function durableHost(ctx: DurableObjectState, env: Env): DurableHost {
   const name = ctx.id.name;
   if (name === undefined) throw new Error("Object must be addressed by name");
-  const environment = stringsOf(env);
+  const environment = { ...stringsOf(env), LULU_RELEASE: env.CF_VERSION_METADATA?.id };
   const telemetry = createTelemetry(environment, (task) => ctx.waitUntil(task));
   const kv = kvOf(env.LULU_MCP);
   const storage: DurableHost["storage"] = {

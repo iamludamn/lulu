@@ -152,6 +152,14 @@ func chatEntries(c *conversation, hidden []jsonID) []chatEntry {
 	closeTurn := func(fallback bool) {
 		var sent []chatEntry
 		for _, e := range turn {
+			if e.Kind == scheduleOfferKind {
+				if e.Data != nil {
+					if card := decodeCard(e.Data.Widget); card != nil && card.widget != nil && card.widget.Body.Kind == "schedules" {
+						sent = append(sent, chatEntry{id: scheduleOriginPrefix + string(e.ID), pos: position(e.ID), at: time.UnixMilli(int64(e.Data.At)), card: card})
+					}
+				}
+				continue
+			}
 			sent = append(sent, sentEntries(e.Model, position(e.ID), messageTime(e.Model), delivered)...)
 		}
 		if len(sent) > 0 {
@@ -176,7 +184,7 @@ func chatEntries(c *conversation, hidden []jsonID) []chatEntry {
 			if text := messageText(e.Model); text != "" {
 				result = append(result, chatEntry{id: string(e.ID), pos: position(e.ID), user: true, text: text, at: messageTime(e.Model)})
 			}
-		case "pi.assistant":
+		case "pi.assistant", scheduleOfferKind:
 			turn = append(turn, e)
 		}
 	}
@@ -407,7 +415,7 @@ func chatRows(s *snapshot, now time.Time) []chatRow {
 	}
 	for _, item := range timeline(entries, messages) {
 		if e := item.entry; e != nil {
-			if e.card != nil && kept[e.id] {
+			if e.card != nil && kept[e.id] && !strings.HasPrefix(e.id, scheduleOriginPrefix) {
 				continue
 			}
 			stamp(e.at, e.id)

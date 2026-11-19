@@ -17,7 +17,7 @@ struct ChatRow: Identifiable, Equatable {
     var text: String
     var body: String?
     var card: SentCard?
-    var spaceOffer: SpaceOfferState?
+    var viewOffer: ViewOfferState?
     var keepConfirmed = false
     var offerError: String?
     var offerAvailable = true
@@ -96,14 +96,15 @@ func chatRows(_ snapshot: BotStore.Snapshot, entries: [ChatEntry], keeping: Set<
     for item in timeline(entries, messages) {
         switch item {
         case .entry(let entry):
-            if entry.card != nil && spaceStates[entry.id] == nil && kept.contains(entry.id) && !keeping.contains(entry.id) { continue }
+            let viewOffer = spaceStates[entry.id] ?? scheduleOfferState(entry, panel: snapshot.panel)
+            if entry.card != nil && viewOffer == nil && kept.contains(entry.id) && !keeping.contains(entry.id) { continue }
             stamp(entry.time, before: entry.id)
             var row = ChatRow(id: entry.id, role: entry.role == .user ? .user : .assistant, text: entry.text)
             row.body = entry.body
             row.card = entry.card
-            row.spaceOffer = spaceStates[entry.id]
+            row.viewOffer = viewOffer
             if row.card != nil {
-                row.keepConfirmed = row.spaceOffer == nil && kept.contains(entry.id)
+                row.keepConfirmed = row.viewOffer == nil && kept.contains(entry.id)
                 row.offerAvailable = snapshot.link == .online
                 row.sending = keepRequests[entry.id]?.sending ?? false
                 row.offerError = keepRequests[entry.id]?.error

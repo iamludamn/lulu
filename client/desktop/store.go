@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -53,7 +54,9 @@ type snapshot struct {
 }
 
 type socket struct {
-	out chan []byte
+	out              chan []byte
+	deliveryReceipts bool
+	receiptedCalls   map[string]bool
 }
 
 type store struct {
@@ -214,7 +217,7 @@ func (s *store) session(ctx context.Context, client *http.Client) (bool, websock
 		return false, websocket.CloseStatus(err)
 	}
 	conn.SetReadLimit(64 << 20)
-	sock := &socket{out: make(chan []byte, 64)}
+	sock := &socket{out: make(chan []byte, 64), receiptedCalls: make(map[string]bool)}
 	sessionCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	defer conn.CloseNow()
@@ -235,7 +238,7 @@ func (s *store) session(ctx context.Context, client *http.Client) (bool, websock
 		s.sock = sock
 		s.snap.loadingHistory = false
 		s.snap.historyRequest = ""
-		s.transmit(obj{"type": "hello", "incremental": true})
+		s.transmit(obj{"type": "hello", "incremental": true, "schedules": true})
 		for _, r := range s.snap.requests {
 			if r.state == requestSending {
 				s.transmit(r.command.frame)
@@ -305,6 +308,17 @@ func (s *store) receive(msg *serverMessage, d decodedState) {
 		s.snap.mcp = msg.MCP
 		s.snap.panel = d.panel
 		s.snap.assets = d.assets
+		s.snap.requests = slices.DeleteFunc(s.snap.requests, func(r request) bool {
+			return r.command.kind == cmdKeep && slices.Contains(d.panel.ScheduleReceipts[r.command.origin].RequestIDs, r.command.requestID)
+		})
+		if s.sock != nil {
+			s.sock.deliveryReceipts = msg.View.DeliveryReceipts
+			if msg.View.Reset {
+				s.receiptFinals("snapshot")
+			} else if len(msg.View.Entries) > 0 {
+				s.receiptFinals("live")
+			}
+		}
 		s.persist()
 	case "history":
 		s.snap.loadingHistory = false
@@ -313,6 +327,7 @@ func (s *store) receive(msg *serverMessage, d decodedState) {
 			frame := viewFrame{Entries: msg.Entries, Docs: s.snap.view.Docs}
 			s.snap.view = frame.applied(s.snap.view)
 			s.snap.view.Before = msg.Before
+			s.receiptFinals("history")
 			s.persist()
 		}
 	case "models":
@@ -342,17 +357,70 @@ func (s *store) receive(msg *serverMessage, d decodedState) {
 	s.touch()
 }
 
-func (s *store) transmit(frame obj) {
-	if s.sock == nil {
+func (s *store) receiptFinals(source string) {
+	if s.sock == nil || !s.sock.deliveryReceipts {
 		return
+	}
+	pending := map[string][]string{}
+	for _, e := range s.snap.view.Entries {
+		if e.Kind != "pi.tool-result" {
+			continue
+		}
+		for _, message := range e.Model {
+			callID := str(message, "toolCallId")
+			if callID == "" || s.sock.receiptedCalls[callID] || str(message, "toolName") != sendTool || message["isError"] == true {
+				continue
+			}
+			details, _ := message["details"].(obj)
+			ids, _ := details["requestIds"].([]any)
+			if details["end"] != true {
+				continue
+			}
+			for _, id := range ids {
+				if requestID, ok := id.(string); ok {
+					pending[callID] = append(pending[callID], requestID)
+				}
+			}
+		}
+	}
+	if len(pending) == 0 {
+		return
+	}
+	var receipts []obj
+	var calls []string
+	for _, entry := range chatEntries(s.snap.view, s.snap.progress.HiddenEntries) {
+		ids := pending[entry.id]
+		if !entry.final || len(ids) == 0 {
+			continue
+		}
+		calls = append(calls, entry.id)
+		for _, id := range ids {
+			receipts = append(receipts, obj{"requestId": id, "callId": entry.id})
+		}
+	}
+	for start := 0; start < len(receipts); start += 32 {
+		if !s.transmit(obj{"type": "prompt.receipts", "source": source, "receipts": receipts[start:min(start+32, len(receipts))]}) {
+			return
+		}
+	}
+	for _, call := range calls {
+		s.sock.receiptedCalls[call] = true
+	}
+}
+
+func (s *store) transmit(frame obj) bool {
+	if s.sock == nil {
+		return false
 	}
 	data, err := json.Marshal(frame)
 	if err != nil {
-		return
+		return false
 	}
 	select {
 	case s.sock.out <- data:
+		return true
 	default:
+		return false
 	}
 }
 

@@ -1,7 +1,8 @@
-import { defineTool, type ToolExecutionResult } from "@earendil-works/pi-durable";
-import { SPACE_ID } from "../protocol/panel.js";
+import { ChatDeliveryDoc } from "../conversation/delivery-doc.js";
+import { defineTool, LiveDoc, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
+import { SCHEDULE_WIDGET_ID, SPACE_ID } from "../protocol/panel.js";
 import type { SendCard, SendInput } from "../protocol/send.js";
-import { ARTIFACT_REF, SEND_TOOL, SendInput as SendParams } from "../protocol/send.js";
+import { ARTIFACT_REF, SEND_TOOL, ModelSendInput } from "../protocol/send.js";
 import { assetRefProblem, spaceRefProblem, spacePreviewProblem } from "../artifact/space.js";
 
 const TEXT_LIMIT = { chars: 600, lines: 12 };
@@ -9,7 +10,7 @@ const DOCUMENT_SHAPE = /^(#{1,6} |\|.+\|\s*$)/m;
 
 export type ArtifactCheck = (name: string, version: number) => Promise<boolean>;
 
-type SendDetails = { type: string; end: boolean };
+type SendDetails = { type: string; end: boolean; requestIds?: string[] };
 
 const DESCRIPTION = [
   "Say something to the user in the Lulu chat. This is your only voice: the user only ever sees send_to_user calls, and your plain assistant text is a private scratchpad they never see.",
@@ -40,6 +41,7 @@ function misuse(input: SendInput): string | undefined {
   if (input.content !== undefined) return "content is only valid with type text and would be dropped from a widget. Nothing was sent, so the card has not been delivered. Send the text as its own type text call, then send the card again without content.";
   if (input.widget === undefined) return "type widget requires widget. Nothing was sent.";
   const card = input.widget;
+  if (card.kind === "panel" && card.panel.id === SCHEDULE_WIDGET_ID) return "The schedules widget is created automatically by the schedule tool.";
   if (card.kind === "panel" && card.panel.body.kind === "space" && !SPACE_ID.test(card.panel.id))
     return "A space widget id is the key of its saved state, so it must be letters, digits, - or _, start with a letter or digit, and be at most 64 characters. Nothing was sent. Send the card again with a valid id.";
   return undefined;
@@ -76,21 +78,26 @@ function fail(text: string): ToolExecutionResult<SendDetails> {
   return { output: [{ type: "text", text }], details: { type: "error", end: false }, isError: true };
 }
 
-export const createSendTool = (exists: ArtifactCheck | undefined) =>
+export const createSendTool = (exists: ArtifactCheck | undefined): ToolRegistration<typeof ModelSendInput, SendDetails> =>
   defineTool({
     name: SEND_TOOL,
     description: DESCRIPTION,
-    parameters: SendParams,
+    parameters: ModelSendInput,
     replay: "safe",
     executionMode: "sequential",
-    execute: async (args) => {
+    execute: async (args, api, context) => {
       const input = args as SendInput;
       const refused = misuse(input) ?? (input.widget === undefined ? undefined : await missingAsset(input.widget, exists));
       if (refused !== undefined) return fail(refused);
       const end = input.end_turn === true;
+      const inputs = (await api.snapshot(LiveDoc, api.conversationId, context))?.run?.inputs ?? [];
+      const delivery = inputs.length > 0 ? await api.snapshot(ChatDeliveryDoc, context) : undefined;
+      const requestIds = delivery?.requests
+        .filter((request) => !request.final && inputs.some((id) => request.submissions.includes(id)))
+        .map((request) => request.requestId) ?? [];
       return {
         output: [{ type: "text", text: end ? "Delivered. Your turn is complete." : "Delivered." }],
-        details: { type: input.type, end },
+        details: { type: input.type, end, ...(requestIds.length > 0 ? { requestIds } : {}) },
         ...(end && { control: { terminate: true } }),
       };
     },

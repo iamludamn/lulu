@@ -8,6 +8,16 @@ public enum SpaceRefresh: String, Decodable, Sendable {
     case manual, open, daily
 }
 
+public struct ScheduledTaskRow: Decodable, Equatable, Identifiable, Sendable {
+    public enum State: String, Decodable, Sendable { case active, paused, done, missed, deleted }
+    public let id: String
+    public let name: String
+    public let schedule: Schedule
+    public let state: State
+    public let nextRunAt: Double?
+    public let lastRunAt: Double?
+}
+
 public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
     public enum Size: String, Decodable, Sendable { case s, m, l }
 
@@ -76,9 +86,10 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
         case space(src: String, summary: String?, refresh: SpaceRefresh, preview: String?)
         case weather(city: String)
         case actions([Button])
+        case schedules(revision: Int, rows: [ScheduledTaskRow])
         case unknown
 
-        private enum Keys: String, CodingKey { case kind, value, unit, at, delta, spark, items, mark, x, series, events, markdown, src, caption, buttons, summary, refresh, city, preview }
+        private enum Keys: String, CodingKey { case kind, value, unit, at, delta, spark, items, mark, x, series, events, markdown, src, caption, buttons, summary, refresh, city, preview, revision, rows }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Keys.self)
@@ -112,6 +123,7 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
                 )
             case "weather": self = .weather(city: try c.decode(String.self, forKey: .city))
             case "actions": self = .actions(try c.decode([Button].self, forKey: .buttons))
+            case "schedules": self = .schedules(revision: try c.decode(Int.self, forKey: .revision), rows: try c.decode([ScheduledTaskRow].self, forKey: .rows))
             default: self = .unknown
             }
         }
@@ -140,11 +152,18 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
     }
 }
 
+public enum ViewOfferAction: String, Decodable, Sendable { case add, update }
+
 public struct SpaceReceipt: Decodable, Equatable, Sendable {
-    public enum Action: String, Decodable, Sendable { case add, update }
+    public typealias Action = ViewOfferAction
     public let id: String
     public let version: Int
     public let action: Action
+}
+
+public struct ScheduleReceipt: Decodable, Equatable, Sendable {
+    public let action: ViewOfferAction
+    let requestIds: [String]
 }
 
 public struct PanelState: Decodable, Equatable, Sendable {
@@ -153,12 +172,16 @@ public struct PanelState: Decodable, Equatable, Sendable {
 
     public let spaceReceipts: [String: SpaceReceipt]
     public let spaceUpdates: [String: SpaceUpdate]
+    public let scheduleRevision: Int?
+    public let scheduleReceipts: [String: ScheduleReceipt]
 
-    public init(order: [String] = [], widgets: [String: PanelWidget] = [:], spaceReceipts: [String: SpaceReceipt] = [:], spaceUpdates: [String: SpaceUpdate] = [:]) {
+    public init(order: [String] = [], widgets: [String: PanelWidget] = [:], spaceReceipts: [String: SpaceReceipt] = [:], spaceUpdates: [String: SpaceUpdate] = [:], scheduleRevision: Int? = nil, scheduleReceipts: [String: ScheduleReceipt] = [:]) {
         self.order = order
         self.widgets = widgets
         self.spaceReceipts = spaceReceipts
         self.spaceUpdates = spaceUpdates
+        self.scheduleRevision = scheduleRevision
+        self.scheduleReceipts = scheduleReceipts
     }
 
     private struct Lenient: Decodable {
@@ -169,12 +192,14 @@ public struct PanelState: Decodable, Equatable, Sendable {
         }
     }
 
-    private enum Keys: String, CodingKey { case order, widgets, spaceReceipts, spaceUpdates }
+    private enum Keys: String, CodingKey { case order, widgets, spaceReceipts, spaceUpdates, scheduleRevision, scheduleReceipts }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: Keys.self)
         spaceUpdates = try container.decodeIfPresent([String: SpaceUpdate].self, forKey: .spaceUpdates) ?? [:]
         spaceReceipts = try container.decodeIfPresent([String: SpaceReceipt].self, forKey: .spaceReceipts) ?? [:]
+        scheduleRevision = try container.decodeIfPresent(Int.self, forKey: .scheduleRevision)
+        scheduleReceipts = try container.decodeIfPresent([String: ScheduleReceipt].self, forKey: .scheduleReceipts) ?? [:]
         order = try container.decode([String].self, forKey: .order)
         widgets = try container.decode([String: Lenient].self, forKey: .widgets).compactMapValues(\.widget)
     }
@@ -184,7 +209,7 @@ public struct PanelState: Decodable, Equatable, Sendable {
     public func checking(_ id: String, item index: Int, done: Bool) -> PanelState {
         var copy = widgets
         copy[id] = widgets[id]?.checking(index, done: done)
-        return PanelState(order: order, widgets: copy, spaceReceipts: spaceReceipts, spaceUpdates: spaceUpdates)
+        return PanelState(order: order, widgets: copy, spaceReceipts: spaceReceipts, spaceUpdates: spaceUpdates, scheduleRevision: scheduleRevision, scheduleReceipts: scheduleReceipts)
     }
 }
 

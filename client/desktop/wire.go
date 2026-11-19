@@ -10,12 +10,14 @@ import (
 )
 
 const (
-	botID            = "main"
-	botName          = "lulu"
-	liveDoc          = "pi.live"
-	sendTool         = "send_to_user"
-	defaultServer    = "http://127.0.0.1:8787"
-	closeBotNotFound = 4404
+	botID                = "main"
+	botName              = "lulu"
+	liveDoc              = "pi.live"
+	sendTool             = "send_to_user"
+	scheduleOfferKind    = "lulu.schedules.offer"
+	scheduleOriginPrefix = "schedules:"
+	defaultServer        = "http://127.0.0.1:8787"
+	closeBotNotFound     = 4404
 )
 
 type jsonID string
@@ -37,17 +39,41 @@ func (id *jsonID) UnmarshalJSON(data []byte) error {
 type obj = map[string]any
 
 type entry struct {
-	ID    jsonID `json:"id"`
-	Kind  string `json:"kind"`
-	Model []obj  `json:"model,omitempty"`
+	ID    jsonID             `json:"id"`
+	Kind  string             `json:"kind"`
+	Model []obj              `json:"model,omitempty"`
+	Data  *scheduleOfferData `json:"data,omitempty"`
+}
+
+type scheduleOfferData struct {
+	Widget obj     `json:"widget"`
+	At     float64 `json:"at"`
+}
+
+func (e *entry) UnmarshalJSON(data []byte) error {
+	type plain entry
+	var raw struct {
+		*plain
+		Data json.RawMessage `json:"data"`
+	}
+	raw.plain = (*plain)(e)
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	e.Data = nil
+	if e.Kind == scheduleOfferKind && len(raw.Data) != 0 {
+		return json.Unmarshal(raw.Data, &e.Data)
+	}
+	return nil
 }
 
 type viewFrame struct {
-	Reset   bool           `json:"reset"`
-	Before  *int64         `json:"before"`
-	Entries []entry        `json:"entries"`
-	Order   []jsonID       `json:"order"`
-	Docs    map[string]any `json:"docs"`
+	DeliveryReceipts bool           `json:"deliveryReceipts"`
+	Reset            bool           `json:"reset"`
+	Before           *int64         `json:"before"`
+	Entries          []entry        `json:"entries"`
+	Order            []jsonID       `json:"order"`
+	Docs             map[string]any `json:"docs"`
 }
 
 type conversation struct {
@@ -217,22 +243,24 @@ type delta struct {
 }
 
 type widgetBody struct {
-	Kind     string          `json:"kind"`
-	Value    json.RawMessage `json:"value"`
-	Unit     string          `json:"unit"`
-	At       *float64        `json:"at"`
-	Delta    *delta          `json:"delta"`
-	Spark    []float64       `json:"spark"`
-	Items    json.RawMessage `json:"items"`
-	Mark     string          `json:"mark"`
-	X        []string        `json:"x"`
-	Series   []series        `json:"series"`
-	Events   []timelineEvent `json:"events"`
-	Markdown string          `json:"markdown"`
-	Src      string          `json:"src"`
-	Caption  string          `json:"caption"`
-	Buttons  []actionButton  `json:"buttons"`
-	City     string          `json:"city"`
+	Kind      string             `json:"kind"`
+	Value     json.RawMessage    `json:"value"`
+	Unit      string             `json:"unit"`
+	At        *float64           `json:"at"`
+	Delta     *delta             `json:"delta"`
+	Spark     []float64          `json:"spark"`
+	Items     json.RawMessage    `json:"items"`
+	Mark      string             `json:"mark"`
+	X         []string           `json:"x"`
+	Series    []series           `json:"series"`
+	Events    []timelineEvent    `json:"events"`
+	Markdown  string             `json:"markdown"`
+	Src       string             `json:"src"`
+	Caption   string             `json:"caption"`
+	Buttons   []actionButton     `json:"buttons"`
+	City      string             `json:"city"`
+	Revision  int                `json:"revision,omitempty"`
+	Schedules []scheduledTaskRow `json:"rows,omitempty"`
 
 	Meters []meter    `json:"-"`
 	Rows   []listItem `json:"-"`
@@ -276,19 +304,36 @@ type widget struct {
 }
 
 type panelState struct {
-	Order   []string
-	Widgets map[string]*widget
+	Order            []string                   `json:"order"`
+	Widgets          map[string]*widget         `json:"widgets"`
+	ScheduleRevision int                        `json:"scheduleRevision,omitempty"`
+	ScheduleReceipts map[string]scheduleReceipt `json:"scheduleReceipts,omitempty"`
+}
+
+type scheduleReceipt struct {
+	Action     string   `json:"action"`
+	RequestIDs []string `json:"requestIds"`
+}
+
+type scheduledTaskRow struct {
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Schedule  schedule `json:"schedule"`
+	State     string   `json:"state"`
+	NextRunAt *float64 `json:"nextRunAt"`
+	LastRunAt *float64 `json:"lastRunAt,omitempty"`
 }
 
 func (p *panelState) UnmarshalJSON(data []byte) error {
+	type plain panelState
 	var raw struct {
-		Order   []string                   `json:"order"`
+		*plain
 		Widgets map[string]json.RawMessage `json:"widgets"`
 	}
+	raw.plain = (*plain)(p)
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	p.Order = raw.Order
 	p.Widgets = map[string]*widget{}
 	for id, item := range raw.Widgets {
 		var w widget
@@ -323,7 +368,8 @@ func (p panelState) checking(id string, index int, done bool) panelState {
 		widgets[k] = v
 	}
 	widgets[id] = &copied
-	return panelState{Order: p.Order, Widgets: widgets}
+	p.Widgets = widgets
+	return p
 }
 
 type serverMessage struct {

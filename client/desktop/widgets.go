@@ -103,6 +103,8 @@ func (a *app) widgetBody(c *ui.Context, p palette, w *widget, interactive bool) 
 		a.weatherBody(c, p, b.City, w.Size)
 	case "actions":
 		a.actionsBody(c, p, b.Buttons, compact, interactive)
+	case "schedules":
+		schedulePreview(c, p, b.Schedules)
 	default:
 		ui.Text(c, "客户端暂不支持这种组件").FontSize(12).TextColor(p.text2)
 	}

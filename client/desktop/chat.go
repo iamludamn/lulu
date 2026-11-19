@@ -265,6 +265,10 @@ func absf(v float32) float32 {
 
 func (a *app) cardRow(c *ui.Context, p palette, row chatRow) {
 	card := row.card
+	if card.widget != nil && card.widget.Body.Kind == "schedules" {
+		a.scheduleOfferCard(c, p, row)
+		return
+	}
 	destination, label, symbol := pagePanel, "放入视图", "grid"
 	if card.kind == "asset" {
 		destination, label, symbol = pageAssets, "收进资产", "tray"

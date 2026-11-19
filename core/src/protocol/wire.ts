@@ -5,11 +5,15 @@ import type { AssetItem } from "./send.js";
 
 export const MAX_CLIENT_FRAME_CHARACTERS = 64_000;
 
+export type ReceiptSource = "live" | "snapshot" | "history";
+export type DeliveryReceipt = { requestId: string; callId: string };
+
 export type ClientMessage =
-  | { type: "hello"; incremental?: boolean }
+  | { type: "hello"; incremental?: boolean; schedules?: boolean }
   | { type: "history.load"; requestId: string; before: number }
   | { type: "prompt.submit"; requestId: string; content: string; whenBusy: BusyMode }
   | { type: "prompt.abort"; requestId: string }
+  | { type: "prompt.receipts"; source: ReceiptSource; receipts: DeliveryReceipt[] }
   | { type: "model.select"; requestId: string; model: ModelRef }
   | { type: "widget.keep"; requestId: string; origin: string }
   | { type: "widget.drop"; requestId: string; origin: string }
@@ -23,7 +27,7 @@ export type ClientMessage =
   | { type: "voice.mute"; requestId: string; muted: boolean }
   | { type: "voice.stop"; requestId: string };
 
-export type ViewFrame = Omit<ConversationView, "entries"> & { order?: string[]; reset?: boolean; entries: ConversationView["entries"] };
+export type ViewFrame = Omit<ConversationView, "entries"> & { order?: string[]; reset?: boolean; deliveryReceipts?: boolean; entries: ConversationView["entries"] };
 
 export type ServerMessage =
   | { type: "state"; view: ViewFrame; progress: SessionProgress; mcp: McpStatus[]; panel: PanelState; assets: AssetItem[] }
