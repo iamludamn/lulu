@@ -1,3 +1,4 @@
+import type { TelemetryContext } from "@earendil-works/pi-telemetry";
 import type { MemoryResource } from "./doc.js";
 import type { DurableHost } from "../host/types.js";
 
@@ -5,8 +6,9 @@ type Stub = Pick<DurableHost, "objects">;
 
 const memory = (host: Stub, botId: string) => host.objects.MEMORY.getByName(botId);
 
-export async function memoryCatalog(host: Stub, botId: string): Promise<MemoryResource[]> {
-  const response = await memory(host, botId).fetch("https://memory/catalog");
+export async function memoryCatalog(host: Stub, botId: string, telemetry: TelemetryContext): Promise<MemoryResource[]> {
+  const traceparent = telemetry.propagation?.inject(telemetry)?.traceparent;
+  const response = await memory(host, botId).fetch("https://memory/catalog", traceparent === undefined ? undefined : { headers: { traceparent } });
   if (!response.ok) throw new Error("Memory catalog unavailable");
   return response.json() as Promise<MemoryResource[]>;
 }

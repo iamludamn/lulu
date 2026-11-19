@@ -9,7 +9,7 @@ import { entryRange, HISTORY_PAGE_SIZE, observeView } from "./view.js";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { type Conversation, type ConversationView, type EntryId, CompactionEntry, Harness, type Registry, type Storage } from "@earendil-works/pi-durable";
-import type { TelemetrySpan } from "@earendil-works/pi-telemetry";
+import type { TelemetryContext, TelemetrySpan } from "@earendil-works/pi-telemetry";
 import type { McpHost, McpServerConfig } from "../agent/mcp.js";
 import { handleMcpRegistry } from "../agent/mcp-registry.js";
 import { mcpStore } from "../agent/mcp-store.js";
@@ -184,6 +184,7 @@ export class BotSession {
     });
     trackProgress(
       harness,
+      root.id,
       {
         pending: () => {
           this.#awaiting = true;
@@ -322,7 +323,7 @@ export class BotSession {
         { name: `bot.command ${frame.type}`, attributes: { "lulu.bot.id": this.#host.name, "lulu.command": frame.type } },
         (span) => {
           if (frame.type === "prompt.submit") span.setAttributes({ "lulu.prompt.chars": frame.content.length, "lulu.prompt.when_busy": frame.whenBusy });
-          return this.#handle(socket, frame);
+          return this.#handle(socket, frame, span);
         },
       );
     } catch (error) {
@@ -365,7 +366,7 @@ export class BotSession {
     for (const [requestId, maker] of this.#makers) if (maker.socket === socket) this.#makers.delete(requestId);
   }
 
-  async #handle(socket: Socket, command: Command): Promise<void> {
+  async #handle(socket: Socket, command: Command, telemetry: TelemetryContext = this.#host.telemetry): Promise<void> {
     switch (command.type) {
       case "asr.start":
         await this.#asr.start(socket, command.requestId);
@@ -399,8 +400,13 @@ export class BotSession {
         this.#acknowledge(socket, command.requestId);
         return;
       }
-      case "prompt.submit":
-        return this.#inPromptOrder(() => this.#submitPrompt(socket, command));
+      case "prompt.submit": {
+        const queuedAt = Date.now();
+        return telemetry.startSpan({ name: "prompt.admission", attributes: {
+          "lulu.bot.id": this.#host.name, "lulu.agent": "chat", "lulu.conversation.id": String(this.#root.id), "lulu.conversation.kind": "root",
+          "lulu.memory.request_id": command.requestId,
+        } }, (span) => this.#inPromptOrder(() => this.#submitPrompt(socket, command, span, queuedAt)));
+      }
       case "prompt.abort":
         if (this.#resumeAfterMcp) await this.#mcpReady;
         await this.#root.abort(BACKGROUND_CONTEXT);
@@ -442,10 +448,13 @@ export class BotSession {
     }
   }
 
-  async #submitPrompt(socket: Socket, command: Extract<Command, { type: "prompt.submit" }>): Promise<void> {
-    const injection = await prepareInjection(this.#host, this.#harness, command.requestId, command.content, this.#view.value, chatModelRef(this.#host.env, this.#selected));
+  async #submitPrompt(socket: Socket, command: Extract<Command, { type: "prompt.submit" }>, span: TelemetrySpan, queuedAt: number): Promise<void> {
+    span.setAttributes({ "lulu.prompt.queue_ms": Date.now() - queuedAt });
+    const injection = await prepareInjection(this.#host, this.#harness, command.requestId, command.content, this.#view.value, chatModelRef(this.#host.env, this.#selected), span);
+    span.setAttributes({ "lulu.prompt.memory_ready_ms": Date.now() - queuedAt });
     if (this.#resumeAfterMcp) await this.#mcpReady;
-    await admitPrompt(this.#harness, this.#root, this.#view.value, command, injection);
+    const firstBinding = await admitPrompt(this.#harness, this.#root, this.#view.value, command, injection);
+    span.setAttributes({ "lulu.prompt.admission_ms": Date.now() - queuedAt, "lulu.prompt.replay": !firstBinding, "lulu.memory.outcome": injection.outcome, "lulu.memory.selected": injection.selected.length });
     void this.#refreshAlarm().catch((error: unknown) => reportError("Prompt alarm reconciliation failed", error));
     this.#broadcastState();
     this.#acknowledge(socket, command.requestId);

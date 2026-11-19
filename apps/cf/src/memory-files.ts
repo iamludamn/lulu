@@ -1,6 +1,7 @@
 import { Workspace } from "@cloudflare/computer";
 import { createGitClient } from "@cloudflare/computer/git";
-import type { MemoryCommit, MemoryFiles } from "@lulu/core/memory/files.js";
+import type { MemoryCommit, MemoryFiles, PublishedMemory } from "@lulu/core/memory/files.js";
+import { memoryResources } from "@lulu/core/memory/resources.js";
 
 const DIR = "/memory";
 const GIT = `${DIR}/.git`;
@@ -18,9 +19,29 @@ const orUndefined = <T>(error: unknown): T | undefined => {
 };
 
 export function createMemoryFiles(storage: DurableObjectStorage): MemoryFiles {
-  const { fs, git } = new Workspace({ storage, git: createGitClient(), defaultGitIdentity: IDENTITY });
+  let catalogReads: { rows: number } | undefined;
+  const { fs, git } = new Workspace({
+    storage: {
+      sql: {
+        exec(query, ...bindings) {
+          const cursor = storage.sql.exec(query, ...bindings);
+          const reads = catalogReads;
+          if (reads === undefined) return cursor;
+          return { toArray() {
+            const rows = cursor.toArray();
+            reads.rows += cursor.rowsRead;
+            return rows;
+          } };
+        },
+      },
+      transactionSync: (task) => storage.transactionSync(task),
+    },
+    git: createGitClient(),
+    defaultGitIdentity: IDENTITY,
+  });
   let chain: Promise<unknown> = Promise.resolve();
   let ready: Promise<void> | undefined;
+  let catalog: { version: string; resources: ReturnType<typeof memoryResources> } | undefined;
 
   const init = async (): Promise<void> => {
     if ((await fs.stat(`${GIT}/HEAD`).catch(orUndefined)) !== undefined) return;
@@ -72,18 +93,32 @@ export function createMemoryFiles(storage: DurableObjectStorage): MemoryFiles {
     return out;
   };
 
+  const published = async (oid: string | undefined): Promise<PublishedMemory> => {
+    const paths = await tracked(oid);
+    const files: Record<string, string> = {};
+    for (const path of paths) {
+      const text = await committed(oid, path);
+      if (text === undefined) throw new Error("Committed memory file is unavailable");
+      files[path] = text;
+    }
+    return { version: oid ?? "empty", files };
+  };
+
   return {
-    published: () => serial(async () => {
-      const version = await head();
-      if (version === undefined) return { version: "empty", files: {} };
-      const paths = await tracked(version);
-      const files: Record<string, string> = {};
-      for (const path of paths) {
-        const text = await committed(version, path);
-        if (text === undefined) throw new Error("Committed memory file is unavailable");
-        files[path] = text;
+    published: () => serial(async () => published(await head())),
+    publishedCatalog: () => serial(async () => {
+      const reads = { rows: 0 };
+      catalogReads = reads;
+      try {
+        const oid = await head();
+        if (catalog?.version === (oid ?? "empty")) return { resources: catalog.resources, cacheHit: true, fileReads: 0, sqlRowsRead: reads.rows };
+        const snapshot = await published(oid);
+        const resources = memoryResources(snapshot);
+        catalog = { version: snapshot.version, resources };
+        return { resources, cacheHit: false, fileReads: Object.keys(snapshot.files).length, sqlRowsRead: reads.rows };
+      } finally {
+        catalogReads = undefined;
       }
-      return { version, files };
     }),
     readVersion: (path, version) => serial(() => {
       if (!/^[a-f0-9]{40}$/.test(version)) return Promise.resolve(undefined);
