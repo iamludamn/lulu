@@ -63,8 +63,6 @@ export interface DurableHost {
   readonly env: Environment;
   readonly decisionModel?: DecisionModel;
   readonly telemetry: TelemetryContext;
-  readMcpAuth(): Promise<string | undefined>;
-  writeMcpAuth(content: string): Promise<void>;
   readonly name: string;
   readonly id: string;
   readonly storage: DurableStorage;
@@ -80,5 +78,3 @@ export interface DurableHost {
   connect(url: string, headers: Record<string, string>, handlers: UpstreamHandlers): Promise<{ status: number; socket: Socket | undefined }>;
   abort(reason: string): void;
 }
-
-export type McpHostServices = Pick<DurableHost, "env" | "readMcpAuth" | "writeMcpAuth" | "telemetry">;
