@@ -2,41 +2,67 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var loading: Bool {
+        if let connection = model.connection {
+            let snapshot = connection.store.snapshot
+            return snapshot.view == nil && snapshot.link == .connecting && snapshot.halt == nil
+        }
+        return model.api != nil
+    }
 
     var body: some View {
-        Group {
-            if let api = model.api {
-                if let bot = model.bot {
-                    NavigationStack {
-                        HomeView(bot: bot, api: api, token: model.chatToken(for: api.base))
-                            .toolbarVisibility(.hidden, for: .navigationBar)
-                    }
-                    .id(model.connectionRevision)
-                } else if let error = model.error {
-                    ContentUnavailableView {
-                        Label("连接失败", systemImage: "wifi.exclamationmark")
-                    } description: {
-                        Text(error)
-                    } actions: {
-                        Button("重试") { Task { await model.resolve() } }
-                        NavigationLink("修改服务器") { SettingsView() }
-                    }
-                    .navigationStackWrapped()
-                } else {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background { Wallpaper() }
+        let loading = self.loading
+        ZStack {
+            if let connection = model.connection {
+                NavigationStack {
+                    HomeView(bot: connection.bot, api: connection.api, store: connection.store)
+                        .toolbarVisibility(.hidden, for: .navigationBar)
                 }
-            } else {
+                .id(model.connectionRevision)
+                .allowsHitTesting(!loading)
+                .accessibilityHidden(loading)
+            } else if model.api == nil {
                 NavigationStack { SettingsView() }
             }
+            if loading {
+                LoadingScreen()
+                    .transition(.opacity)
+                    .zIndex(1)
+            }
         }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: loading)
         .task(id: model.connectionRevision) { await model.resolve() }
     }
 }
 
-private extension View {
-    func navigationStackWrapped() -> some View {
-        NavigationStack { self }
+private struct LoadingScreen: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var breathing = false
+
+    var body: some View {
+        ZStack {
+            Wallpaper()
+            ZStack {
+                ForEach(0..<5) { index in
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(.white.opacity(0.9 - Double(index) * 0.13), lineWidth: 2)
+                        .frame(width: 66 + CGFloat(index) * 13, height: 66 + CGFloat(index) * 13)
+                        .rotationEffect(.degrees(Double(index) * 12))
+                }
+                Circle().fill(.white.opacity(0.8)).frame(width: 40, height: 40)
+            }
+            .scaleEffect(breathing && !reduceMotion ? 1.06 : (reduceMotion ? 1 : 0.94))
+            .opacity(breathing || reduceMotion ? 1 : 0.7)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .ignoresSafeArea()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("正在加载 lulu")
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { breathing = true }
+        }
     }
 }

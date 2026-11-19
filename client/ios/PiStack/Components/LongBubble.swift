@@ -1,7 +1,9 @@
 import SwiftUI
 
 func readingLength(_ text: String) -> Int {
-    let count = text.filter { !$0.isWhitespace }.count
+    let count = text.reduce(into: 0) { count, character in
+        if !character.isWhitespace { count += 1 }
+    }
     let step = count < 1000 ? 10 : 100
     return max(step, (count + step / 2) / step * step)
 }
@@ -109,11 +111,21 @@ struct LongReader: View {
     let origin: CGRect
     let canvas: CGSize
     let onClose: () -> Void
+    private let length: Int
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expanded = false
     @State private var revealed = false
     @State private var closing = false
     @State private var drag: CGFloat = 0
+
+    init(summary: String, text: String, origin: CGRect, canvas: CGSize, onClose: @escaping () -> Void) {
+        self.summary = summary
+        self.text = text
+        self.origin = origin
+        self.canvas = canvas
+        self.onClose = onClose
+        length = readingLength(text)
+    }
 
     private var target: CGRect {
         let width = min(720, canvas.width - 20)
@@ -146,8 +158,8 @@ struct LongReader: View {
                 .position(x: frame.midX, y: frame.midY + drag)
                 .opacity(reduceMotion && !expanded ? 0 : 1)
             VStack(alignment: .leading, spacing: 8) {
-                MarkdownText(text: summary, airy: true)
-                LongHint(length: readingLength(text))
+                MarkdownText(text: summary, airy: true).equatable()
+                LongHint(length: length)
             }
             .lineSpacing(3)
             .padding(.horizontal, 15)
@@ -186,7 +198,7 @@ struct LongReader: View {
             VStack(spacing: 8) {
                 Capsule().fill(Color.secondary.opacity(0.45)).frame(width: 36, height: 5)
                 HStack {
-                    Text(verbatim: "全文 · 约 \(readingLength(text)) 字")
+                    Text(verbatim: "全文 · 约 \(length) 字")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -209,6 +221,7 @@ struct LongReader: View {
             )
             ScrollView {
                 MarkdownText(text: text, selectable: true, document: true)
+                    .equatable()
                     .lineSpacing(5)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)

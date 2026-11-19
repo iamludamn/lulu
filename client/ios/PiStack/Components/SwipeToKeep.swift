@@ -18,19 +18,22 @@ struct SwipeToKeep<Content: View>: View {
     let destination: Page
     let onLand: () -> Void
     let onKeep: () -> Void
+    var holdRow: (Bool) -> Void = { _ in }
+    var sending = false
+    var confirmed = false
     var retainsCard = false
     var enabled = true
     @ViewBuilder let content: (_ send: @escaping () -> Void) -> Content
     @Environment(\.keepTargets) private var targets
     @Environment(\.keepPull) private var pull
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var drag: CGFloat = 0
     @State private var center: CGPoint = .zero
     @State private var flight: CGSize = .zero
     @State private var phase = Phase.resting
-    @State private var measured: CGFloat = 0
-    @State private var height: CGFloat?
+    @State private var animationID: UUID?
 
-    private enum Phase { case resting, flying, fading, gone }
+    private enum Phase { case resting, flying, fading, waiting, collapsing }
 
     private var direction: CGFloat { destination == .panel ? -1 : 1 }
     private var progress: CGFloat { min(abs(drag) / swipeThreshold, 1) }
@@ -38,82 +41,128 @@ struct SwipeToKeep<Content: View>: View {
 
     private var scale: CGFloat {
         switch phase {
-        case .resting: 1 - 0.04 * progress
+        case .resting: reduceMotion ? 1 : 1 - 0.04 * progress
         case .flying: 0.1
-        case .fading: 0.86
-        case .gone: 0.1
+        case .fading: reduceMotion ? 1 : 0.86
+        case .waiting, .collapsing: 1
         }
     }
 
     var body: some View {
         content(sendInPlace)
-            .rotationEffect(.degrees(Double(drag) / 36))
+            .rotationEffect(.degrees(reduceMotion ? 0 : Double(drag) / 36))
             .scaleEffect(scale)
             .opacity(phase == .resting ? 1 : 0)
             .offset(x: drag + flight.width, y: flight.height)
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { measured = $0 }
-            .frame(height: height, alignment: .top)
+            .allowsHitTesting(phase == .resting)
+            .accessibilityHidden(phase != .resting)
+            .overlay {
+                if (phase == .waiting || phase == .resting) && sending && !confirmed {
+                    HStack(spacing: 5) {
+                        ProgressView().controlSize(.mini)
+                        Text("正在收藏…")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(8)
+                    .background(.regularMaterial, in: .capsule)
+                    .allowsHitTesting(false)
+                }
+            }
             .zIndex(phase == .resting && drag == 0 ? 0 : 1)
             .onGeometryChange(for: CGPoint.self) { proxy in
                 let frame = proxy.frame(in: .global)
                 return CGPoint(x: frame.midX, y: frame.midY)
             } action: { center = $0 }
             .gesture(KeepPan(direction: direction, enabled: enabled && phase == .resting, changed: change, ended: end, cancelled: reset))
+            .onChange(of: phase) { settle() }
+            .onChange(of: sending) { settle() }
+            .onChange(of: confirmed) { settle() }
+            .onChange(of: enabled) {
+                if !enabled && phase == .resting && drag != 0 { reset() }
+            }
+            .onDisappear {
+                if phase == .resting && drag != 0 { pull(destination, 0) }
+                if phase != .resting && phase != .collapsing { holdRow(false) }
+                animationID = nil
+                phase = .resting
+                drag = 0
+                flight = .zero
+            }
             .sensoryFeedback(.impact(weight: .medium), trigger: armed) { _, now in now }
     }
 
     private func change(_ x: CGFloat) {
+        guard enabled, phase == .resting else { return }
         drag = swipeOffset(x, direction: direction)
-        pull(destination, progress)
+        if !reduceMotion { pull(destination, progress) }
     }
 
     private func reset() {
+        guard phase == .resting else { return }
         pull(destination, 0)
-        withAnimation(.spring(duration: 0.35, bounce: 0.3)) { drag = 0 }
+        withAnimation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.3)) { drag = 0 }
     }
 
-    private func end(_ velocity: CGFloat) {
+    private func end(_ translation: CGFloat, velocity: CGFloat) {
+        guard enabled, phase == .resting else { return }
+        drag = swipeOffset(translation, direction: direction)
         guard armed || velocity * direction > 900 else {
-            pull(destination, 0)
-            withAnimation(.spring(duration: 0.35, bounce: 0.3)) { drag = 0 }
+            reset()
             return
         }
+        submit(fromSwipe: true)
+    }
+
+    private func sendInPlace() {
+        submit(fromSwipe: false)
+    }
+
+    private func submit(fromSwipe: Bool) {
+        guard enabled, phase == .resting, animationID == nil else { return }
         if retainsCard {
             reset()
             onKeep()
             return
         }
+
+        let flies = fromSwipe && !reduceMotion
         let target = targets[destination] ?? CGPoint(x: center.x + direction * 200, y: 0)
-        withAnimation(.easeIn(duration: 0.34)) {
-            flight = CGSize(width: target.x - center.x - drag, height: target.y - center.y)
-            phase = .flying
-        }
-        Task {
-            try? await Task.sleep(for: .milliseconds(340))
-            pull(destination, 0)
-            phase = .gone
-            await settle()
-        }
-    }
-
-    private func sendInPlace() {
-        guard phase == .resting else { return }
-        if retainsCard { onKeep(); return }
-        withAnimation(.easeOut(duration: 0.28)) { phase = .fading }
-        Task {
-            try? await Task.sleep(for: .milliseconds(280))
-            await settle()
-        }
-    }
-
-    private func settle() async {
-        onLand()
-        try? await Task.sleep(for: .milliseconds(200))
-        height = measured
-        try? await Task.sleep(for: .milliseconds(16))
-        withAnimation(.spring(duration: 0.55, bounce: 0.28)) { height = 0 }
-        try? await Task.sleep(for: .milliseconds(520))
+        let next: Phase = flies ? .flying : .fading
+        let animation: Animation = flies ? .easeIn(duration: 0.34) : .easeOut(duration: reduceMotion ? 0.15 : 0.28)
+        let id = UUID()
+        animationID = id
+        pull(destination, 0)
+        holdRow(true)
         onKeep()
+        withAnimation(animation, completionCriteria: .logicallyComplete) {
+            if flies {
+                flight = CGSize(width: target.x - center.x - drag, height: target.y - center.y)
+            }
+            phase = next
+        } completion: {
+            guard animationID == id else { return }
+            animationID = nil
+            drag = 0
+            flight = .zero
+            phase = .waiting
+        }
+    }
+
+    private func settle() {
+        if phase == .collapsing && !confirmed {
+            phase = .resting
+            return
+        }
+        guard phase == .waiting else { return }
+        if confirmed {
+            onLand()
+            phase = .collapsing
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { holdRow(false) }
+        } else if !sending {
+            withAnimation(.easeOut(duration: 0.18)) { phase = .resting }
+            holdRow(false)
+        }
     }
 }
 
@@ -121,7 +170,7 @@ private struct KeepPan: UIGestureRecognizerRepresentable {
     let direction: CGFloat
     let enabled: Bool
     let changed: (CGFloat) -> Void
-    let ended: (CGFloat) -> Void
+    let ended: (CGFloat, CGFloat) -> Void
     let cancelled: () -> Void
 
     func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
@@ -141,8 +190,8 @@ private struct KeepPan: UIGestureRecognizerRepresentable {
 
     func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
         switch recognizer.state {
-        case .changed: changed(recognizer.translation(in: recognizer.view).x)
-        case .ended: ended(recognizer.velocity(in: recognizer.view).x)
+        case .changed: changed(recognizer.translation(in: nil).x)
+        case .ended: ended(recognizer.translation(in: nil).x, recognizer.velocity(in: nil).x)
         case .cancelled, .failed: cancelled()
         default: break
         }

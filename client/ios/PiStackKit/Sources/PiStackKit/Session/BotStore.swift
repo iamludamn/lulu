@@ -4,10 +4,10 @@ import Observation
 @MainActor @Observable
 public final class BotStore {
     public enum Link: Sendable { case connecting, online, offline }
-    public enum Halt: Sendable { case notFound }
+    public enum Halt: Equatable, Sendable { case notFound }
 
     public struct Request: Identifiable, Sendable {
-        public enum State: Sendable { case sending, failed }
+        public enum State: Sendable { case sending, acknowledged, failed }
 
         public let command: Command
         public var state: State
@@ -31,14 +31,33 @@ public final class BotStore {
     }
 
     public private(set) var snapshot = Snapshot()
+    @ObservationIgnored private var cachedTranscriptEntries: [ChatEntry]?
+
+    public var transcriptEntries: [ChatEntry] {
+        let view = snapshot.view
+        let hidden = snapshot.progress?.hiddenEntries ?? []
+        if let cachedTranscriptEntries { return cachedTranscriptEntries }
+        let entries = chatEntries(view, hidden: hidden)
+        cachedTranscriptEntries = entries
+        return entries
+    }
     public var onVoiceEvent: ((JSONValue) -> Void)?
     public var onVoiceError: ((String) -> Void)?
     public var onASREvent: ((JSONValue) -> Void)?
     public var onASRError: ((String) -> Void)?
     private var asrRequestId: String?
     private var voiceRequestId: String?
-    public private(set) var loadingHistory = false
-    private var historyRequest: String?
+    public enum HistoryLoad: Equatable, Sendable {
+        case idle
+        case loading
+        case failed(String)
+    }
+
+    public private(set) var historyLoad: HistoryLoad = .idle
+    private var historyRequest: (id: String, upperBound: Int)?
+    private var historyTimer: Task<Void, Never>?
+    private var submitTimers: [String: Task<Void, Never>] = [:]
+    private var keepTimers: [String: Task<Void, Never>] = [:]
 
     private let socketURL: URL
     private let token: String
@@ -46,6 +65,7 @@ public final class BotStore {
     private let stateTimeout: Duration
     private let retryTimeout: Duration
     private var stateTimer: Task<Void, Never>?
+    @ObservationIgnored private var restoration: Task<Void, Never>?
     private var saving: Task<Void, Never>?
     private var latestState: Data?
     private var task: URLSessionWebSocketTask?
@@ -66,10 +86,9 @@ public final class BotStore {
     }
 
     public func start() {
-        guard !running else { return }
+        guard !running, snapshot.halt == nil else { return }
         running = true
-        snapshot.link = .connecting
-        snapshot.halt = nil
+        if snapshot.view != nil { snapshot.link = .offline }
         restore()
         connect()
     }
@@ -77,7 +96,10 @@ public final class BotStore {
     public func stop() {
         onVoiceError?("连接已关闭，语音通话已结束")
         onASRError?("连接已关闭，语音识别已取消")
+        failPendingKeeps("连接已关闭，请重试")
         running = false
+        restoration?.cancel()
+        restoration = nil
         timer?.cancel()
         timer = nil
         stateTimer?.cancel()
@@ -85,13 +107,28 @@ public final class BotStore {
         let current = task
         task = nil
         current?.cancel(with: .goingAway, reason: nil)
+        cancelSubmitTimers()
+        if snapshot.halt == nil { snapshot.link = .offline }
+        if historyRequest != nil { finishHistory("连接已中断") }
     }
 
     public func loadEarlier() {
-        guard !loadingHistory, snapshot.link == .online, let view = snapshot.view, view.before != nil, let first = view.entries.first, let before = Int(first.id) else { return }
+        guard historyRequest == nil, snapshot.halt == nil, let view = snapshot.view, view.before != nil,
+              let first = view.entries.first, let before = Int(first.id), before > 0 else { return }
+        guard snapshot.link == .online, let task else {
+            historyLoad = .failed("连接恢复后可重试")
+            return
+        }
         let requestId = newId()
-        historyRequest = requestId
-        loadingHistory = true
+        historyRequest = (requestId, before)
+        historyLoad = .loading
+        historyTimer = Task { [weak self] in
+            guard let self else { return }
+            do { try await Task.sleep(for: self.stateTimeout) } catch { return }
+            guard self.task === task, self.historyRequest?.id == requestId else { return }
+            self.finishHistory("加载超时")
+            self.closed(task)
+        }
         transmit(["type": "history.load", "requestId": requestId, "before": before])
     }
 
@@ -130,12 +167,14 @@ public final class BotStore {
     public func abort() { dispatch(Command(.abort)) }
     public func selectModel(_ model: ModelRef) { dispatch(Command(.selectModel(model))) }
     public func keep(_ origin: String) {
-        let matching = snapshot.requests.filter { request in
+        if let request = snapshot.requests.last(where: { request in
             if case .keep(let value) = request.command.kind { return value == origin }
             return false
+        }) {
+            guard request.state == .failed else { return }
+            retry(request.id)
+            return
         }
-        guard !matching.contains(where: { $0.state == .sending }) else { return }
-        snapshot.requests.removeAll { request in matching.contains { $0.id == request.id } }
         dispatch(Command(.keep(origin: origin)))
     }
     public func drop(_ origin: String) { dispatch(Command(.drop(origin: origin))) }
@@ -161,50 +200,59 @@ public final class BotStore {
     }
 
     public func retry(_ requestId: String) {
-        guard let request = snapshot.requests.first(where: { $0.id == requestId }) else { return }
-        dispatch(request.command)
+        guard snapshot.halt == nil, let index = snapshot.requests.firstIndex(where: { $0.id == requestId && $0.state == .failed }) else { return }
+        snapshot.requests[index].state = .sending
+        snapshot.requests[index].error = nil
+        send(snapshot.requests[index].command)
     }
 
     public func dismiss(_ requestId: String) {
+        submitTimers.removeValue(forKey: requestId)?.cancel()
+        keepTimers.removeValue(forKey: requestId)?.cancel()
         snapshot.requests.removeAll { $0.id == requestId }
     }
 
     private func restore() {
         guard snapshot.view == nil else { return }
         let url = cacheURL
-        Task {
-            let (cached, state) = await Task.detached {
-                (Cache.load(url)?.offline, try? Data(contentsOf: url.appendingPathExtension("state")))
+        restoration = Task { [weak self] in
+            let restored = await Task.detached(priority: .userInitiated) { () -> (Cache, (PanelState, [AssetItem])?)? in
+                guard let cache = Cache.load(url)?.offline else { return nil }
+                if let data = cache.state ?? (try? Data(contentsOf: url.appendingPathExtension("state"))),
+                   let surfaces = try? JSONDecoder().decode(Cache.Surfaces.self, from: data) {
+                    return (cache, (surfaces.panel ?? PanelState(), surfaces.assets ?? []))
+                }
+                return (cache, nil)
             }.value
-            guard snapshot.view == nil, let cached else { return }
-            snapshot.view = cached.view
-            snapshot.progress = cached.progress
-            if !snapshot.hasReceivedState, let state, case .state(_, _, _, let panel, let assets) = try? JSONDecoder().decode(ServerMessage.self, from: state) {
-                snapshot.panel = panel
-                snapshot.assets = assets
+            guard !Task.isCancelled, let self else { return }
+            self.restoration = nil
+            guard self.snapshot.halt == nil, self.snapshot.view == nil, let (cache, state) = restored else { return }
+            self.cachedTranscriptEntries = nil
+            self.snapshot.view = cache.view
+            self.snapshot.progress = cache.progress
+            if !self.snapshot.hasReceivedState, let (panel, assets) = state {
+                self.snapshot.panel = panel
+                self.snapshot.assets = assets
             }
         }
     }
 
     private func persist() {
         guard let view = snapshot.view, let progress = snapshot.progress else { return }
-        let cache = Cache(view: view, progress: progress)
+        let cache = Cache(view: view, progress: progress, state: latestState)
         let url = cacheURL
-        let state = latestState
-        saving?.cancel()
+        let previous = saving
+        previous?.cancel()
         saving = Task {
             try? await Task.sleep(for: .seconds(1.5))
+            await previous?.value
             guard !Task.isCancelled else { return }
-            await Task.detached {
-                cache.write(to: url)
-                if let state { try? state.write(to: url.appendingPathExtension("state"), options: .atomic) }
-            }.value
+            await Task.detached { cache.write(to: url) }.value
         }
     }
 
     private func connect() {
-        loadingHistory = false
-        historyRequest = nil
+        guard running, snapshot.halt == nil else { return }
         var request = URLRequest(url: socketURL)
         if socketURL.scheme == "wss", !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -222,10 +270,8 @@ public final class BotStore {
             do { try await Task.sleep(for: self.retryTimeout) } catch { return }
             guard self.task === task else { return }
             self.closed(task)
-            task.cancel(with: .goingAway, reason: nil)
         }
         transmit(["type": "hello", "incremental": true])
-        for request in snapshot.requests where request.state == .sending { transmit(request.command.frame) }
         Task { await listen(task) }
     }
 
@@ -234,16 +280,19 @@ public final class BotStore {
             do {
                 let message = try await task.receive()
                 guard self.task === task else { return }
-                let data: Data
-                switch message {
-                case .string(let text): data = Data(text.utf8)
-                case .data(let bytes): data = bytes
-                @unknown default: continue
-                }
-                let decoded = await Task.detached { try? JSONDecoder().decode(ServerMessage.self, from: data) }.value
+                let (decoded, state) = await Task.detached { () -> (ServerMessage?, Data?) in
+                    let data: Data
+                    switch message {
+                    case .string(let text): data = Data(text.utf8)
+                    case .data(let bytes): data = bytes
+                    @unknown default: return (nil, nil)
+                    }
+                    let decoded = try? JSONDecoder().decode(ServerMessage.self, from: data)
+                    if case .state = decoded { return (decoded, data) }
+                    return (decoded, nil)
+                }.value
                 guard self.task === task, let decoded else { continue }
-                if case .state = decoded { latestState = data }
-                receive(decoded)
+                receive(decoded, data: state)
             } catch {
                 closed(task)
                 return
@@ -256,46 +305,77 @@ public final class BotStore {
         self.task = nil
         stateTimer?.cancel()
         stateTimer = nil
+        let notFound = task.closeCode.rawValue == 4404
+        if notFound {
+            snapshot.halt = .notFound
+            restoration?.cancel()
+            restoration = nil
+        }
         snapshot.link = .offline
+        failPendingKeeps("连接已断开，请重试")
+        if historyRequest != nil { finishHistory("连接已中断") }
+        cancelSubmitTimers()
+        task.cancel(with: .goingAway, reason: nil)
         onASRError?("连接已断开，语音识别已取消")
         if onVoiceEvent != nil { onVoiceError?("连接已断开，语音通话已结束") }
-        switch task.closeCode.rawValue {
-        case 4404: snapshot.halt = .notFound
-        default:
-            guard running else { return }
-            let delay = min(15.0, 0.5 * pow(2, Double(attempts)))
-            attempts += 1
-            timer = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(delay))
-                guard !Task.isCancelled else { return }
-                self?.connect()
-            }
+        guard running, !notFound else { return }
+        let delay = min(15.0, 0.5 * pow(2, Double(attempts)))
+        attempts += 1
+        timer = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled else { return }
+            self?.connect()
         }
     }
 
-    private func receive(_ message: ServerMessage) {
-        attempts = 0
-        if snapshot.hasReceivedState && snapshot.link != .online { snapshot.link = .online }
+    private func receive(_ message: ServerMessage, data: Data?) {
         switch message {
         case .state(let view, let progress, let mcp, let panel, let assets):
             guard let applied = view.applied(to: snapshot.view) else { return }
+            if view.reset == true || view.conversation != snapshot.view?.conversation ||
+                !view.entries.isEmpty || view.order != nil ||
+                progress.hiddenEntries != (snapshot.progress?.hiddenEntries ?? []) {
+                cachedTranscriptEntries = nil
+            }
+            let connected = snapshot.link != .online
+            attempts = 0
             stateTimer?.cancel()
             stateTimer = nil
-            if snapshot.link != .online { snapshot.link = .online }
+            latestState = data
+            if connected { snapshot.link = .online }
             snapshot.view = applied
             snapshot.progress = progress
             snapshot.mcp = mcp
             snapshot.panel = panel
             snapshot.assets = assets
             snapshot.hasReceivedState = true
+            if !snapshot.requests.isEmpty {
+                let submitted = Set(progress.messages.compactMap(\.requestId))
+                for id in submitted { submitTimers.removeValue(forKey: id)?.cancel() }
+                snapshot.requests.removeAll {
+                    if case .submit = $0.command.kind { return submitted.contains($0.id) }
+                    return false
+                }
+            }
+            if connected {
+                for request in snapshot.requests where request.state == .sending { send(request.command) }
+            }
             persist()
         case .history(let entries, let before):
-            loadingHistory = false
-            historyRequest = nil
-            guard let view = snapshot.view else { return }
-            var known = Dictionary(uniqueKeysWithValues: view.entries.map { ($0.id, $0) })
-            for entry in entries { known[entry.id] = entry }
-            snapshot.view = ConversationView(entries: known.values.sorted { (Int($0.id) ?? 0) < (Int($1.id) ?? 0) }, docs: view.docs, before: before)
+            guard let historyRequest, let view = snapshot.view else { return }
+            let upperBound = historyRequest.upperBound
+            let ids = entries.compactMap { Int($0.id) }
+            let joinsWindow = view.before == upperBound || entries.last?.id == view.before.map(String.init)
+            guard view.entries.first?.id == String(upperBound), ids.count == entries.count,
+                  zip(ids, ids.dropFirst()).allSatisfy({ $0 < $1 }),
+                  ids.last.map({ $0 < upperBound && joinsWindow }) ?? (before == nil) else {
+                finishHistory("历史消息已更新，请重试")
+                return
+            }
+            cachedTranscriptEntries = nil
+            snapshot.view = ConversationView(entries: entries + view.entries, docs: view.docs,
+                                             before: before, conversation: view.conversation)
+            finishHistory(nil)
             persist()
         case .models(let config): snapshot.models = config
         case .voice(let event):
@@ -313,25 +393,93 @@ public final class BotStore {
                 if let error { onVoiceError?(error) }
                 return
             }
-            if requestId == historyRequest { loadingHistory = false; historyRequest = nil }
+            if requestId == historyRequest?.id {
+                finishHistory(error ?? "服务器未返回历史消息")
+                return
+            }
+            submitTimers.removeValue(forKey: requestId)?.cancel()
+            keepTimers.removeValue(forKey: requestId)?.cancel()
             guard let index = snapshot.requests.firstIndex(where: { $0.id == requestId }) else { return }
             if let error {
                 snapshot.requests[index].state = .failed
                 snapshot.requests[index].error = error
+            } else if case .submit = snapshot.requests[index].command.kind {
+                snapshot.requests[index].state = .acknowledged
             } else {
                 snapshot.requests.remove(at: index)
             }
         }
     }
 
+    private func finishHistory(_ error: String?) {
+        historyTimer?.cancel()
+        historyTimer = nil
+        historyRequest = nil
+        historyLoad = error.map(HistoryLoad.failed) ?? .idle
+    }
+
     private func dispatch(_ command: Command) {
+        guard snapshot.halt == nil else { return }
         snapshot.requests.removeAll { $0.id == command.requestId }
         snapshot.requests.append(Request(command: command, state: .sending, at: .now))
+        send(command)
+    }
+
+    private func send(_ command: Command) {
+        let id = command.requestId
+        guard snapshot.link == .online, task != nil else {
+            if case .keep = command.kind { failRequest(id, "当前未连接，请重试") }
+            return
+        }
+        switch command.kind {
+        case .submit:
+            submitTimers.removeValue(forKey: id)?.cancel()
+            submitTimers[id] = Task { [weak self, retryTimeout] in
+                do { try await Task.sleep(for: retryTimeout * 2) } catch { return }
+                self?.submitTimers[id] = nil
+                self?.failRequest(id, nil)
+            }
+        case .keep:
+            guard keepTimers[id] == nil else { return }
+            keepTimers[id] = Task { [weak self, retryTimeout] in
+                do { try await Task.sleep(for: retryTimeout) } catch { return }
+                self?.keepTimers[id] = nil
+                self?.failRequest(id, "收藏确认超时，请重试")
+            }
+        default:
+            break
+        }
         transmit(command.frame)
+    }
+
+    private func cancelSubmitTimers() {
+        for timer in submitTimers.values { timer.cancel() }
+        submitTimers.removeAll()
+    }
+
+    private func failRequest(_ id: String, _ message: String?) {
+        guard let index = snapshot.requests.firstIndex(where: {
+            $0.id == id && $0.state == .sending
+        }) else { return }
+        snapshot.requests[index].state = .failed
+        snapshot.requests[index].error = message
+    }
+
+    private func failPendingKeeps(_ message: String) {
+        for timer in keepTimers.values { timer.cancel() }
+        keepTimers.removeAll()
+        for index in snapshot.requests.indices where snapshot.requests[index].state == .sending {
+            guard case .keep = snapshot.requests[index].command.kind else { continue }
+            snapshot.requests[index].state = .failed
+            snapshot.requests[index].error = message
+        }
     }
 
     private func transmit(_ frame: [String: Any]) {
         guard let task, let data = try? JSONSerialization.data(withJSONObject: frame) else { return }
-        task.send(.string(String(decoding: data, as: UTF8.self))) { _ in }
+        task.send(.string(String(decoding: data, as: UTF8.self))) { [weak self] error in
+            guard error != nil else { return }
+            Task { @MainActor in self?.closed(task) }
+        }
     }
 }

@@ -20,6 +20,7 @@ actor SpaceFetcher {
     private let directory: URL
     private let dayKey: String
     private let daily: Bool
+    private var generation = 0
     private var stale: Bool
     private var fresh: Set<String> = []
 
@@ -35,8 +36,9 @@ actor SpaceFetcher {
     }
 
     func invalidate() {
+        generation += 1
         stale = true
-        fresh = []
+        fresh.removeAll()
     }
 
     func respond(to request: URLRequest) async throws -> [String: Any] {
@@ -45,6 +47,7 @@ actor SpaceFetcher {
         let key = Self.key(url)
         let cached = cacheable ? read(key) : nil
         if let cached, !stale || fresh.contains(key) { return Self.reply(cached) }
+        let generation = self.generation
         var request = request
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 20
@@ -57,9 +60,10 @@ actor SpaceFetcher {
                     if let cached { return Self.reply(cached) }
                     return Self.reply(entry)
                 }
-                write(entry, key: key)
-                fresh.insert(key)
-                if daily { UserDefaults.standard.set(Date(), forKey: dayKey) }
+                if self.generation == generation {
+                    if write(entry, key: key) { fresh.insert(key) }
+                    if daily { UserDefaults.standard.set(Date(), forKey: dayKey) }
+                }
             }
             return Self.reply(entry)
         } catch {
@@ -95,11 +99,17 @@ actor SpaceFetcher {
         (try? Data(contentsOf: directory.appending(path: key))).flatMap { try? JSONDecoder().decode(Entry.self, from: $0) }
     }
 
-    private func write(_ entry: Entry, key: String) {
-        guard entry.body.count <= Self.entryLimit, let data = try? JSONEncoder().encode(entry) else { return }
+    private func write(_ entry: Entry, key: String) -> Bool {
+        let file = directory.appending(path: key)
+        guard entry.body.count <= Self.entryLimit else {
+            try? FileManager.default.removeItem(at: file)
+            return false
+        }
+        guard let data = try? JSONEncoder().encode(entry) else { return false }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try? data.write(to: directory.appending(path: key), options: .atomic)
+        guard (try? data.write(to: file, options: .atomic)) != nil else { return false }
         prune()
+        return true
     }
 
     private func prune() {

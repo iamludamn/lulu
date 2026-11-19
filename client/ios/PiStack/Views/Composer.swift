@@ -1,6 +1,7 @@
 import PiStackKit
 import SwiftUI
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 
 struct Composer: View {
     @Binding var draft: String
@@ -13,17 +14,27 @@ struct Composer: View {
     let onSend: () -> Void
     let onVoiceConversation: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @State private var listening = false
+    @State private var showPreparation = false
     private enum VoiceTarget { case send, text, cancel, conversation }
     private let voiceRadius: CGFloat = 104
     private var diagonal: CGFloat { voiceRadius / sqrt(2) }
     @State private var voiceTarget: VoiceTarget = .send
-    @GestureState private var voiceGestureActive = false
     @State private var notice: String?
     @State private var noticeTask: Task<Void, Never>?
 
     private var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var showSend: Bool { canSend && !listening }
+
+    private var voiceHint: String? {
+        guard listening else { return transcription.processing ? "正在识别…" : notice }
+        if voiceTarget == .cancel { return "松手取消" }
+        if voiceTarget == .conversation { return "松手进入语音对话" }
+        if let error = transcription.error { return error }
+        if transcription.recording { return voiceTarget == .text ? "松手转文字" : "松开发送" }
+        return transcription.starting && showPreparation ? "正在准备录音…" : nil
+    }
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
@@ -39,7 +50,7 @@ struct Composer: View {
                     .overlay(alignment: .leading) {
                         if listening || draft.isEmpty {
                             HStack(spacing: 6) {
-                                Text(listening ? (voiceTarget == .text ? "松手放入输入框" : "滑动转文字") : placeholder)
+                                Text(listening ? (voiceTarget == .text && transcription.recording ? "松手放入输入框" : "滑动转文字") : placeholder)
                                 if listening { Image(systemName: "arrow.left") }
                             }
                                 .font(.body)
@@ -58,7 +69,10 @@ struct Composer: View {
                     }
                     .buttonStyle(.plain)
                     .padding(7)
-                    .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
+                    .transition(.asymmetric(
+                        insertion: reduceMotion ? .opacity : .scale.combined(with: .opacity),
+                        removal: .identity
+                    ))
                     .accessibilityLabel(busy ? "追加" : "发送")
                 }
             }
@@ -73,18 +87,11 @@ struct Composer: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 4)
         .overlay(alignment: .top) {
-            if listening {
-                Text(voiceTarget == .text ? "转文字" : voiceTarget == .cancel ? "松手取消" : voiceTarget == .conversation ? "松手进入语音对话" : "松开发送")
-                .font(.caption)
-                .padding(.horizontal, 14).padding(.vertical, 9)
-                .glassEffect(.regular, in: .capsule)
-                .offset(y: -48)
-                .allowsHitTesting(false)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
-            } else if let notice = transcription.processing ? "正在识别…" : notice {
-                Text(notice)
+            if let voiceHint {
+                Text(voiceHint)
                     .font(.caption)
-                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
                     .glassEffect(.regular, in: .capsule)
                     .offset(y: -48)
                     .allowsHitTesting(false)
@@ -104,20 +111,23 @@ struct Composer: View {
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
-        .animation(.snappy(duration: 0.2), value: listening)
-        .animation(.snappy(duration: 0.2), value: voiceTarget)
-        .animation(.snappy(duration: 0.2), value: notice)
-        .onChange(of: voiceGestureActive) { _, active in
-            if !active {
-                if listening { transcription.cancel() }
-                listening = false
-                voiceTarget = .send
-            }
-        }
+        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: listening)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: voiceTarget)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: notice)
         .onChange(of: transcription.error) { _, error in
             if let error { showNotice(error) }
         }
-        .onDisappear { transcription.cancel() }
+        .task(id: transcription.starting) {
+            showPreparation = false
+            guard transcription.starting else { return }
+            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            guard !Task.isCancelled, transcription.starting else { return }
+            showPreparation = true
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { revokeListening() }
+        }
+        .onDisappear { revokeListening() }
     }
 
     private func showNotice(_ message: String) {
@@ -141,52 +151,66 @@ struct Composer: View {
         .frame(width: 48, height: 48)
         .glassEffect(.regular, in: .circle)
         .scaleEffect(listening ? 1.08 : 1)
-        .contentShape(Circle())
-        .allowsHitTesting(!transcription.processing)
-        .gesture(LongPressGesture(minimumDuration: 0.35).sequenced(before: DragGesture(minimumDistance: 0))
-            .updating($voiceGestureActive) { value, active, _ in
-                if case .second(true, _) = value { active = true }
-            }
-            .onChanged { value in
-                guard case .second(true, let drag) = value else { return }
-                if !listening {
-                    noticeTask?.cancel()
-                    notice = nil
-                    listening = true
-                    focused.wrappedValue = false
-                    transcription.start(store)
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                }
-                let next = target(for: drag?.translation ?? .zero)
-                if next != voiceTarget {
-                    voiceTarget = next
-                    if next != .send {
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    }
-                }
-            }
-            .onEnded { value in
-                guard case .second(true, let drag) = value else { return }
-                switch target(for: drag?.translation ?? .zero) {
-                case .send:
-                    transcription.finish { text in onTranscribed(text, true) }
-                case .text:
-                    transcription.finish { text in onTranscribed(text, false) }
-                case .cancel: transcription.cancel(); showNotice("已取消")
-                case .conversation: transcription.cancel(); notice = nil; onVoiceConversation()
-                }
-                listening = false
-                voiceTarget = .send
-                noticeTask?.cancel()
-                noticeTask = Task { @MainActor in
-                    try? await Task.sleep(for: .seconds(2))
-                    if !Task.isCancelled { notice = nil }
-                }
-            })
-        .onTapGesture { onVoiceConversation() }
-        .accessibilityLabel("语音对话")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint("轻点开始通话，长按展开语音选项")
+        .overlay {
+            VoiceInteraction(
+                isEnabled: !transcription.processing,
+                onTap: onVoiceConversation,
+                onHold: beginListening,
+                onDrag: updateListening,
+                onRelease: finishListening,
+                onCancel: cancelListening
+            )
+        }
+    }
+
+    private func beginListening() {
+        noticeTask?.cancel()
+        notice = nil
+        showPreparation = false
+        listening = true
+        focused.wrappedValue = false
+        transcription.start(store)
+    }
+
+    private func updateListening(_ translation: CGSize) {
+        guard listening else { return }
+        let next = target(for: translation)
+        guard next != voiceTarget else { return }
+        voiceTarget = next
+        if next != .send {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
+    }
+
+    private func finishListening(_ translation: CGSize) {
+        guard listening else { return }
+        switch target(for: translation) {
+        case .send:
+            transcription.finish { text in onTranscribed(text, true) }
+        case .text:
+            transcription.finish { text in onTranscribed(text, false) }
+        case .cancel: transcription.cancel(); showNotice("已取消")
+        case .conversation: transcription.cancel(); notice = nil; onVoiceConversation()
+        }
+        listening = false
+        voiceTarget = .send
+    }
+
+    private func cancelListening() {
+        guard listening else { return }
+        transcription.cancel()
+        listening = false
+        voiceTarget = .send
+        showNotice("已取消")
+    }
+
+    private func revokeListening() {
+        transcription.cancel()
+        listening = false
+        voiceTarget = .send
+        showPreparation = false
+        noticeTask?.cancel()
+        notice = nil
     }
 
     private func target(for translation: CGSize) -> VoiceTarget {
@@ -208,6 +232,124 @@ struct Composer: View {
             .glassEffect(.regular, in: .circle)
             .scaleEffect(selected ? 1.1 : 1)
             .accessibilityLabel(title)
+    }
+}
+
+private struct VoiceInteraction: UIViewRepresentable {
+    let isEnabled: Bool
+    let onTap: () -> Void
+    let onHold: () -> Void
+    let onDrag: (CGSize) -> Void
+    let onRelease: (CGSize) -> Void
+    let onCancel: () -> Void
+
+    func makeUIView(context: Context) -> Surface {
+        Surface(self)
+    }
+
+    func updateUIView(_ view: Surface, context: Context) {
+        view.interaction = self
+        view.isUserInteractionEnabled = isEnabled
+        view.accessibilityTraits = isEnabled ? .button : [.button, .notEnabled]
+    }
+
+    final class Surface: UIView {
+        var interaction: VoiceInteraction
+        private let pressFeedback = UIView()
+        private var start = CGPoint.zero
+        private let impact = UIImpactFeedbackGenerator(style: .medium)
+
+        init(_ interaction: VoiceInteraction) {
+            self.interaction = interaction
+            super.init(frame: .zero)
+            backgroundColor = .clear
+            isAccessibilityElement = true
+            accessibilityLabel = "语音对话"
+            accessibilityHint = "轻点开始通话，长按展开语音选项"
+            pressFeedback.backgroundColor = UIColor.label.withAlphaComponent(0.2)
+            pressFeedback.isUserInteractionEnabled = false
+            pressFeedback.alpha = 0
+            addSubview(pressFeedback)
+
+            let tap = PressFeedbackTap(target: self, action: #selector(tapped))
+            tap.onPressChanged = { [weak self] pressed in
+                guard let self else { return }
+                let active = pressed && self.interaction.isEnabled
+                if active && self.pressFeedback.alpha == 0 { self.impact.impactOccurred() }
+                self.pressFeedback.alpha = active ? 1 : 0
+            }
+            let hold = UILongPressGestureRecognizer(target: self, action: #selector(held(_:)))
+            hold.minimumPressDuration = 0.35
+            tap.require(toFail: hold)
+            addGestureRecognizer(tap)
+            addGestureRecognizer(hold)
+        }
+
+        required init?(coder: NSCoder) { return nil }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            pressFeedback.frame = bounds
+            pressFeedback.layer.cornerRadius = min(bounds.width, bounds.height) / 2
+        }
+
+        override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+            hypot(point.x - bounds.midX, point.y - bounds.midY) <= min(bounds.width, bounds.height) / 2
+        }
+
+        override func accessibilityActivate() -> Bool {
+            guard interaction.isEnabled else { return false }
+            interaction.onTap()
+            return true
+        }
+
+        @objc private func tapped() {
+            guard interaction.isEnabled else { return }
+            interaction.onTap()
+        }
+
+        @objc private func held(_ gesture: UILongPressGestureRecognizer) {
+            let point = gesture.location(in: nil)
+            let translation = CGSize(width: point.x - start.x, height: point.y - start.y)
+            switch gesture.state {
+            case .began:
+                guard interaction.isEnabled else { return }
+                start = point
+                interaction.onHold()
+            case .changed:
+                interaction.onDrag(translation)
+            case .ended:
+                interaction.onRelease(translation)
+            case .cancelled, .failed:
+                interaction.onCancel()
+            default:
+                break
+            }
+        }
+    }
+}
+
+private final class PressFeedbackTap: UITapGestureRecognizer {
+    var onPressChanged: ((Bool) -> Void)?
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        onPressChanged?(true)
+        super.touchesBegan(touches, with: event)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        onPressChanged?(false)
+        super.touchesEnded(touches, with: event)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        onPressChanged?(false)
+        super.touchesCancelled(touches, with: event)
+    }
+
+    override func reset() {
+        onPressChanged?(false)
+        super.reset()
     }
 }
 

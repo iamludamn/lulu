@@ -6,15 +6,20 @@ import Security
 @MainActor @Observable
 final class AppModel {
     private static let serverKey = "pistack.server"
-    private static let botId = "main"
+    private nonisolated static let botId = "main"
     private static let defaultName = "lulu"
 
     private(set) var server: String {
         didSet { UserDefaults.standard.set(server, forKey: Self.serverKey) }
     }
+    struct Connection {
+        let api: Api
+        let bot: BotSummary
+        let store: BotStore
+    }
+
     private(set) var connectionRevision = 0
-    var bot: BotSummary?
-    var error: String?
+    private(set) var connection: Connection?
 
     init() {
         server = UserDefaults.standard.string(forKey: Self.serverKey) ?? ""
@@ -23,6 +28,10 @@ final class AppModel {
     var api: Api? { Api.normalize(server).map(Api.init) }
 
     func chatToken(for server: URL) -> String {
+        Self.readChatToken(for: server)
+    }
+
+    private nonisolated static func readChatToken(for server: URL) -> String {
         var query = chatTokenQuery(for: server)
         query[kSecReturnData as String] = true
         var item: CFTypeRef?
@@ -33,7 +42,7 @@ final class AppModel {
     func saveConnection(server address: String, token: String) -> Bool {
         guard let url = Api.normalize(address) else { return false }
         if token != chatToken(for: url) {
-            let query = chatTokenQuery(for: url)
+            let query = Self.chatTokenQuery(for: url)
             let status: OSStatus
             if token.isEmpty {
                 status = SecItemDelete(query as CFDictionary)
@@ -46,12 +55,13 @@ final class AppModel {
             }
             guard status == errSecSuccess || (token.isEmpty && status == errSecItemNotFound) else { return false }
         }
+        connection = nil
         server = address
         connectionRevision += 1
         return true
     }
 
-    private func chatTokenQuery(for server: URL) -> [String: Any] {
+    private nonisolated static func chatTokenQuery(for server: URL) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "lulu.chat",
@@ -60,9 +70,12 @@ final class AppModel {
     }
 
     func resolve() async {
-        bot = nil
-        error = nil
-        guard api != nil else { return }
-        bot = BotSummary(id: Self.botId, name: Self.defaultName)
+        guard connection == nil, let api else { return }
+        let revision = connectionRevision
+        let server = api.base
+        let token = await Task.detached(priority: .userInitiated) { Self.readChatToken(for: server) }.value
+        guard !Task.isCancelled, revision == connectionRevision, connection == nil else { return }
+        let bot = BotSummary(id: Self.botId, name: Self.defaultName)
+        connection = Connection(api: api, bot: bot, store: BotStore(botId: bot.id, server: server, token: token))
     }
 }
