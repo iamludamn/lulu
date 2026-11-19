@@ -6,13 +6,14 @@ import { DelegateIndex, RunFamily, type RunDoc } from "../delegate/runs.js";
 import { owedDeliveries, type Entries } from "../send/delivery.js";
 import { DeliveryDoc, MakeDoc } from "../send/doc.js";
 import { readSubmission, trackSubmissions, type SubmissionReader } from "./submissions.js";
+import { STORED_DOC_KINDS } from "../durable-names.js";
 
 export type ChatMessage = { requestId: string; id: number | null; text: string; after: number | null; at?: number; deadline?: number; error?: string };
 
 export type ChatState = { messages: ChatMessage[] };
 
 export const ChatDoc = defineDoc<ChatState>({
-  kind: "pistack.chat.messages",
+  kind: STORED_DOC_KINDS.chatMessages,
   version: 1,
   scope: "session",
   checkpointWhen: () => false,

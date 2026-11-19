@@ -1,5 +1,6 @@
 import { defineDoc, defineDocFamily } from "@earendil-works/pi-durable";
 import type { ConversationId, SubmissionId, TaskId, Tx } from "@earendil-works/pi-durable";
+import { STORED_DOC_KINDS } from "../durable-names.js";
 
 export type RunStatus = "running" | "done" | "failed" | "closed";
 
@@ -45,7 +46,7 @@ export type RunSeed = {
 };
 
 export const RunFamily = defineDocFamily<RunDoc, RunSeed>({
-  kind: "pistack.delegate.run",
+  kind: STORED_DOC_KINDS.delegateRun,
   version: 2,
   migrate: (value) => value as unknown as RunDoc,
   scope: "session",
@@ -77,7 +78,7 @@ export const RunFamily = defineDocFamily<RunDoc, RunSeed>({
 });
 
 export const DelegateIndex = defineDoc<{ ids: string[] }>({
-  kind: "pistack.delegate.index",
+  kind: STORED_DOC_KINDS.delegateIndex,
   version: 1,
   scope: "session",
   checkpointWhen: () => false,

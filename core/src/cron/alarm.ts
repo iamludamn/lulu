@@ -10,11 +10,15 @@ import { createRun } from "../delegate/spawn.js";
 import type { DurableHost } from "../host/types.js";
 import type { ScheduleEntry } from "../protocol/contract.js";
 import { CronJobsDoc } from "./doc.js";
-import { MEMORY_UPDATE } from "../memory/schedule.js";
-import { SANDBOX_LIFECYCLE } from "../sandbox/lifecycle.js";
 import { expireRuns, fireDue, nextAlarm } from "./engine.js";
+import { RENAMED_TASKS } from "../durable-names.js";
 
 export const RECOVERY_ALARM_DELAY_MS = 60_000;
+export const ALARM_TASK_KINDS: ReadonlySet<string> = new Set([
+  ...Object.values(RENAMED_TASKS.sandboxLifecycle),
+  ...Object.values(RENAMED_TASKS.memoryUpdate),
+  DREAMING_TASK,
+]);
 const SELF_ADVANCING_KINDS: ReadonlySet<string> = new Set(["running", "ready", "completing"]);
 
 export type AlarmOutcome = { fired: string[]; expired: ConversationId[] };
@@ -73,7 +77,7 @@ export async function nextAlarmAt(harness: Harness): Promise<number | undefined>
     if (!SELF_ADVANCING_KINDS.has(task.state.kind)) continue;
     const state = task.record.state;
     const checkpoint = state.status === "running" || state.status === "pending" ? state.checkpoint : undefined;
-    if ((task.record.kind === SANDBOX_LIFECYCLE || task.record.kind === MEMORY_UPDATE || task.record.kind === DREAMING_TASK) && task.state.kind === "running" && checkpoint && typeof checkpoint === "object" && !Array.isArray(checkpoint) && checkpoint.phase === "wait" && typeof checkpoint.until === "number" && checkpoint.until > now) deadlines.push(checkpoint.until);
+    if (ALARM_TASK_KINDS.has(task.record.kind) && task.state.kind === "running" && checkpoint && typeof checkpoint === "object" && !Array.isArray(checkpoint) && checkpoint.phase === "wait" && typeof checkpoint.until === "number" && checkpoint.until > now) deadlines.push(checkpoint.until);
     else deadlines.push(now + RECOVERY_ALARM_DELAY_MS);
   }
   const jobs = (await harness.snapshot(CronJobsDoc, BACKGROUND_CONTEXT))?.jobs ?? [];

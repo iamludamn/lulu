@@ -2,8 +2,9 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { CompactionEntry, defineDoc, defineTask, type Conversation, type EntryId, type Harness } from "@earendil-works/pi-durable";
 import type { DurableHost } from "../host/types.js";
 import { memoryRemember } from "./client.js";
+import { RENAMED_TASKS } from "../durable-names.js";
 
-export const MEMORY_UPDATE = "pistack.memory.update";
+export const MEMORY_UPDATE = RENAMED_TASKS.memoryUpdate.current;
 const RETRY_MS = 60 * 60 * 1000;
 
 const MemoryTriggerDoc = defineDoc<{ scanned: number }>({

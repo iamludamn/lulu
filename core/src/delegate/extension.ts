@@ -10,6 +10,7 @@ import { createDelegateTool } from "./tool.js";
 import { DelegateToolSection, DelegatingSection } from "./prompt.js";
 import { DelegateAnchor } from "./anchor.js";
 import { DelegateWait } from "./wait.js";
+import { RENAMED_TASKS, STORED_EXTENSION_NAMES, withPreviousTaskName } from "../durable-names.js";
 
 const CHILD_REFUSED = ["delegate", SEND_TOOL, "panel"];
 
@@ -39,10 +40,13 @@ const sandboxRefusal = (presets: DelegatePresets) => (run: RunDoc | undefined, n
 
 export const createDelegateExtension = (presets: DelegatePresets, sandboxes: SandboxProvider | undefined) =>
   defineExtension({
-    name: "pistack.delegate",
+    name: STORED_EXTENSION_NAMES.delegate,
     tools: [createDelegateTool(presets, sandboxes)],
     sections: [DelegateToolSection, DelegatingSection],
-    tasks: [DelegateAnchor, DelegateWait],
+    tasks: [
+      ...withPreviousTaskName(DelegateAnchor, RENAMED_TASKS.delegateAnchor.previous),
+      ...withPreviousTaskName(DelegateWait, RENAMED_TASKS.delegateWait.previous),
+    ],
     wraps: [
       ...CHILD_REFUSED.map((tool) => ({ tool, wrap: guard(childRefusal) })),
       ...CODING_TOOLS.map((tool) => ({ tool, wrap: guard(sandboxRefusal(presets)) })),

@@ -1,11 +1,12 @@
 import { defineTask } from "@earendil-works/pi-durable";
+import { RENAMED_TASKS } from "../durable-names.js";
 
 export interface AnchorInput {
   runId: string;
 }
 
 export const DelegateAnchor = defineTask<AnchorInput, { phase: "hold" }, { runId: string }, object>({
-  name: "pistack.delegate.anchor",
+  name: RENAMED_TASKS.delegateAnchor.current,
   version: 1,
   initial: () => ({ phase: "hold" }),
   phases: {

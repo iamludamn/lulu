@@ -1,7 +1,8 @@
 import { defineDoc, type ConversationId, type TaskId } from "@earendil-works/pi-durable";
 import type { SandboxRef } from "./provider.js";
+import { STORED_DOC_KINDS } from "../durable-names.js";
 
-export const SANDBOX_KIND = "pistack.sandbox";
+export const SANDBOX_KIND = STORED_DOC_KINDS.sandbox;
 export const SANDBOX_IDLE_MS = 30_000;
 export const SANDBOX_RENEW_MS = 30_000;
 export const SANDBOX_LEASE_MS = 120_000;
@@ -13,6 +14,7 @@ export type SandboxBinding = {
   key: string | null;
   owner: ConversationId | null;
   backend: string | null;
+  createApp?: string;
   profile: string;
   ref: SandboxRef | null;
   cwd: string;
