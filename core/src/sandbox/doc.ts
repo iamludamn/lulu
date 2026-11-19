@@ -2,7 +2,7 @@ import { defineDoc, type ConversationId, type TaskId } from "@earendil-works/pi-
 import type { SandboxRef } from "./provider.js";
 
 export const SANDBOX_KIND = "pistack.sandbox";
-export const SANDBOX_IDLE_MS = 120_000;
+export const SANDBOX_IDLE_MS = 30_000;
 export const SANDBOX_RENEW_MS = 30_000;
 export const SANDBOX_LEASE_MS = 120_000;
 export const SANDBOX_RETENTION_MS = 7 * 86_400_000;
