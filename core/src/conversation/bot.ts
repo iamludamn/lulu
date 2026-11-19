@@ -183,6 +183,7 @@ export class BotSession {
     });
     trackProgress(
       harness,
+      root.id,
       {
         pending: () => {
           this.#awaiting = true;
