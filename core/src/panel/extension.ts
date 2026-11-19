@@ -1,6 +1,7 @@
 import { defineExtension, section } from "@earendil-works/pi-durable";
 import { PanelDoc } from "./doc.js";
 import { createPanelTool } from "./tool.js";
+import { STORED_EXTENSION_NAMES } from "../durable-names.js";
 
 const PanelSection = section("panel", async (input, context) => {
   const state = await input.read.snapshot(PanelDoc, context);
@@ -13,7 +14,7 @@ const PanelSection = section("panel", async (input, context) => {
 
 export const createPanelExtension = () =>
   defineExtension({
-    name: "pistack.panel",
+    name: STORED_EXTENSION_NAMES.panel,
     tools: [createPanelTool()],
     sections: [PanelSection],
   });

@@ -1,6 +1,7 @@
 import { defineExtension, section } from "@earendil-works/pi-durable";
 import { ScheduleTool } from "./tool.js";
 import { CronJobsDoc } from "./doc.js";
+import { STORED_EXTENSION_NAMES } from "../durable-names.js";
 
 const ScheduledJobsSection = section("scheduled_jobs", async (input, context) => {
   const jobs = (await input.read.snapshot(CronJobsDoc, context))?.jobs ?? [];
@@ -9,7 +10,7 @@ const ScheduledJobsSection = section("scheduled_jobs", async (input, context) =>
 });
 
 export const CronExtension = defineExtension({
-  name: "pistack.cron",
+  name: STORED_EXTENSION_NAMES.cron,
   tools: [ScheduleTool],
   sections: [ScheduledJobsSection],
 });

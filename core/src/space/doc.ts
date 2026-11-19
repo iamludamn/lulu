@@ -2,6 +2,7 @@ import { defineDoc, defineDocFamily, type Harness } from "@earendil-works/pi-dur
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { Tx } from "@earendil-works/pi-durable";
 import type { SpaceStatus } from "../protocol/panel.js";
+import { STORED_DOC_KINDS } from "../durable-names.js";
 
 export type Mode = SpaceStatus["mode"];
 
@@ -40,7 +41,7 @@ export type Refresh = {
 };
 
 export const SpaceRefreshIndex = defineDoc<{ ids: string[]; devices?: string[]; pushRetryAt?: number | null }>({
-  kind: "pistack.space-refresh-index",
+  kind: STORED_DOC_KINDS.spaceRefreshIndex,
   version: 1,
   scope: "session",
   checkpointWhen: () => false,
@@ -48,7 +49,7 @@ export const SpaceRefreshIndex = defineDoc<{ ids: string[]; devices?: string[]; 
 });
 
 export const SpaceRefreshDoc = defineDocFamily<{ entry?: Refresh }, null>({
-  kind: "pistack.space-refresh",
+  kind: STORED_DOC_KINDS.spaceRefresh,
   version: 1,
   scope: "session",
   family: true,

@@ -6,6 +6,7 @@ import type { Environment } from "../../host/types.js";
 import { WorkspaceLost, type SandboxProvider, type SandboxRef } from "../provider.js";
 import { SANDBOX_LEASE_MS } from "../doc.js";
 import { E2bExecutionEnv } from "./env.js";
+import { PREVIOUS_SANDBOX_APP } from "../../durable-names.js";
 
 const idempotencyKeyOf = async (scope: string, key: string): Promise<string> =>
   Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${scope}:${key}`))), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -44,7 +45,7 @@ export function createE2bProvider(env: Environment, scope: string, telemetry: Te
           const id = idOf(request.ref);
           sandbox = await existing(() => measured("connect", () => Sandbox.connect(id, { ...options(context), timeoutMs: SANDBOX_LEASE_MS })));
         } else {
-          const createOptions = { ...options(context), idempotencyKey: await idempotencyKeyOf(scope, `${backend}:${request.requestId}`), timeoutMs: SANDBOX_LEASE_MS, metadata: { app: "pistack", scope, workspace: request.key, backend }, lifecycle: { onTimeout: "pause" as const } };
+          const createOptions = { ...options(context), idempotencyKey: await idempotencyKeyOf(scope, `${backend}:${request.requestId}`), timeoutMs: SANDBOX_LEASE_MS, metadata: { app: request.createApp ?? PREVIOUS_SANDBOX_APP, scope, workspace: request.key, backend }, lifecycle: { onTimeout: "pause" as const } };
           sandbox = request.profile === "default" ? await measured("create", () => Sandbox.create(createOptions)) : await measured("create", () => Sandbox.create(request.profile, createOptions));
           const id = sandbox.sandboxId;
           sandbox = await existing(() => measured("connect", () => Sandbox.connect(id, { ...options(context), timeoutMs: SANDBOX_LEASE_MS })));

@@ -6,10 +6,11 @@ import { toError } from "@earendil-works/pi-durable/env";
 import type { Context } from "@earendil-works/chord/context";
 import { ensureSandboxLifecycle, resetSandbox, waitForSandbox } from "./workspace.js";
 import { accounting, confirmedReady, finishResource, opening, stoppingResource, uncertainResource } from "./accounting.js";
+import { RENAMED_TASKS } from "../durable-names.js";
 
-export const SANDBOX_LIFECYCLE = "pistack.sandbox.lifecycle";
+export const SANDBOX_LIFECYCLE = RENAMED_TASKS.sandboxLifecycle.current;
 type LifecycleInput = { holder: ConversationId };
-type LifecycleState = { phase: "check" } | { phase: "wait"; until: number; revision: number } | { phase: "apply"; epoch: number; ref: SandboxRef | null; backend: string; profile: string; cwd: string; action: "open" | "renew" | "idle" | "destroy"; requestId: string; started?: number };
+type LifecycleState = { phase: "check" } | { phase: "wait"; until: number; revision: number } | { phase: "apply"; epoch: number; ref: SandboxRef | null; backend: string; profile: string; cwd: string; action: "open" | "renew" | "idle" | "destroy"; requestId: string; createApp?: string; started?: number };
 type LifecycleResult = { released: true };
 export type SandboxLifecycleTask = Task<LifecycleInput, LifecycleState, LifecycleResult, object>;
 
@@ -63,7 +64,8 @@ export function createSandboxLifecycle(provider: SandboxProvider | undefined): S
           if (action === "open" && binding.backend) opening(await accounting(tx, now), key, binding.backend, now, !binding.ref || binding.idleSince !== null);
           if (action === "idle" || action === "destroy") stoppingResource(await accounting(tx, now), key);
           binding.operation = { taskId: runtime.taskId, kind: action, requestId };
-          return { status: "running", checkpoint: { phase: "apply", epoch: binding.epoch, ref: binding.ref, backend: binding.backend!, profile: binding.profile, cwd: binding.cwd, action, requestId, started: now } };
+          const createMetadata = action === "open" && binding.createApp !== undefined ? { createApp: binding.createApp } : {};
+          return { status: "running", checkpoint: { phase: "apply", epoch: binding.epoch, ref: binding.ref, backend: binding.backend!, profile: binding.profile, cwd: binding.cwd, action, requestId, ...createMetadata, started: now } };
         }, context);
       },
       wait: async (task, runtime, context) => {
@@ -90,7 +92,7 @@ export function createSandboxLifecycle(provider: SandboxProvider | undefined): S
         try {
           if (!provider) throw new Error("Sandbox backend is not configured");
           if (checkpoint.action === "open") {
-            const opened = await provider.open({ backend: checkpoint.backend, profile: checkpoint.profile, key: `${task.input.holder}:${checkpoint.epoch}`, requestId: checkpoint.requestId, ref, cwd }, context);
+            const opened = await provider.open({ backend: checkpoint.backend, profile: checkpoint.profile, key: `${task.input.holder}:${checkpoint.epoch}`, requestId: checkpoint.requestId, createApp: checkpoint.createApp, ref, cwd }, context);
             if (opened.ref.backend !== checkpoint.backend) throw new Error("Sandbox backend returned a mismatched reference");
             ref = opened.ref;
             cwd = opened.cwd;

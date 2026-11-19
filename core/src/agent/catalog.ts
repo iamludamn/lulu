@@ -17,6 +17,7 @@ import { createArtifactExtension } from "../artifact/extension.js";
 import { artifactConfigured } from "../artifact/s3.js";
 import type { McpHost } from "./mcp.js";
 import type { DurableHost } from "../host/types.js";
+import { STORED_EXTENSION_NAMES } from "../durable-names.js";
 
 export type HarnessDeps = { host: DurableHost; mcp: McpHost };
 
@@ -53,7 +54,7 @@ export const CATALOG: Record<string, (deps: HarnessDeps) => Extension> = {
   send: ({ host }) => createSendExtension(artifactCheck(host)),
   chat: () =>
     defineExtension({
-      name: "pistack.chat",
+      name: STORED_EXTENSION_NAMES.chat,
       sections: [
         section("preamble", () => DEFAULT_HARNESS.prompt, { tag: false }),
         section("clock", () => `Current time: ${new Date().toISOString().slice(0, 16)}Z.`, { tag: false }),

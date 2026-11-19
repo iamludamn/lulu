@@ -6,6 +6,7 @@ import { SandboxDoc } from "./doc.js";
 import { createSandboxLifecycle, type SandboxLifecycleTask } from "./lifecycle.js";
 import type { SandboxProvider } from "./provider.js";
 import { openSandbox, releaseSandbox } from "./workspace.js";
+import { RENAMED_TASKS, STORED_EXTENSION_NAMES, withPreviousTaskName } from "../durable-names.js";
 
 export const CODING_TOOLS = ["read", "write", "edit", "bash"];
 
@@ -60,8 +61,8 @@ function inSandbox(provider: SandboxProvider | undefined, lifecycle: SandboxLife
 export function createEnvironmentExtension(provider: SandboxProvider | undefined) {
   const lifecycle = createSandboxLifecycle(provider);
   return defineExtension({
-    name: "pistack.environment",
-    tasks: [lifecycle],
+    name: STORED_EXTENSION_NAMES.environment,
+    tasks: withPreviousTaskName(lifecycle, RENAMED_TASKS.sandboxLifecycle.previous),
     sections: [section("workspace", async (input, context) => {
       const own = await input.read.snapshot(SandboxDoc, input.conversationId, context);
       if (!own?.key) return undefined;

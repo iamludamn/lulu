@@ -9,6 +9,7 @@ import { InjectionBindings, InjectionFamily } from "./doc.js";
 import { SandboxDoc } from "../sandbox/doc.js";
 import { RunFamily } from "../delegate/runs.js";
 import type { createMemoryUpdate } from "./schedule.js";
+import { RENAMED_TASKS, STORED_EXTENSION_NAMES, withPreviousTaskName } from "../durable-names.js";
 
 export type MemoryExtensionOptions = {
   telemetry?: TelemetryContext;
@@ -18,8 +19,11 @@ export type MemoryExtensionOptions = {
 
 export function createMemoryExtension({ telemetry = NOOP_TELEMETRY_CONTEXT, update, dreaming }: MemoryExtensionOptions) {
   return defineExtension({
-    name: "pistack.memory",
-    tasks: [...(update === undefined ? [] : [update]), ...(dreaming === undefined ? [] : [dreaming])],
+    name: STORED_EXTENSION_NAMES.memory,
+    tasks: [
+      ...(update === undefined ? [] : withPreviousTaskName(update, RENAMED_TASKS.memoryUpdate.previous)),
+      ...(dreaming === undefined ? [] : [dreaming]),
+    ],
     hooks: [hook(GenerationTask, {
       beforeRequest: async ({ messages }, api) => {
         const text = getCurrentSystemMessage(messages)?.sections?.memory;
