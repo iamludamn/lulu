@@ -12,6 +12,7 @@ struct MessageRow: View, Equatable {
     let onKept: (Page) -> Void
     let holdKeepRow: (Bool) -> Void
     @Environment(\.openSpace) private var openSpace
+    @State private var showsSchedules = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.row == rhs.row && lhs.expanded == rhs.expanded && lhs.botId == rhs.botId && lhs.api.base == rhs.api.base }
@@ -127,34 +128,13 @@ struct MessageRow: View, Equatable {
                 .contentShape(.rect(cornerRadius: 26, style: .continuous))
             if case .space(let src, _, _, _) = widget.body {
                 let source = "chat-\(row.id)"
-                let state = row.spaceOffer ?? .add
+                let state = row.viewOffer ?? .add
                 if state.actionable {
-                    SwipeToKeep(destination: .panel, onLand: {}, onKeep: { store.keep(row.id) }, retainsCard: true, enabled: !row.sending && row.offerAvailable) { send in
-                        VStack(spacing: 8) {
-                            Button { ArtifactAddress(src).map { openSpace($0, SpaceOpening(id: widget.id, title: widget.title, preview: true), source) } } label: { face }
-                                .buttonStyle(.plain)
-                                .artifactSource(source, radius: 26)
-                                .contextMenu {
-                                    Button(state == .update ? "更新视图" : "加入视图", systemImage: "square.stack.3d.up", action: send)
-                                        .disabled(row.sending || !row.offerAvailable)
-                                }
-                                .accessibilityAction(named: state == .update ? "更新视图" : "加入视图") {
-                                    if !row.sending && row.offerAvailable { send() }
-                                }
-                            HStack(spacing: 5) {
-                                if row.sending { ProgressView().controlSize(.mini) }
-                                else { Image(systemName: "arrow.left") }
-                                Text(row.sending ? "正在提交…" : row.offerAvailable ? state.caption : "连接后可滑动")
-                            }
-                            .font(.caption).foregroundStyle(.secondary)
-                            if let error = row.offerError {
-                                Text("\(error) · 滑动重试")
-                                    .font(.caption).foregroundStyle(.red)
-                            }
-                        }
-                        .padding(.vertical, 10)
+                    viewOfferSwipe(state) {
+                        Button { ArtifactAddress(src).map { openSpace($0, SpaceOpening(id: widget.id, title: widget.title, preview: true), source) } } label: { face }
+                            .buttonStyle(.plain)
+                            .artifactSource(source, radius: 26)
                     }
-                    .frame(maxWidth: .infinity)
                 } else {
                     HStack(spacing: 10) {
                         Image(systemName: state == .superseded ? "clock.arrow.circlepath" : "checkmark.circle")
@@ -178,6 +158,21 @@ struct MessageRow: View, Equatable {
                     .artifactSource(source, radius: 18)
                     .padding(.vertical, 8)
                 }
+            } else if case .schedules(_, let rows) = widget.body {
+                let state = row.viewOffer ?? .superseded
+                Group {
+                    if state.actionable {
+                        viewOfferSwipe(state) { schedulesButton(face) }
+                    } else {
+                        VStack(spacing: 8) {
+                            schedulesButton(face)
+                            Label(state.caption, systemImage: state == .superseded ? "clock.arrow.circlepath" : "checkmark.circle")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 10)
+                    }
+                }
+                .sheet(isPresented: $showsSchedules) { ScheduleOverview(rows: rows) }
             } else {
                 kept(destination: .panel, label: "放入视图", symbol: "square.grid.2x2") { face }
             }
@@ -191,6 +186,38 @@ struct MessageRow: View, Equatable {
                     .artifactSource(source, radius: 22)
             }
         }
+    }
+
+    private func schedulesButton<Content: View>(_ face: Content) -> some View {
+        Button { showsSchedules = true } label: { face }
+            .buttonStyle(.plain)
+            .accessibilityHint("查看全部定时任务")
+    }
+
+    private func viewOfferSwipe<Content: View>(_ state: ViewOfferState, @ViewBuilder face: () -> Content) -> some View {
+        let label = state == .update ? "更新视图" : "加入视图"
+        let enabled = !row.sending && row.offerAvailable
+        let card = face()
+        return SwipeToKeep(destination: .panel, onLand: {}, onKeep: { store.keep(row.id) }, retainsCard: true, enabled: enabled) { send in
+            VStack(spacing: 8) {
+                card.contextMenu {
+                    Button(label, systemImage: "square.stack.3d.up", action: send).disabled(!enabled)
+                }
+                .accessibilityAction(named: label) { if enabled { send() } }
+                HStack(spacing: 5) {
+                    if row.sending { ProgressView().controlSize(.mini) }
+                    else { Image(systemName: "arrow.left") }
+                    Text(row.sending ? "正在提交…" : row.offerAvailable ? state.caption : "连接后可滑动")
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                if let error = row.offerError {
+                    Text("\(error) · \(row.offerAvailable ? "滑动重试" : "连接后重试")")
+                        .font(.caption).foregroundStyle(.red)
+                }
+            }
+            .padding(.vertical, 10)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func kept<Content: View>(destination: Page, label: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {

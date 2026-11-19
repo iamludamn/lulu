@@ -1,7 +1,7 @@
 import { defineTool, type ToolExecutionResult } from "@earendil-works/pi-durable";
-import { SPACE_ID } from "../protocol/panel.js";
+import { SCHEDULE_WIDGET_ID, SPACE_ID } from "../protocol/panel.js";
 import type { SendCard, SendInput } from "../protocol/send.js";
-import { ARTIFACT_REF, SEND_TOOL, SendInput as SendParams } from "../protocol/send.js";
+import { ARTIFACT_REF, SEND_TOOL, ModelSendInput } from "../protocol/send.js";
 import { assetRefProblem, spaceRefProblem, spacePreviewProblem } from "../artifact/space.js";
 
 const TEXT_LIMIT = { chars: 600, lines: 12 };
@@ -40,6 +40,7 @@ function misuse(input: SendInput): string | undefined {
   if (input.content !== undefined) return "content is only valid with type text and would be dropped from a widget. Nothing was sent, so the card has not been delivered. Send the text as its own type text call, then send the card again without content.";
   if (input.widget === undefined) return "type widget requires widget. Nothing was sent.";
   const card = input.widget;
+  if (card.kind === "panel" && card.panel.id === SCHEDULE_WIDGET_ID) return "The schedules widget is created automatically by the schedule tool.";
   if (card.kind === "panel" && card.panel.body.kind === "space" && !SPACE_ID.test(card.panel.id))
     return "A space widget id is the key of its saved state, so it must be letters, digits, - or _, start with a letter or digit, and be at most 64 characters. Nothing was sent. Send the card again with a valid id.";
   return undefined;
@@ -80,7 +81,7 @@ export const createSendTool = (exists: ArtifactCheck | undefined) =>
   defineTool({
     name: SEND_TOOL,
     description: DESCRIPTION,
-    parameters: SendParams,
+    parameters: ModelSendInput,
     replay: "safe",
     executionMode: "sequential",
     execute: async (args) => {

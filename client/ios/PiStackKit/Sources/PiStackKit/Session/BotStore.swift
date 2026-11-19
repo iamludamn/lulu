@@ -271,7 +271,7 @@ public final class BotStore {
             guard self.task === task else { return }
             self.closed(task)
         }
-        transmit(["type": "hello", "incremental": true])
+        transmit(["type": "hello", "incremental": true, "schedules": true])
         Task { await listen(task) }
     }
 
@@ -354,6 +354,10 @@ public final class BotStore {
                 for id in submitted { submitTimers.removeValue(forKey: id)?.cancel() }
                 snapshot.requests.removeAll {
                     if case .submit = $0.command.kind { return submitted.contains($0.id) }
+                    if case .keep(let origin) = $0.command.kind, panel.scheduleReceipts[origin]?.requestIds.contains($0.id) == true {
+                        keepTimers.removeValue(forKey: $0.id)?.cancel()
+                        return true
+                    }
                     return false
                 }
             }

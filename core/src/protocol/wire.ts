@@ -6,7 +6,7 @@ import type { AssetItem } from "./send.js";
 export const MAX_CLIENT_FRAME_CHARACTERS = 64_000;
 
 export type ClientMessage =
-  | { type: "hello"; incremental?: boolean }
+  | { type: "hello"; incremental?: boolean; schedules?: boolean }
   | { type: "history.load"; requestId: string; before: number }
   | { type: "prompt.submit"; requestId: string; content: string; whenBusy: BusyMode }
   | { type: "prompt.abort"; requestId: string }

@@ -1,7 +1,7 @@
 import Foundation
 
-public enum SpaceOfferState: Equatable, Sendable {
-    case add, update, accepted(SpaceReceipt.Action), superseded
+public enum ViewOfferState: Equatable, Sendable {
+    case add, update, accepted(ViewOfferAction), superseded
 
     public var actionable: Bool { self == .add || self == .update }
     public var caption: String {
@@ -14,6 +14,8 @@ public enum SpaceOfferState: Equatable, Sendable {
         }
     }
 }
+
+public typealias SpaceOfferState = ViewOfferState
 
 extension PanelWidget {
     public var spaceVersion: Int? {

@@ -1,5 +1,5 @@
 import { Type, type Static } from "typebox";
-import { WidgetInput } from "./panel.js";
+import { ModelWidgetInput, WidgetInput } from "./panel.js";
 
 export const SEND_TOOL = "send_to_user";
 
@@ -25,6 +25,11 @@ export const SendInput = Type.Object({
   body: Type.Optional(Type.String({ description: "Full Markdown for type text when the reply is long: the user sees content as a short bubble and taps it to read body" })),
   widget: Type.Optional(Type.Union([PanelCard, AssetCard], { description: "Card for type widget" })),
   end_turn: Type.Optional(Type.Boolean({ description: "true on your final send when the reply is complete; omit for acknowledgements and progress updates" })),
+});
+
+export const ModelSendInput = Type.Object({
+  ...SendInput.properties,
+  widget: Type.Optional(Type.Union([Type.Object({ ...PanelCard.properties, panel: ModelWidgetInput }), AssetCard], { description: "Card for type widget" })),
 });
 
 export type SendInput = Static<typeof SendInput>;

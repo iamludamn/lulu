@@ -99,7 +99,17 @@ public func chatEntries(_ view: ConversationView?, hidden: [String]) -> [ChatEnt
     var result: [ChatEntry] = []
     var turn: [ConversationEntry] = []
     func close(fallback: Bool) {
-        let sent = turn.flatMap { sentEntries($0.model, position: Double($0.id) ?? .infinity, time: messageTime($0.model), delivered: delivered) }
+        let sent = turn.flatMap { entry -> [ChatEntry] in
+            let position = Double(entry.id) ?? .infinity
+            if entry.kind == scheduleOfferKind {
+                guard case .panel(let widget)? = sentCard(entry.data?["widget"]), case .schedules = widget.body else { return [] }
+                let time: Date?
+                if case .number(let milliseconds)? = entry.data?["at"] { time = Date(timeIntervalSince1970: milliseconds / 1000) }
+                else { time = nil }
+                return [ChatEntry(id: scheduleOriginPrefix + entry.id, position: position, role: .assistant, text: "", body: nil, card: .panel(widget), time: time, final: false)]
+            }
+            return sentEntries(entry.model, position: position, time: messageTime(entry.model), delivered: delivered)
+        }
         if !sent.isEmpty {
             result += sent
         } else if fallback, let last = turn.last(where: { !messageText($0.model).isEmpty }) {
@@ -113,7 +123,7 @@ public func chatEntries(_ view: ConversationView?, hidden: [String]) -> [ChatEnt
             close(fallback: true)
             let text = messageText(entry.model)
             if !text.isEmpty { result.append(ChatEntry(id: entry.id, position: Double(entry.id) ?? .infinity, role: .user, text: text, body: nil, card: nil, time: messageTime(entry.model), final: false)) }
-        case "pi.assistant":
+        case "pi.assistant", scheduleOfferKind:
             turn.append(entry)
         default:
             break

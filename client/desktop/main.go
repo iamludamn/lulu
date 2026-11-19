@@ -40,10 +40,12 @@ type app struct {
 	chat     chatView
 	noteMD   markdown.Options
 
-	reading    string
-	readerBody string
-	readerOpen bool
-	readerMD   markdown.Options
+	reading       string
+	readerBody    string
+	readerOpen    bool
+	readerMD      markdown.Options
+	schedulesOpen bool
+	scheduleRows  []scheduledTaskRow
 
 	resources      map[string]*resource
 	weather        map[string]forecastState
@@ -65,6 +67,7 @@ func (a *app) connect(base string) {
 	a.store = newStore(a.api, func(fn func()) { a.win.Update(fn) })
 	a.resources = map[string]*resource{}
 	a.chat = chatView{}
+	a.schedulesOpen, a.scheduleRows = false, nil
 	a.lastReply, a.repliesKnown = "", false
 	a.store.start()
 }
@@ -148,6 +151,7 @@ func (a *app) view(c *ui.Context) {
 		})
 		a.viewer.view(c, p)
 		a.readerView(c, p)
+		a.scheduleOverview(c, p)
 		a.settingsView(c, p)
 	})
 }

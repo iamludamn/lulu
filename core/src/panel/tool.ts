@@ -3,13 +3,13 @@ import type { ToolRegistration } from "@earendil-works/pi-durable";
 import { defineTool, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord/context";
 import { Type, type Static } from "typebox";
-import { WidgetInput } from "../protocol/panel.js";
+import { ModelWidgetInput, SCHEDULE_WIDGET_ID } from "../protocol/panel.js";
 import { rememberSpace } from "../send/space-offers.js";
 import { PanelDoc } from "./doc.js";
 
 const PanelParams = Type.Object({
   action: Type.Union([Type.Literal("update"), Type.Literal("remove"), Type.Literal("list")], { description: "update | remove | list" }),
-  widget: Type.Optional(WidgetInput),
+  widget: Type.Optional(ModelWidgetInput),
   id: Type.Optional(Type.String({ description: "Widget id for remove" })),
 });
 
@@ -28,6 +28,7 @@ async function update(api: ToolExecutionApi<PanelDetails>, args: PanelArgs, cont
   const widget = args.widget;
   if (!widget) return fail("update requires widget");
   const id = widget.id.trim();
+  if (id === SCHEDULE_WIDGET_ID) return fail("Scheduled task overviews are updated only when the user accepts a new schedule card.");
   const current = await api.snapshot(PanelDoc, context);
   const previous = current?.widgets[id];
   if (previous === undefined) return fail(`${id} is not on the panel. Only the user adds widgets: offer a new one with send_to_user type widget kind panel.`);

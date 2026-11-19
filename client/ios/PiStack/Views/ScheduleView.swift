@@ -1,6 +1,59 @@
 import PiStackKit
 import SwiftUI
 
+extension ScheduledTaskRow.State {
+    var label: String {
+        switch self {
+        case .active: "已启用"
+        case .paused: "已暂停"
+        case .done: "已完成"
+        case .missed: "已错过"
+        case .deleted: "已删除"
+        }
+    }
+}
+
+struct ScheduleOverview: View {
+    let rows: [ScheduledTaskRow]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List(rows) { row in
+                VStack(alignment: .leading, spacing: 5) {
+                    LabeledContent {
+                        Text(row.state.label)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(row.state == .active ? Color.green : .secondary)
+                    } label: {
+                        Text(row.name).font(.subheadline.weight(.semibold))
+                    }
+                    switch row.schedule {
+                    case .once(let at): Text("一次 · \(utc(at))")
+                    case .daily(let time, let tz): Text("每天 \(time)（\(tz)）")
+                    }
+                    Text(row.nextRunAt.map { "下次 \(utc($0))" } ?? "无下次执行")
+                        .font(.caption)
+                    if let last = row.lastRunAt {
+                        Text("上次触发 · \(utc(last))").font(.caption)
+                    }
+                }
+                .font(.subheadline).foregroundStyle(.secondary)
+                .padding(.vertical, 3)
+            }
+            .overlay { if rows.isEmpty { ContentUnavailableView("暂无定时任务", systemImage: "clock") } }
+            .navigationTitle("定时任务")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+        }
+    }
+
+    private func utc(_ ms: Double) -> String {
+        let format = Date.FormatStyle(date: .abbreviated, time: .shortened, timeZone: TimeZone(secondsFromGMT: 0) ?? .gmt)
+        return Date(timeIntervalSince1970: ms / 1000).formatted(format) + " UTC"
+    }
+}
+
 struct ScheduleView: View {
     let botId: String
     let api: Api

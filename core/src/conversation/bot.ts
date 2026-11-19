@@ -36,6 +36,7 @@ import { AsrSessions } from "../voice/asr.js";
 import { VoiceSession } from "./voice.js";
 import { MAX_CLIENT_FRAME_CHARACTERS, type ClientMessage, type ServerMessage } from "../protocol/wire.js";
 import { parseFrame } from "./frame.js";
+import { withoutSchedules } from "./compat.js";
 import { createChatHarnessOptions, reconnectChatMcp } from "../agent/chat.js";
 import { chatModelConfig, chatModelRef, createChatModels, durableModel } from "../agent/models.js";
 import { createMemoryUpdate, recoverMemoryUpdates } from "../memory/schedule.js";
@@ -48,7 +49,7 @@ const MODEL_KEY = "model";
 const STATE_INTERVAL_MS = 50;
 const PROGRESS_WAIT_MS = 500;
 
-type ClientAttachment = { readonly role: "client"; readonly ready: boolean; readonly incremental?: boolean; readonly authenticated?: boolean };
+type ClientAttachment = { readonly role: "client"; readonly ready: boolean; readonly incremental?: boolean; readonly schedules?: boolean; readonly authenticated?: boolean };
 type HelloMessage = Extract<ClientMessage, { type: "hello" }>;
 type Command = Exclude<ClientMessage, HelloMessage>;
 
@@ -305,7 +306,7 @@ export class BotSession {
     }
 
     if (frame.type === "hello") {
-      const next = this.#hello(socket, attachment, frame.incremental === true);
+      const next = this.#hello(socket, attachment, frame);
       this.#handshakes.set(socket, next);
       await next;
       return;
@@ -350,9 +351,9 @@ export class BotSession {
     return attachment;
   }
 
-  async #hello(socket: Socket, attachment: ClientAttachment, incremental: boolean): Promise<boolean> {
+  async #hello(socket: Socket, attachment: ClientAttachment, hello: HelloMessage): Promise<boolean> {
     const config = await this.#config();
-    this.#host.sockets.attach(socket, { ...attachment, ready: true, incremental } satisfies ClientAttachment);
+    this.#host.sockets.attach(socket, { ...attachment, ready: true, incremental: hello.incremental === true, schedules: hello.schedules === true } satisfies ClientAttachment);
     this.#send(socket, { type: "models", config });
     this.#send(socket, this.#stateMessage(undefined, true));
     return true;
@@ -419,7 +420,7 @@ export class BotSession {
       }
       case "widget.keep":
       case "widget.drop":
-        await keepWidget(this.#harness, await entryRange(this.#root, 0, undefined, BACKGROUND_CONTEXT), command.origin, command.type === "widget.keep");
+        await keepWidget(this.#harness, command.type === "widget.keep" ? await entryRange(this.#root, 0, undefined, BACKGROUND_CONTEXT) : [], command.origin, command.type === "widget.keep", command.requestId);
         this.#acknowledge(socket, command.requestId);
         return;
       case "layout.order":
@@ -605,7 +606,13 @@ export class BotSession {
     if (message.type === "state" && this.#attachmentOf(socket)?.incremental !== true) {
       message = { ...message, mcp: message.mcp.map((server) => server.state === "idle" ? { ...server, state: "failed", error: "Preparing tools" } : server) };
     }
-    socket.send(JSON.stringify(message));
+    if (this.#attachmentOf(socket)?.schedules !== true) message = withoutSchedules(message);
+    try {
+      socket.send(JSON.stringify(message));
+    } catch (error) {
+      reportError("Socket delivery failed", error);
+      this.#reject(socket, 1011, "Reconnect to recover state");
+    }
   }
 
   #reject(socket: Socket, code: number, reason: string): void {
