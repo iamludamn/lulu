@@ -44,7 +44,7 @@ export class Memory extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.#memory = new MemoryObject(durableHost(ctx, env), createMemoryFiles(ctx.storage));
-    void ctx.blockConcurrencyWhile(async () => this.#memory.start(await openDurableObjectSqliteStorage(ctx.storage), await openDurableObjectSqliteStorage(ctx.storage, { prefix: "memory_retrieval_" })));
+    void ctx.blockConcurrencyWhile(async () => this.#memory.start(await openDurableObjectSqliteStorage(ctx.storage), () => openDurableObjectSqliteStorage(ctx.storage, { prefix: "memory_retrieval_" })));
   }
 
   override fetch(request: Request): Promise<Response> {

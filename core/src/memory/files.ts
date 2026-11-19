@@ -1,3 +1,5 @@
+import type { MemoryResource } from "./doc.js";
+
 export interface MemoryCommit {
   readonly oid: string;
   readonly message: string;
@@ -5,9 +7,11 @@ export interface MemoryCommit {
 }
 
 export type PublishedMemory = { version: string; files: Record<string, string> };
+export type PublishedCatalog = { resources: MemoryResource[]; cacheHit: boolean; fileReads: number; sqlRowsRead: number };
 
 export interface MemoryFiles {
   published(): Promise<PublishedMemory>;
+  publishedCatalog(): Promise<PublishedCatalog>;
   readVersion(path: string, version: string): Promise<string | undefined>;
   files(): Promise<string[]>;
   read(path: string): Promise<string | undefined>;
