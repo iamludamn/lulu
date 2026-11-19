@@ -8,32 +8,39 @@ import { createMemoryFiles } from "./memory-files.js";
 
 export class Bot extends DurableObject<Env> {
   readonly #session: BotSession;
+  #cold = true;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.#session = new BotSession(durableHost(ctx, env));
     void ctx.blockConcurrencyWhile(async () => {
-      await this.#session.start(await openDurableObjectSqliteStorage(ctx.storage));
+      await this.#session.start(() => openDurableObjectSqliteStorage(ctx.storage));
     }).then(() => this.#session.recover());
   }
 
   override fetch(request: Request): Promise<Response> {
+    this.#cold = false;
     return this.#session.fetch(request);
   }
 
-  override alarm(): Promise<void> {
-    return this.#session.alarm();
+  override alarm(info?: AlarmInvocationInfo): Promise<void> {
+    const cold = this.#cold;
+    this.#cold = false;
+    return this.#session.alarm(info?.scheduledTime, cold);
   }
 
   override webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    this.#cold = false;
     return this.#session.webSocketMessage(socket, message);
   }
 
   override webSocketClose(socket: WebSocket, code: number, reason: string): void {
+    this.#cold = false;
     this.#session.webSocketClose(socket, code, reason);
   }
 
   override webSocketError(socket: WebSocket): void {
+    this.#cold = false;
     this.#session.webSocketError(socket);
   }
 }

@@ -1,18 +1,28 @@
-import { awaitWithContext, withCancel } from "@earendil-works/chord/context";
-import { defineTask, type ConversationId, type Harness, type Task } from "@earendil-works/pi-durable";
+import { defineTask, type ConversationId, type Harness, type Task, type TaskId } from "@earendil-works/pi-durable";
 import { SandboxDoc, SANDBOX_IDLE_MS, SANDBOX_RENEW_MS, SANDBOX_LEASE_MS, SANDBOX_RETENTION_MS } from "./doc.js";
 import { WorkspaceLost, type SandboxProvider, type SandboxRef } from "./provider.js";
 import { toError } from "@earendil-works/pi-durable/env";
 import type { Context } from "@earendil-works/chord/context";
-import { ensureSandboxLifecycle, resetSandbox, waitForSandbox } from "./workspace.js";
+import { ensureSandboxLifecycle, resetSandbox } from "./workspace.js";
 import { accounting, confirmedReady, finishResource, opening, stoppingResource, uncertainResource } from "./accounting.js";
 import { RENAMED_TASKS } from "../durable-names.js";
 
 export const SANDBOX_LIFECYCLE = RENAMED_TASKS.sandboxLifecycle.current;
 type LifecycleInput = { holder: ConversationId };
-type LifecycleState = { phase: "check" } | { phase: "wait"; until: number; revision: number } | { phase: "apply"; epoch: number; ref: SandboxRef | null; backend: string; profile: string; cwd: string; action: "open" | "renew" | "idle" | "destroy"; requestId: string; createApp?: string; started?: number };
+type LifecycleState = { phase: "check"; revision?: number } | { phase: "wait"; until: number; revision: number } | { phase: "apply"; epoch: number; ref: SandboxRef | null; backend: string; profile: string; cwd: string; action: "open" | "renew" | "idle" | "destroy"; requestId: string; createApp?: string; started?: number };
 type LifecycleResult = { released: true };
 export type SandboxLifecycleTask = Task<LifecycleInput, LifecycleState, LifecycleResult, object>;
+
+export const SandboxLifecycleTimer = defineTask<{ until: number }, { phase: "sleep" } | { phase: "done" }, null>({
+  name: "lulu.sandbox.lifecycle.timer",
+  version: 1,
+  initial: () => ({ phase: "sleep" }),
+  phases: {
+    sleep: (task, runtime, context) => runtime.sleepUntil(task.input.until, { phase: "done" }, context),
+    done: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context),
+  },
+  abort: (_task, runtime, context) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context),
+});
 
 export function createSandboxLifecycle(provider: SandboxProvider | undefined): SandboxLifecycleTask {
   return defineTask<LifecycleInput, LifecycleState, LifecycleResult>({
@@ -68,20 +78,15 @@ export function createSandboxLifecycle(provider: SandboxProvider | undefined): S
           return { status: "running", checkpoint: { phase: "apply", epoch: binding.epoch, ref: binding.ref, backend: binding.backend!, profile: binding.profile, cwd: binding.cwd, action, requestId, ...createMetadata, started: now } };
         }, context);
       },
-      wait: async (task, runtime, context) => {
-        const child = withCancel(context);
-        let stopTimer = (): void => {};
-        try {
-          await Promise.race([
-            awaitWithContext(new Promise<void>((resolve) => { stopTimer = runtime.setTimer(resolve, Math.max(0, task.state.checkpoint.until - runtime.now())); }), child.context),
-            waitForSandbox(runtime, task.input.holder, (binding) => !binding || binding.revision !== task.state.checkpoint.revision, child.context),
-          ]);
-        } finally {
-          stopTimer();
-          child.cancel();
+      wait: (task, runtime, context) => runtime.commit(async (tx) => {
+        const binding = await tx.doc(SandboxDoc, task.input.holder);
+        const { until, revision } = task.state.checkpoint;
+        if (binding.lifecycleTaskId !== runtime.taskId || binding.revision !== revision || until <= runtime.now()) {
+          return { status: "running", checkpoint: { phase: "check" } };
         }
-        await runtime.commit(() => ({ status: "running", checkpoint: { phase: "check" } }), context);
-      },
+        const timer = await tx.createTask(SandboxLifecycleTimer, { until }, { ownership: { kind: "task", taskId: runtime.taskId } });
+        return { status: "waiting", on: [timer], policy: "allSettled", checkpoint: { phase: "check", revision } };
+      }, context),
       apply: async (task, runtime, context) => {
         const checkpoint = task.state.checkpoint;
         const started = runtime.now();
@@ -146,6 +151,16 @@ export function createSandboxLifecycle(provider: SandboxProvider | undefined): S
   });
 }
 
+export async function staleSandboxTimer(harness: Harness, holder: ConversationId, context: Context): Promise<TaskId | undefined> {
+  const binding = await harness.snapshot(SandboxDoc, holder, context);
+  if (binding?.lifecycleTaskId == null) return undefined;
+  const lifecycle = await harness.getTask(binding.lifecycleTaskId, context);
+  if (lifecycle?.state.status !== "waiting") return undefined;
+  const { checkpoint, on } = lifecycle.state;
+  if (checkpoint && typeof checkpoint === "object" && "revision" in checkpoint && typeof checkpoint.revision === "number" && checkpoint.revision < binding.revision) return on[0];
+  return undefined;
+}
+
 export async function recoverSandboxLifecycle(harness: Harness, holder: ConversationId, provider: SandboxProvider | undefined, context: Context): Promise<void> {
   const binding = await harness.snapshot(SandboxDoc, holder, context);
   if (!binding || (!binding.ref && !binding.operation && binding.users.length === 0)) return;
@@ -154,4 +169,6 @@ export async function recoverSandboxLifecycle(harness: Harness, holder: Conversa
     const current = await tx.doc(SandboxDoc, holder);
     await ensureSandboxLifecycle(tx, holder, current, lifecycle);
   }, context);
+  const timer = await staleSandboxTimer(harness, holder, context);
+  if (timer !== undefined) await harness.abortTask(timer, context);
 }

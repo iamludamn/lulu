@@ -48,23 +48,25 @@ export async function owedDeliveries(
   return [{ message: message.id, requestId: `nudge:${message.id}#${chain.length}` }];
 }
 
-export async function chaseDeliveries(harness: Harness, root: Conversation, entries: Entries): Promise<void> {
+export async function chaseDeliveries(harness: Harness, root: Conversation, entries: Entries, run: (work: () => Promise<void>) => Promise<void>): Promise<void> {
   for (const owed of await owedDeliveries(harness, entries, BACKGROUND_CONTEXT)) {
     const { requestId } = owed;
     if (requestId === null) continue;
-    await harness.commit(async (tx) => {
-      const delivery = await tx.doc(DeliveryDoc);
-      if (!delivery.nudges.some((nudge) => nudge.requestId === requestId)) delivery.nudges.push({ message: owed.message, requestId, id: null });
-    }, BACKGROUND_CONTEXT);
-    await harness.commit(async (tx) => {
-      const id = await root.submit(tx, { type: "input", content: NUDGE_PROMPT, requestId, whenBusy: "followUp" });
-      await bindDelivery(tx, [owed.message], id);
-      const bindings = await tx.doc(InjectionBindings);
-      const originalRequest = bindings.requests[String(owed.message)];
-      if (originalRequest !== undefined) bindings.requests[String(id)] = originalRequest;
-      const nudge = (await tx.doc(DeliveryDoc)).nudges.find((item) => item.requestId === requestId);
-      if (nudge !== undefined) nudge.id = Number(id);
-    }, BACKGROUND_CONTEXT);
-    harness.resume();
+    await run(async () => {
+      await harness.commit(async (tx) => {
+        const delivery = await tx.doc(DeliveryDoc);
+        if (!delivery.nudges.some((nudge) => nudge.requestId === requestId)) delivery.nudges.push({ message: owed.message, requestId, id: null });
+      }, BACKGROUND_CONTEXT);
+      await harness.commit(async (tx) => {
+        const id = await root.submit(tx, { type: "input", content: NUDGE_PROMPT, requestId, whenBusy: "followUp" });
+        await bindDelivery(tx, [owed.message], id);
+        const bindings = await tx.doc(InjectionBindings);
+        const originalRequest = bindings.requests[String(owed.message)];
+        if (originalRequest !== undefined) bindings.requests[String(id)] = originalRequest;
+        const nudge = (await tx.doc(DeliveryDoc)).nudges.find((item) => item.requestId === requestId);
+        if (nudge !== undefined) nudge.id = Number(id);
+      }, BACKGROUND_CONTEXT);
+      harness.resume();
+    });
   }
 }

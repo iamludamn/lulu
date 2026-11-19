@@ -7,7 +7,7 @@ import { handleSpaceRefresh, nextSpaceAlarm, receiveSpaceEvent, refreshDueSpaces
 import { SpaceRefreshDoc, SpaceRefreshIndex, spaceEntries, spaceStatus } from "../space/doc.js";
 import { DreamingTriggerDoc, reconcileDreaming } from "../memory/dreaming.js";
 import { admitPrompt, prepareInjection } from "../memory/injection.js";
-import { expireRequests } from "./deadlines.js";
+import { expireRequests, RequestDeadlinesDoc } from "./deadlines.js";
 import { RunFamily } from "../delegate/runs.js";
 import { entryRange, HISTORY_PAGE_SIZE, observeView } from "./view.js";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -21,10 +21,11 @@ import { ChatDoc, trackProgress, trackSnapshot } from "./progress.js";
 import type { EpisodeSource } from "../memory/doc.js";
 import { episodesOf } from "../memory/episodes.js";
 import type { McpStatus, ModelRef, SessionProgress } from "../protocol/contract.js";
-import { ALARM_TASK_KINDS, RECOVERY_ALARM_DELAY_MS, type AlarmOutcome, abortRuns, fireSchedules, nextAlarmAt, replaceAlarm, scheduleEntries } from "../cron/alarm.js";
+import { abortRuns, fireSchedules, nextScheduleAlarm, scheduleEntries } from "../cron/alarm.js";
+import { BotAlarm, RECOVERY_ALARM_DELAY_MS } from "./alarm.js";
 import { CRON_KIND } from "../cron/doc.js";
 import { SANDBOX_KIND } from "../sandbox/doc.js";
-import { recoverSandboxLifecycle } from "../sandbox/lifecycle.js";
+import { recoverSandboxLifecycle, staleSandboxTimer } from "../sandbox/lifecycle.js";
 import { createSandboxProvider } from "../sandbox/backends.js";
 import { observeSandboxActivity } from "../sandbox/activity.js";
 import { sandboxWindowQuery } from "../sandbox/report-api.js";
@@ -52,6 +53,15 @@ const MEMORY_SOURCE_ENTRIES = 200;
 const MODEL_KEY = "model";
 const STATE_INTERVAL_MS = 50;
 const PROGRESS_WAIT_MS = 500;
+const ALARM_DOCUMENT_KINDS = new Set([
+  CRON_KIND,
+  ChatDeliveryDoc.definition.kind,
+  DreamingTriggerDoc.definition.kind,
+  RequestDeadlinesDoc.definition.kind,
+  RunFamily.definition.kind,
+  SpaceRefreshDoc.definition.kind,
+  SpaceRefreshIndex.definition.kind,
+]);
 
 type ClientAttachment = { readonly role: "client"; readonly ready: boolean; readonly incremental?: boolean; readonly schedules?: boolean; readonly authenticated?: boolean };
 type HelloMessage = Extract<ClientMessage, { type: "hello" }>;
@@ -85,7 +95,9 @@ export class BotSession {
   readonly #deferred: Array<() => void> = [];
   #dirty = false;
   #spaceWork: Promise<void> | undefined;
-  #alarmUpdate: Promise<void> = Promise.resolve();
+  readonly #alarm: BotAlarm;
+  #alarmRetryAt = 0;
+  #lastScheduleRunAt = 0;
   #prompts: Promise<void> = Promise.resolve();
   #dreaming: Promise<void> = Promise.resolve();
   readonly #handshakes = new WeakMap<Socket, Promise<boolean>>();
@@ -105,6 +117,7 @@ export class BotSession {
 
   constructor(host: DurableHost) {
     this.#host = host;
+    this.#alarm = new BotAlarm(host.alarm, () => this.#harness.wake(), () => this.#applicationAlarm());
     this.#asr = new AsrSessions(host, (socket, event) => this.#send(socket, { type: "voice", event }));
     this.#voice = new VoiceSession({
       host,
@@ -118,22 +131,30 @@ export class BotSession {
     });
   }
 
-  async start(storage: Storage): Promise<void> {
-    for (const socket of this.#host.sockets.all()) {
-      if (socket.readyState === SOCKET_OPEN && this.#attachmentOf(socket) === null) socket.close(1008, "Reconnect required");
-    }
-    await this.#initialize(storage);
+  start(openStorage: () => Promise<Storage>): Promise<void> {
+    return this.#alarm.run(async () => {
+      for (const socket of this.#host.sockets.all()) {
+        if (socket.readyState === SOCKET_OPEN && this.#attachmentOf(socket) === null) socket.close(1008, "Reconnect required");
+      }
+      await this.#initialize(await openStorage());
+    });
   }
 
   recover(): void {
     void this.#reconcileDreaming();
-    this.#mcpReady = this.#reconnectMcp().catch((error: unknown) => reportError("MCP reconnect failed", error)).finally(() => {
-      if (this.#resumeAfterMcp) {
-        this.#resumeAfterMcp = false;
-        this.#harness.resume();
-        this.#chase();
+    this.#mcpReady = this.#alarm.run(async () => {
+      try {
+        await this.#reconnectMcp();
+      } catch (error) {
+        reportError("MCP reconnect failed", error);
+      } finally {
+        if (this.#resumeAfterMcp) {
+          this.#resumeAfterMcp = false;
+          this.#harness.resume();
+          this.#chase();
+        }
       }
-    });
+    }).catch((error: unknown) => this.#alarmFailed(error));
   }
 
   async #initialize(storage: Storage): Promise<void> {
@@ -150,6 +171,7 @@ export class BotSession {
       {
         ...options,
         telemetry: telemetry.context,
+        onWake: () => { if (this.#harness) this.#alarmChanged(); },
         onReport: (report) => reportError("Harness background task failed", report.error, { kind: report.kind, ...("reason" in report ? { reason: report.reason } : {}), ...("extension" in report ? { extension: report.extension } : {}) }),
       },
       BACKGROUND_CONTEXT,
@@ -158,9 +180,7 @@ export class BotSession {
     observeDelegateTiming(harness, telemetry.context);
     harness.observeCommits({ advance: (publication) => {
       if (publication.changes.some((change) => change.type === "document" && (change.record.kind === PanelDoc.definition.kind || change.record.kind === AssetsDoc.definition.kind))) void this.#reconcileDreaming();
-      if (publication.changes.some((change) => (change.type === "document" && (change.record.kind === SpaceRefreshDoc.definition.kind || change.record.kind === SpaceRefreshIndex.definition.kind || change.record.kind === CRON_KIND || change.record.kind === SANDBOX_KIND || change.record.kind === RunFamily.definition.kind || change.record.kind === ChatDoc.definition.kind || change.record.kind === DreamingTriggerDoc.definition.kind)) || (change.type === "submission") || (change.type === "task" && ALARM_TASK_KINDS.has(change.value.kind)))) {
-        void this.#refreshAlarm().catch((error: unknown) => reportError("Schedule alarm reconciliation failed", error));
-      }
+      if (publication.changes.some((change) => change.type === "submission" || (change.type === "document" && ALARM_DOCUMENT_KINDS.has(change.record.kind)))) this.#alarmChanged();
     }, end: () => {} });
 
     void harness.closed.then((end) => {
@@ -185,7 +205,13 @@ export class BotSession {
     const update = createMemoryUpdate(this.#host);
     harness.observeCommits({ advance: (publication) => {
       if (publication.changes.some((change) => change.type === "entry" && change.value.conversationId === root.id && CompactionEntry.is(change.value))) {
-        void recoverMemoryUpdates(harness, root, update).catch((error: unknown) => reportError("Memory compaction scheduling failed", error));
+        void this.#alarm.run(() => recoverMemoryUpdates(harness, root, update)).catch((error: unknown) => reportError("Memory compaction scheduling failed", error));
+      }
+      if (publication.changes.some((change) => change.type === "document" && change.record.kind === SANDBOX_KIND && change.conversationId === root.id)) {
+        void Promise.resolve().then(async () => {
+          const timer = await staleSandboxTimer(harness, root.id, BACKGROUND_CONTEXT);
+          if (timer !== undefined) await this.#alarm.run(() => harness.abortTask(timer, BACKGROUND_CONTEXT));
+        }).catch((error: unknown) => this.#alarmFailed(error));
       }
     }, end: () => {} });
     await recoverMemoryUpdates(harness, root, update);
@@ -247,13 +273,12 @@ export class BotSession {
       if (delivery.since !== null) return;
       delivery.since = Math.max(0, ...(await tx.doc(ChatDoc)).messages.map((message) => message.id ?? 0));
     }, BACKGROUND_CONTEXT);
-    await this.#refreshAlarm();
   }
 
   #reconcileDreaming(): Promise<void> {
-    this.#dreaming = this.#dreaming.then(() => reconcileDreaming(this.#harness, this.#host, chatModelRef(this.#host.env, this.#selected))).catch((error: unknown) => {
+    this.#dreaming = this.#dreaming.then(() => this.#alarm.run(() => reconcileDreaming(this.#harness, this.#host, chatModelRef(this.#host.env, this.#selected)))).catch((error: unknown) => {
       reportError("Source dreaming reconciliation failed", error);
-      return this.#refreshAlarm();
+      return this.#alarm.refresh();
     });
     return this.#dreaming;
   }
@@ -276,10 +301,8 @@ export class BotSession {
     if (pathname === "/space-refresh" || pathname === "/space-webhook" || pathname === "/space-device") {
       if (pathname === "/space-webhook" && request.method !== "POST") return Promise.resolve(new Response(null, { status: 405 }));
       const handler = pathname === "/space-webhook" ? receiveSpaceEvent : pathname === "/space-device" ? spaceDevice : handleSpaceRefresh;
-      return handler(this.#harness, request, this.#host.env).then(async (response) => {
-        if (request.method === "POST") await this.#refreshAlarm();
-        return response;
-      }).catch(spaceError);
+      const handle = () => handler(this.#harness, request, this.#host.env);
+      return (request.method === "POST" ? this.#alarm.run(handle) : handle()).catch(spaceError);
     }
     if (pathname === "/schedules") return this.#schedulesResponse();
     if (pathname === "/mcp" || pathname.startsWith("/mcp/")) {
@@ -290,8 +313,17 @@ export class BotSession {
     return this.#upgrade(request);
   }
 
-  alarm(): Promise<void> {
-    return this.#host.telemetry.startSpan({ name: "bot.alarm", attributes: { "lulu.bot.id": this.#host.name } }, (span) => this.#runAlarm(span));
+  alarm(scheduledAt?: number, coldStart = false): Promise<void> {
+    const delay = scheduledAt !== undefined && Number.isFinite(scheduledAt) ? Math.max(0, Date.now() - scheduledAt) : undefined;
+    if (delay !== undefined) {
+      this.#host.telemetry.metrics?.histogram("lulu.bot.alarm.wake_delay", { unit: "ms" }).record(delay, { "lulu.alarm.cold_start": coldStart });
+    }
+    const attributes = {
+      "lulu.bot.id": this.#host.name,
+      "lulu.alarm.cold_start": coldStart,
+      "lulu.alarm.wake_delay_ms": delay,
+    };
+    return this.#host.telemetry.startSpan({ name: "bot.alarm", attributes }, (span) => this.#alarm.run(() => this.#runAlarm(span)));
   }
 
   async webSocketMessage(socket: Socket, message: string | ArrayBuffer): Promise<void> {
@@ -439,8 +471,10 @@ export class BotSession {
       case "prompt.abort":
         return this.#inPromptOrder(async () => {
           if (this.#resumeAfterMcp) await this.#mcpReady;
-          await markDeliveryCancellation(this.#harness);
-          await this.#root.abort(BACKGROUND_CONTEXT);
+          await this.#alarm.run(async () => {
+            await markDeliveryCancellation(this.#harness);
+            await this.#root.abort(BACKGROUND_CONTEXT);
+          });
           this.#broadcastState();
           this.#acknowledge(socket, command.requestId);
         });
@@ -456,12 +490,15 @@ export class BotSession {
         return;
       }
       case "widget.keep":
-      case "widget.drop":
-        await keepWidget(this.#harness, command.type === "widget.keep" ? await entryRange(this.#root, 0, undefined, BACKGROUND_CONTEXT) : [], command.origin, command.type === "widget.keep", command.requestId);
+      case "widget.drop": {
+        const keep = command.type === "widget.keep";
+        const entries = keep ? await entryRange(this.#root, 0, undefined, BACKGROUND_CONTEXT) : [];
+        await this.#alarm.run(() => keepWidget(this.#harness, entries, command.origin, keep, command.requestId));
         this.#acknowledge(socket, command.requestId);
         return;
+      }
       case "layout.order":
-        await orderCards(this.#harness, command.ids);
+        await this.#alarm.run(() => orderCards(this.#harness, command.ids));
         this.#acknowledge(socket, command.requestId);
         return;
       case "widget.check":
@@ -470,7 +507,10 @@ export class BotSession {
         return;
       case "widget.make": {
         if (this.#resumeAfterMcp) await this.#mcpReady;
-        const make = await this.#inPromptOrder(() => entryRange(this.#root, 0, undefined, BACKGROUND_CONTEXT).then((entries) => startMake(this.#harness, this.#root, entries, command)));
+        const make = await this.#inPromptOrder(async () => {
+          const entries = await entryRange(this.#root, 0, undefined, BACKGROUND_CONTEXT);
+          return this.#alarm.run(() => startMake(this.#harness, this.#root, entries, command));
+        });
         this.#makers.set(command.requestId, { socket, make: make.requestId });
         setTimeout(() => void this.#settleMakes(), Math.max(0, make.at + MAKE_TIMEOUT_MS - Date.now()) + 100);
         await this.#settleMakes();
@@ -485,11 +525,10 @@ export class BotSession {
     const injection = await prepareInjection(this.#host, this.#harness, command.requestId, command.content, this.#view.value, chatModelRef(this.#host.env, this.#selected), span);
     span.setAttributes({ "lulu.prompt.memory_ready_ms": Date.now() - queuedAt });
     if (this.#resumeAfterMcp) await this.#mcpReady;
-    const { request, firstBinding } = await admitPrompt(this.#harness, this.#root, this.#view.value, command, injection, { release, span: received });
+    const { request, firstBinding } = await this.#alarm.run(() => admitPrompt(this.#harness, this.#root, this.#view.value, command, injection, { release, span: received }));
     span.setAttributes({ "lulu.prompt.admission_ms": Date.now() - queuedAt, "lulu.prompt.replay": !firstBinding, "lulu.memory.outcome": injection.outcome, "lulu.memory.selected": injection.selected.length });
     if (request) observeDelivery(this.#host.telemetry, this.#host.name, { request, stage: "accepted", at: request.acceptedAt });
     else received.setAttributes({ "lulu.delivery.replayed": true });
-    void this.#refreshAlarm().catch((error: unknown) => reportError("Prompt alarm reconciliation failed", error));
     this.#broadcastState();
     this.#acknowledge(socket, command.requestId);
   }
@@ -531,7 +570,7 @@ export class BotSession {
   #chase(): void {
     if (this.#resumeAfterMcp) return;
     this.#chasing = this.#chasing
-      .then(() => chaseDeliveries(this.#harness, this.#root, this.#view.value.entries))
+      .then(() => chaseDeliveries(this.#harness, this.#root, this.#view.value.entries, (work) => this.#alarm.run(work)))
       .catch((error: unknown) => reportError("Delivery check failed", error));
   }
 
@@ -575,7 +614,7 @@ export class BotSession {
 
   async #reloadMcp(name?: string): Promise<McpStatus[]> {
     this.#botServers = await mcpStore(this.#host, this.#host.name).servers();
-    await this.#reconnectMcp(name);
+    await this.#alarm.run(() => this.#reconnectMcp(name));
     return this.#mcp;
   }
 
@@ -671,44 +710,48 @@ export class BotSession {
   async #runAlarm(span: TelemetrySpan): Promise<void> {
     if (this.#resumeAfterMcp) await this.#mcpReady;
     const now = Date.now();
-    if (this.#registry === undefined) return this.#refreshAlarm();
+    this.#harness.resume();
     const parentId = this.#root.id;
     const selected = chatModelRef(this.#host.env, this.#selected);
-    let outcome: AlarmOutcome;
     try {
       await this.#reconcileDreaming();
       await expireRequests(this.#harness, this.#root, now);
       await this.#updateDelivery();
       await recoverMemoryUpdates(this.#harness, this.#root, createMemoryUpdate(this.#host));
-      outcome = await fireSchedules(this.#harness, parentId, selected, now);
+      const outcome = await fireSchedules(this.#harness, parentId, selected, now);
+      this.#lastScheduleRunAt = now;
+      span.setAttributes({ "lulu.cron.fired": outcome.fired.length, "lulu.cron.expired": outcome.expired.length });
+      await abortRuns(this.#harness, outcome.expired);
       this.#spaceWork ??= refreshDueSpaces(this.#harness, this.#host.env, now).then(() => sendSpacePushes(this.#harness, this.#host.env, Date.now())).finally(() => { this.#spaceWork = undefined; });
       await this.#spaceWork;
+      this.#alarmRetryAt = 0;
     } catch (error) {
       reportError("Schedule run failed", error);
-      await this.#serializeAlarmUpdate(() => replaceAlarm(this.#host.alarm, now + RECOVERY_ALARM_DELAY_MS));
-      return;
+      this.#alarmRetryAt = Date.now() + RECOVERY_ALARM_DELAY_MS;
     }
-    span.setAttributes({ "lulu.cron.fired": outcome.fired.length, "lulu.cron.expired": outcome.expired.length });
-    await abortRuns(this.#harness, outcome.expired);
-    await this.#refreshAlarm();
   }
 
   async #schedulesResponse(): Promise<Response> {
     return Response.json(await scheduleEntries(this.#harness));
   }
 
-  #refreshAlarm(): Promise<void> {
-    return this.#serializeAlarmUpdate(async () => {
-      const [other, space, push, delivery] = await Promise.all([nextAlarmAt(this.#harness), nextSpaceAlarm(this.#harness), nextPushAlarm(this.#harness, this.#host.env), nextDeliveryAlarm(this.#harness)]);
-      const serviceDeadline = Math.min(space ?? Infinity, push ?? Infinity, delivery ?? Infinity);
-      const due = Math.min(other ?? Infinity, Math.max(Date.now() + 1000, serviceDeadline));
-      await replaceAlarm(this.#host.alarm, Number.isFinite(due) ? due : undefined);
-    });
+  async #applicationAlarm(): Promise<number> {
+    const now = Date.now();
+    const deadlines = await Promise.all([
+      nextScheduleAlarm(this.#harness, this.#lastScheduleRunAt),
+      nextSpaceAlarm(this.#harness),
+      nextPushAlarm(this.#harness, this.#host.env),
+      nextDeliveryAlarm(this.#harness),
+    ]);
+    return Math.min(this.#alarmRetryAt || Infinity, ...deadlines.map((at) => at === undefined ? Infinity : at > now ? at : Math.max(now + 1000, this.#alarmRetryAt)));
   }
 
-  #serializeAlarmUpdate(operation: () => Promise<void>): Promise<void> {
-    const update = this.#alarmUpdate.then(operation, operation);
-    this.#alarmUpdate = update;
-    return update;
+  #alarmChanged(): void {
+    void this.#alarm.refresh().catch((error: unknown) => this.#alarmFailed(error));
+  }
+
+  #alarmFailed(error: unknown): void {
+    reportError("Alarm reconciliation failed", error);
+    this.#host.abort("Alarm reconciliation failed");
   }
 }
