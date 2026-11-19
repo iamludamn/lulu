@@ -1,5 +1,4 @@
 import { createInlineCodemodeSandbox } from "@earendil-works/pi-codemode/cloudflare";
-import { mcpStore } from "@lulu/core/agent/mcp-store.js";
 import type { DurableHost, DurableSockets, Environment, KeyValue, Socket } from "@lulu/core/host/types.js";
 import { createTelemetry } from "@lulu/core/telemetry/otlp.js";
 import type { ApiHost } from "@lulu/core/server/api.js";
@@ -50,7 +49,6 @@ export function durableHost(ctx: DurableObjectState, env: Env): DurableHost {
     deleteAll: () => ctx.storage.deleteAll(),
     list: <T = unknown>(options: { prefix: string }) => ctx.storage.list<T>(options),
   };
-  const mcp = mcpStore({ env: environment, kv, storage }, name);
   return {
     env: environment,
     telemetry,
@@ -58,8 +56,6 @@ export function durableHost(ctx: DurableObjectState, env: Env): DurableHost {
       name: "@cf/cloudflare/clef-flash",
       run: (state, questions, signal) => env.AI!.run("@cf/cloudflare/clef-flash", { model: "clef-flash", state, questions }, { signal }),
     },
-    readMcpAuth: () => mcp.readAuth(),
-    writeMcpAuth: (content) => mcp.writeAuth(content),
     name,
     id: ctx.id.toString(),
     storage,

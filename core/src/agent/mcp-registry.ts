@@ -1,11 +1,9 @@
-import type { DurableHost } from "../host/types.js";
 import type { McpStatus } from "../protocol/contract.js";
 import { MCP_MASK, type McpRegistryView } from "../protocol/mcp.js";
 import { McpRegistryError, checkName, maskUrl, parseInput, resolve } from "./mcp-config.js";
-import { loginMcp, callbackMcp, removeMcpAuth } from "./mcp-oauth.js";
-import { mcpStore } from "./mcp-store.js";
-
-export type RegistryHost = Pick<DurableHost, "env" | "kv" | "name" | "storage">;
+import { loginMcp, callbackMcp } from "./mcp-oauth.js";
+import { mcpAuthStore } from "./mcp-auth.js";
+import { mcpStore, type McpStoreHost } from "./mcp-store.js";
 
 export interface RegistryHooks {
   statuses(): readonly McpStatus[];
@@ -14,8 +12,8 @@ export interface RegistryHooks {
 
 const json = (body: unknown, status = 200): Response => Response.json(body, { status });
 
-async function registryView(host: RegistryHost, statuses: readonly McpStatus[]): Promise<McpRegistryView> {
-  const servers = await mcpStore(host, host.name).servers();
+async function registryView(host: McpStoreHost, statuses: readonly McpStatus[]): Promise<McpRegistryView> {
+  const servers = await mcpStore(host).servers();
   return {
     servers: Object.entries(servers).map(([name, config]) => ({
       name,
@@ -26,8 +24,8 @@ async function registryView(host: RegistryHost, statuses: readonly McpStatus[]):
   };
 }
 
-async function save(host: RegistryHost, hooks: RegistryHooks, name: string, request: Request): Promise<Response> {
-  const store = mcpStore(host, host.name);
+async function save(host: McpStoreHost, hooks: RegistryHooks, name: string, request: Request): Promise<Response> {
+  const store = mcpStore(host);
   const servers = await store.servers();
   checkName(name, Object.keys(servers));
   const body = await request.json().catch(() => {
@@ -37,14 +35,13 @@ async function save(host: RegistryHost, hooks: RegistryHooks, name: string, requ
   return json(await registryView(host, await hooks.reload(name)));
 }
 
-async function remove(host: RegistryHost, hooks: RegistryHooks, name: string): Promise<Response> {
-  const store = mcpStore(host, host.name);
-  await store.remove(name);
-  await removeMcpAuth(host, name);
+async function remove(host: McpStoreHost, hooks: RegistryHooks, name: string): Promise<Response> {
+  await mcpStore(host).remove(name);
+  await mcpAuthStore(host).remove(name);
   return json(await registryView(host, await hooks.reload(name)));
 }
 
-async function route(request: Request, host: RegistryHost, hooks: RegistryHooks): Promise<Response> {
+async function route(request: Request, host: McpStoreHost, hooks: RegistryHooks): Promise<Response> {
   if (host.env.MCP_ENCRYPTION_KEY === undefined) throw new McpRegistryError(503, "MCP_ENCRYPTION_KEY is not configured");
   const { pathname, origin, searchParams } = new URL(request.url);
   const parts = pathname.split("/").filter((part) => part !== "").slice(1);
@@ -61,14 +58,14 @@ async function route(request: Request, host: RegistryHost, hooks: RegistryHooks)
   if (parts.length === 3 && parts[2] === "reload") {
     const rejected = allow("POST");
     if (rejected !== undefined) return rejected;
-    if ((await mcpStore(host, host.name).servers())[name] === undefined) throw new McpRegistryError(404, `Unknown server "${name}"`);
+    if ((await mcpStore(host).servers())[name] === undefined) throw new McpRegistryError(404, `Unknown server "${name}"`);
     return json(await registryView(host, await hooks.reload(name)));
   }
-  if (parts.length === 3 && parts[2] === "login") return allow("POST") ?? loginMcp(host, hooks, name, origin);
+  if (parts.length === 3 && parts[2] === "login") return allow("POST") ?? loginMcp(host, name, origin);
   return json({ error: "Not found" }, 404);
 }
 
-export async function handleMcpRegistry(request: Request, host: RegistryHost, hooks: RegistryHooks): Promise<Response> {
+export async function handleMcpRegistry(request: Request, host: McpStoreHost, hooks: RegistryHooks): Promise<Response> {
   try {
     return await route(request, host, hooks);
   } catch (error) {

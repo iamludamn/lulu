@@ -34,20 +34,18 @@ async function open(secret: string, sealed: string): Promise<string> {
   return new TextDecoder().decode(plain);
 }
 
-export function mcpStore(host: Pick<DurableHost, "env" | "kv" | "storage">, botId: string) {
+export type McpStoreHost = Pick<DurableHost, "env" | "kv" | "storage" | "name">;
+
+export function mcpStore(host: McpStoreHost) {
   const secret = host.env.MCP_ENCRYPTION_KEY;
-  const configPrefix = `mcp:config:${botId}:`;
-  const authKey = `mcp:auth:${botId}`;
+  const configPrefix = `mcp:config:${host.name}:`;
+  const authKey = `mcp:auth:${host.name}`;
   return {
     async readAuth(): Promise<string | undefined> {
       if (secret === undefined) return undefined;
       const stored = await host.storage.get<string>(authKey);
-      if (stored !== undefined) return open(secret, stored);
-      const legacy = await host.kv.get(authKey);
-      if (legacy === null) return undefined;
-      const content = await open(secret, legacy);
-      await host.storage.put({ [authKey]: legacy });
-      return content;
+      const sealed = stored ?? await host.kv.get(authKey);
+      return sealed === null ? undefined : open(secret, sealed);
     },
     async writeAuth(content: string): Promise<void> {
       if (secret === undefined) throw new Error("MCP_ENCRYPTION_KEY is not configured");

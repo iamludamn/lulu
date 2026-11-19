@@ -4,7 +4,7 @@ import { deferredMcp, type McpHost, type McpServerConfig } from "./mcp.js";
 import { artifactConfigured } from "../artifact/s3.js";
 import { mcpStore } from "./mcp-store.js";
 import { DEFAULT_HARNESS, installHarness } from "./catalog.js";
-import type { DurableHost, McpHostServices } from "../host/types.js";
+import type { DurableHost } from "../host/types.js";
 import type { McpStatus } from "../protocol/contract.js";
 
 function platformServers(host: DurableHost): Record<string, McpServerConfig> {
@@ -18,19 +18,9 @@ function platformServers(host: DurableHost): Record<string, McpServerConfig> {
   return servers;
 }
 
-function mcpServices(host: DurableHost): McpHostServices & Pick<DurableHost, "storage"> {
-  return {
-    storage: host.storage,
-    env: host.env,
-    telemetry: host.telemetry,
-    readMcpAuth: () => host.readMcpAuth(),
-    writeMcpAuth: (content) => host.writeMcpAuth(content),
-  };
-}
-
 async function openChatMcp(host: DurableHost, botServers: Record<string, McpServerConfig>): Promise<{ host: McpHost; statuses: McpStatus[] }> {
   const platform = platformServers(host);
-  const mcp = await deferredMcp({ ...botServers, ...platform }, mcpServices(host));
+  const mcp = await deferredMcp({ ...botServers, ...platform }, host);
   const statuses = mcp.statuses.map((status): McpStatus => ({ ...status, source: Object.hasOwn(platform, status.name) ? "platform" : "bot" }));
   return { host: mcp, statuses };
 }
@@ -58,7 +48,7 @@ export async function createChatHarnessOptions(
   host: DurableHost,
   models: Models,
 ): Promise<{ options: HarnessOptions; mcp: McpStatus[]; host: McpHost; registry: Registry; botServers: Record<string, McpServerConfig> }> {
-  const botServers = await mcpStore(host, host.name).servers();
+  const botServers = await mcpStore(host).servers();
   const { host: mcp, statuses } = await openChatMcp(host, botServers);
   const registry = createRegistry();
   installHarness(registry, DEFAULT_HARNESS.extensions, { host, mcp });
