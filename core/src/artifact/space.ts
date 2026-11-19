@@ -6,18 +6,10 @@ const WIDGET_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export const spacePage = (id: string): string => `${SPACE_DIR}${id}/index.html`;
 
-export const PAGE_KINDS = [
-  "An .html page is one of two things.",
-  "An HTML Asset is a finished file with its content baked in. It runs without network requests or saved state. Send it to Chat using send_to_user with kind asset so the user can keep it in Assets.",
-  "A Space is an interactive Widget kept on Panel. It can fetch live data from public APIs or remember user state. Send it to Chat using send_to_user with kind panel and body { kind: space, src, preview, refresh }. Its full page lives at `spaces/<widget id>/index.html` and its static cover at `spaces/<widget id>/cover.html`.",
-  "Decide with one question: will the user come back expecting the page to be newer than when you made it, or to find what they did last time? Yes means space, no means html asset.",
-  "Data wanted as of now, such as today's schedule or a comparison, is an html asset with the data baked in. When unsure, build an html asset; it can become a space later.",
-].join(" ");
-
 export function assetRefProblem(ref: string): string | undefined {
   const name = artifactName(ref);
   if (name === undefined || !name.startsWith(SPACE_DIR)) return undefined;
-  return `${name} is under ${SPACE_DIR}, so it is a space, and a space is never offered as an asset. Send it as a kind panel card whose body is { kind: space, src: "${ref}" } and a widget id of lowercase letters, digits and hyphens. Nothing was sent.`;
+  return "Space files are reserved for existing Spaces and cannot be offered as Assets. Nothing was sent.";
 }
 
 export function spaceRefProblem(id: string, src: string): string | undefined {

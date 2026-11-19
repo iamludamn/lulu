@@ -1,5 +1,5 @@
 import { Type, type Static } from "typebox";
-import { ModelWidgetInput, WidgetInput } from "./panel.js";
+import { ChecklistWidgetInput, WidgetInput } from "./panel.js";
 
 export const SEND_TOOL = "send_to_user";
 
@@ -37,7 +37,7 @@ export const SendInput = Type.Object({
 
 export const ModelSendInput = Type.Object({
   ...SendInput.properties,
-  widget: Type.Optional(Type.Union([Type.Object({ ...WidgetCard.properties, panel: ModelWidgetInput }), ScheduleOverviewRequest, AssetCard], { description: "Card for type widget: a Widget for Panel or an Asset for Assets" })),
+  widget: Type.Optional(Type.Union([Type.Object({ ...WidgetCard.properties, panel: ChecklistWidgetInput }), ScheduleOverviewRequest, AssetCard], { description: "Card for type widget: a Widget for Panel or an Asset for Assets" })),
 });
 
 export type SendInput = Static<typeof SendInput>;

@@ -119,7 +119,6 @@ const widgetProperties = {
 };
 
 export const ChecklistWidgetInput = Type.Object({ ...widgetProperties, body: Checklist });
-export const ModelWidgetInput = Type.Object({ ...widgetProperties, body: Type.Union([Checklist, Space]) });
 
 // Stored Panel widgets and Chat offers keep their original wire formats.
 export const WidgetInput = Type.Object({

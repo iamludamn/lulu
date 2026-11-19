@@ -37,7 +37,7 @@ async function update(api: ToolExecutionApi<PanelDetails>, args: PanelArgs, cont
   const current = await api.snapshot(PanelDoc, context);
   const previous = current?.widgets[id];
   if (previous === undefined) return fail(`${id} is not on the panel. Only the user adds widgets: offer a new one with send_to_user type widget kind panel.`);
-  if (["space", "web"].includes(previous.body.kind)) return fail("Space changes require user approval. Save a new page version, then offer a send_to_user panel card with the same id and new ref. The user swipes to apply it. Nothing was changed.");
+  if (["space", "web"].includes(previous.body.kind)) return fail("Space revisions are currently unavailable. Nothing was changed.");
   if (!isChecklist(previous)) return fail(`${id} is not a Checklist. Offer a Checklist with a new id so the existing widget stays on Panel.`);
   const updatedAt = Date.now();
   await api.commit(async (tx) => {
@@ -75,7 +75,7 @@ export const createPanelTool = (): ToolRegistration =>
     description: [
       "Maintain Widgets the user has accepted on Panel.",
       "update replaces a kept Checklist by id. Read the current items with list and preserve the user's checkmarks for unchanged items.",
-      "Only the user can add Widgets by swiping a card you offer with send_to_user. Space revisions need a new artifact version and a card with the same id for the user to accept.",
+      "Only the user can add Widgets by swiping a card you offer with send_to_user.",
     ].join(" "),
     parameters: PanelParams,
     replay: "safe",
