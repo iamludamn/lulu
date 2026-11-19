@@ -16,7 +16,7 @@ export type AlarmOutcome = { fired: string[]; expired: ConversationId[] };
 
 export function fireSchedules(harness: Harness, parentId: ConversationId, selected: ModelRef, now: number): Promise<AlarmOutcome> {
   return harness.commit(async (tx) => {
-    const fired = await fireDue(tx, now, (draft, job, runId) =>
+    const fired = await fireDue(tx, now, (draft, job, runId, scheduledFor) =>
       createRun(draft, {
         runId,
         task: job.prompt,
@@ -24,6 +24,7 @@ export function fireSchedules(harness: Harness, parentId: ConversationId, select
         agent: DefaultDelegateAgent,
         presets: DelegateAgents,
         token: "cron:" + job.id,
+        scheduleSource: { kind: "schedule_message", scheduleId: job.id, scheduledFor },
         origin: [],
         parentId,
         cwd: null,

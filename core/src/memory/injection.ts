@@ -4,6 +4,7 @@ import type { TelemetryContext, TelemetrySpan } from "@earendil-works/pi-telemet
 import type { DurableHost } from "../host/types.js";
 import type { ClientMessage } from "../protocol/wire.js";
 import { ChatDoc } from "../conversation/progress.js";
+import { inputSubmission } from "../conversation/input.js";
 import { RequestDeadlinesDoc } from "../conversation/deadlines.js";
 import { REQUEST_TIMEOUT_MS } from "../delegate/limits.js";
 import { InjectionBindings, InjectionFamily, type MemoryInjection, type MemoryResource } from "./doc.js";
@@ -67,7 +68,12 @@ export async function admitPrompt(harness: Harness, root: Conversation, view: Co
     let message = chat.messages.find((item) => item.requestId === command.requestId);
     const ledger = !message && delivery ? await tx.doc(ChatDeliveryDoc) : undefined;
     if (ledger?.requests.length === 0) ledger.through = Number(await tx.latestEntryId(root.id) ?? 0);
-    const id = await root.submit(tx, { type: "input", content: command.content, requestId: command.requestId, whenBusy: command.whenBusy });
+    const id = await root.submit(tx, inputSubmission({
+      kind: "user_message",
+      content: command.content,
+      requestId: command.requestId,
+      whenBusy: command.whenBusy,
+    }));
     const selection = await tx.doc(InjectionFamily, command.requestId, { requestId: command.requestId });
     const bindings = await tx.doc(InjectionBindings);
     const firstBinding = bindings.requests[String(id)] === undefined;
