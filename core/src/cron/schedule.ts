@@ -79,6 +79,14 @@ export function utcOnceCron(at: number): string {
   return `${utc.getUTCMinutes()} ${utc.getUTCHours()} ${utc.getUTCDate()} ${utc.getUTCMonth() + 1} *`;
 }
 
+export function cronOccurrence(cron: string, eventTime: number): number | undefined {
+  const minute = 60_000;
+  // Cloudflare's event timestamp can include seconds and milliseconds after the rule's UTC minute.
+  for (let at = Math.floor(eventTime / minute) * minute; eventTime - at <= GRACE_MS; at -= minute) {
+    if (cron === utcDailyCron(at) || cron === utcOnceCron(at)) return at;
+  }
+}
+
 export function dailyUtcCrons(time: string, tz: string, now: number): string[] {
   const [hour, minute] = time.split(":").map(Number);
   const clock = clockIn(tz);

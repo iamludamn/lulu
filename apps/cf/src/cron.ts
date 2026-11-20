@@ -1,6 +1,6 @@
 import type { CronRegistration } from "@lulu/core/cron/registration.js";
 import { cronDueAt } from "@lulu/core/cron/engine.js";
-import { GRACE_MS, utcDailyCron, utcOnceCron } from "@lulu/core/cron/schedule.js";
+import { cronOccurrence, GRACE_MS, utcDailyCron } from "@lulu/core/cron/schedule.js";
 import { savedJobs, savedPanel, savedSpace } from "@lulu/core/conversation/bot-data.js";
 import { BOT_ID } from "@lulu/core/server/api.js";
 import { spaceCronDue } from "@lulu/core/space/refresh.js";
@@ -33,19 +33,19 @@ export async function dispatchCron(controller: ScheduledController, env: Env, ct
   if (cronRegistration(env) === undefined) return;
   const { scheduledTime, cron } = controller;
   const now = Date.now();
-  if (!Number.isSafeInteger(scheduledTime) || scheduledTime % 60_000 !== 0 || scheduledTime > now) return;
+  if (!Number.isSafeInteger(scheduledTime) || scheduledTime > now) return;
   const rule = cron.trim().replace(/\s+/g, " ");
-  if (rule === utcOnceCron(scheduledTime) || (rule === utcDailyCron(scheduledTime) && now - scheduledTime <= GRACE_MS)) {
-    const stored = await workerHost(env, ctx).data?.read();
-    if (stored !== undefined) {
-      const due = cronDueAt(rule, scheduledTime);
-      const hasJob = savedJobs(stored).some((job) => due(job, now) !== undefined);
-      const hasSpace = savedPanel(stored)?.order.some((id) => {
-        const entry = savedSpace(stored, id);
-        return entry !== undefined && spaceCronDue(entry, rule, scheduledTime, now);
-      });
-      if (!hasJob && !hasSpace) return;
-    }
-    await env.BOTS.getByName(BOT_ID).runCron(rule, scheduledTime);
+  const at = cronOccurrence(rule, scheduledTime);
+  if (at === undefined || (rule === utcDailyCron(at) && now - at > GRACE_MS)) return;
+  const stored = await workerHost(env, ctx).data?.read();
+  if (stored !== undefined) {
+    const due = cronDueAt(rule, at);
+    const hasJob = savedJobs(stored).some((job) => due(job, now) !== undefined);
+    const hasSpace = savedPanel(stored)?.order.some((id) => {
+      const entry = savedSpace(stored, id);
+      return entry !== undefined && spaceCronDue(entry, rule, at, now);
+    });
+    if (!hasJob && !hasSpace) return;
   }
+  await env.BOTS.getByName(BOT_ID).runCron(rule, at);
 }
