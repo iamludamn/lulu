@@ -2,24 +2,23 @@ import { test } from 'node:test';
 import { setImmediate } from 'node:timers/promises';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import assert from 'node:assert/strict';
-import { createSession, Harness, MemoryStorage } from '@earendil-works/pi-durable';
+import { AssistantEntry, createSession, Harness, MemoryStorage, ProviderDoc, UserEntry } from '@earendil-works/pi-durable';
 import { createBashTool } from '@earendil-works/pi-durable/tools';
 import { NOOP_TELEMETRY_CONTEXT } from '@earendil-works/pi-telemetry';
 import { BotSession } from '../dist/conversation/bot.js';
-import { DelegateAgents } from '../dist/delegate/agents.js';
-import { createRun } from '../dist/delegate/spawn.js';
+import { RunFamily } from '../dist/delegate/runs.js';
 import { SandboxDoc } from '../dist/sandbox/doc.js';
 import { createEnvironmentExtension } from '../dist/sandbox/extension.js';
 import { createE2bProvider } from '../dist/sandbox/e2b/provider.js';
 
 const context = BACKGROUND_CONTEXT;
 
-test('the main loop omits sandbox tools while delegates keep them', async t => {
+test('delegate spawn starts with fresh context and keeps sandbox tools out of the main loop', async t => {
   const codingTools = ['read', 'write', 'edit', 'bash'];
   const open = t.mock.method(Harness, 'open');
   const bot = new BotSession({
     name: 'test',
-    env: {},
+    env: { SANDBOX_BACKEND: 'e2b' },
     telemetry: NOOP_TELEMETRY_CONTEXT,
     storage: { get: async () => undefined },
     alarm: { get: async () => null, set: async () => {}, delete: async () => {} },
@@ -36,21 +35,40 @@ test('the main loop omits sandbox tools while delegates keep them', async t => {
   const root = await harness.root(context);
   const main = await root.agent(context);
   assert.ok(main.extensions.every(extension => extension.name !== 'coding-tools'));
-  assert.ok(main.tools.some(tool => tool.name === 'delegate'));
+  const delegate = main.tools.find(tool => tool.name === 'delegate');
+  assert.ok(delegate);
   assert.ok(main.tools.some(tool => tool.name === 'send_to_user'));
   assert.deepEqual([...main.tools, ...main.callable].filter(tool => codingTools.includes(tool.name)).map(tool => tool.name), []);
 
-  const entry = await harness.commit(tx => tx.appendEntry(root.id, { kind: 'test.fork' }), context);
-  for (const forkAt of [null, entry.id]) {
-    const { childId } = await harness.commit(tx => createRun(tx, {
-      runId: `test-${forkAt}`, task: 'Read a file', description: 'Read a file',
-      agent: 'worker', presets: DelegateAgents, token: null, origin: [],
-      parentId: root.id, cwd: null, forkAt, model: null, thinkingLevel: null,
-    }), context);
-    const child = await harness.conversation(childId, context);
-    const agent = await child.agent(context);
-    assert.deepEqual(agent.tools.filter(tool => codingTools.includes(tool.name)).map(tool => tool.name), codingTools);
-  }
+  const args = { action: 'spawn', task: 'Read a file', description: 'Read a file' };
+  const callId = 'delegate-spawn';
+  await harness.commit(async tx => {
+    await tx.appendEntry(UserEntry, root.id, { model: [{ role: 'user', content: 'Parent history', timestamp: 1 }] });
+    await tx.appendEntry(AssistantEntry, root.id, {
+      model: [{ role: 'assistant', content: [{ type: 'toolCall', id: callId, name: 'delegate', arguments: args }] }],
+    });
+  }, context);
+  const result = await delegate.execute(args, {
+    conversationId: root.id,
+    callId,
+    taskId: 100,
+    agent: () => root.agent(context),
+    snapshot: harness.snapshot.bind(harness),
+    commit: harness.commit.bind(harness),
+    details() {},
+    output() {},
+  }, context);
+  assert.equal(result.details?.action, 'spawn', JSON.stringify(result));
+  const run = await harness.snapshot(RunFamily, result.details.id, context);
+  const child = await harness.conversation(run.conversationId, context);
+  assert.deepEqual((await child.context(context)).messages, []);
+  const parentProvider = await harness.snapshot(ProviderDoc, root.id, context);
+  const childProvider = await harness.snapshot(ProviderDoc, child.id, context);
+  assert.notEqual(childProvider.sessionId, parentProvider.sessionId);
+  const wait = await harness.getTask(run.waitTaskId, context);
+  assert.ok(wait.input.prompt.endsWith('\nTask:\nRead a file'));
+  const agent = await child.agent(context);
+  assert.deepEqual(agent.tools.filter(tool => codingTools.includes(tool.name)).map(tool => tool.name), codingTools);
 });
 
 async function exerciseBash(provider) {

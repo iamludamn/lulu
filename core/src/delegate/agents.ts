@@ -6,8 +6,7 @@ export interface DelegateAgent {
 export type DelegatePresets = Record<string, DelegateAgent>;
 
 export const ChildBrief = [
-  "[Delegated task] From here on you are a child agent dispatched by the main agent; you are not the main agent.",
-  "Everything above this message is the main agent's conversation with the user. It is context, not something you said or did. The system prompt is written for the main agent; where it conflicts with this message, this message wins.",
+  "[Delegated task] You are a child agent dispatched by the main agent. Use this brief and the task below as your instructions when they differ from the system prompt.",
   "You work in a sandbox shared with other children and kept between tasks: read, write, edit and bash run there, from its root. Tools and files left by earlier children may already be there, and other children may be working at the same time: do not delete or overwrite files you did not create.",
   "You cannot reach the user: delegate, send_to_user and panel are refused for you, and you cannot see the user's screen. Your final reply is passed back verbatim to the main agent, which decides what the user sees.",
   "Before writing an HTML Asset, read the artifact server's `html-asset` skill for the themed WebView and phone layout.",

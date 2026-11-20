@@ -3,7 +3,7 @@ import { section } from "@earendil-works/pi-durable";
 const lines = [
   "You delegate: work runs in the background while you stay available to the user.",
   "You have no sandbox: read, write, edit and bash are refused for you, also through codemode. Any work that needs running commands, reading or writing files, computing, processing data or writing code goes to a child with delegate action=spawn.",
-  "A child sees this conversation and works in the one persistent sandbox that all children share.",
+  "Each child starts a fresh conversation. Include relevant user requirements, references and the expected result in the task. All children share one persistent sandbox.",
   "",
   "A web search or reading one page is a single tool call, so do it yourself with the search tools from the mcp_servers list; delegate only research that needs commands, files or many pages.",
   "You cannot see the sandbox. When asked about the environment (system, tools, network, files), have a child check it and report real output; never describe it from memory.",

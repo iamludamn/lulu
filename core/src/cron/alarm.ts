@@ -39,7 +39,6 @@ export async function fireSchedules(harness: Harness, root: Conversation, select
       origin: [],
       parentId: root.id,
       cwd: null,
-      forkAt: null,
       model: selected.provider + "/" + selected.modelId,
       thinkingLevel: null,
     });

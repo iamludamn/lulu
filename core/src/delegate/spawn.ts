@@ -1,8 +1,7 @@
 import { reserveDelegate, REQUEST_TIMEOUT_MS } from "./limits.js";
 import { ChatDoc } from "../conversation/progress.js";
 import type { ScheduleMessageSource } from "../conversation/input.js";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { AssistantEntry, configure, ProviderDoc, type ConversationId, type Cursor, type EntryId, type SubmissionId, type Tx } from "@earendil-works/pi-durable";
+import { configure, type ConversationId, type SubmissionId, type Tx } from "@earendil-works/pi-durable";
 import { SandboxDoc } from "../sandbox/doc.js";
 import { ChildBrief, type DelegatePresets } from "./agents.js";
 import { DelegateAnchor } from "./anchor.js";
@@ -20,27 +19,8 @@ export interface RunStart {
   origin: SubmissionId[];
   parentId: ConversationId;
   cwd: string | null;
-  forkAt: EntryId | null;
   model: string | null;
   thinkingLevel: string | null;
-}
-
-const SCAN_PAGE = 64;
-
-export async function entryBeforeCall(tx: Tx, conversationId: ConversationId, callId: string): Promise<EntryId | null> {
-  const id = callId.split("/")[0];
-  let found = false;
-  let cursor: Cursor | undefined;
-  for (;;) {
-    const page = await tx.scanEntries({ conversationId }, SCAN_PAGE, cursor);
-    for (const entry of page.items) {
-      if (found) return entry.id;
-      const message = AssistantEntry.is(entry) ? (entry.model?.[0] as AssistantMessage | undefined) : undefined;
-      if (message?.content.some((part) => part.type === "toolCall" && part.id === id)) found = true;
-    }
-    if (page.next === undefined) return null;
-    cursor = page.next;
-  }
 }
 
 export async function createRun(tx: Tx, start: RunStart): Promise<{ runId: string; childId: ConversationId }> {
@@ -53,14 +33,12 @@ export async function createRun(tx: Tx, start: RunStart): Promise<{ runId: strin
   const preset = start.presets[start.agent];
   if (!index.ids.includes(start.runId)) index.ids.push(start.runId);
   const anchor = await tx.createTask(DelegateAnchor, { runId: start.runId }, { ownership: { kind: "conversation" }, conversationId: start.parentId, background: true });
-  const ownership = { kind: "task", taskId: anchor } as const;
-  const child = start.forkAt === null ? await tx.createConversation({ ownership }) : await tx.forkConversation(start.parentId, start.forkAt, { ownership });
+  const child = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
   // Delegates use the default extensions, including the coding tools excluded by the main conversation.
   await configure(tx, child.id, { extensions: null });
   const binding = await tx.doc(SandboxDoc, child.id);
   binding.key = start.runId;
   binding.owner = start.parentId;
-  (await tx.doc(ProviderDoc, child.id)).sessionId = (await tx.doc(ProviderDoc, start.parentId)).sessionId;
   draft.conversationId = child.id;
   draft.model = start.model;
   draft.thinkingLevel = start.thinkingLevel;
