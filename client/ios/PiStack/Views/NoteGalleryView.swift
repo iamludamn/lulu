@@ -110,12 +110,13 @@ struct NoteGalleryView: View {
     }
 
     private func galleryCard(_ entry: NoteGalleryEntry) -> some View {
-        VStack(alignment: .center, spacing: 4) {
+        let time = entry.date.formatted(.dateTime.hour().minute().locale(Self.locale))
+        return VStack(alignment: .center, spacing: 4) {
             Group {
                 switch entry {
                 case .note(let note):
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(note.title.isEmpty ? "新笔记" : note.title).font(.system(size: 8, weight: .semibold)).lineLimit(1)
+                        Text(note.displayTitle).font(.system(size: 8, weight: .semibold)).lineLimit(1)
                         Text(note.body).font(.system(size: 7)).lineLimit(3)
                         if let first = note.checks.first {
                             Label(first.text, systemImage: first.done ? "checkmark.circle.fill" : "circle")
@@ -135,11 +136,12 @@ struct NoteGalleryView: View {
             .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.primary.opacity(0.10)))
             .shadow(color: .black.opacity(0.06), radius: 2, y: 2)
             .accessibilityHidden(true)
-            Text(entry.title).font(.caption.weight(.medium)).lineLimit(1)
-            Text(entry.date.formatted(.dateTime.hour().minute().locale(Self.locale)))
+            Text(time)
                 .font(.caption2).foregroundStyle(.secondary)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(entry.title))
+        .accessibilityValue(Text(time))
     }
 
 
@@ -352,7 +354,7 @@ private struct NoteFilePreview: View {
                         }
                         .stroke(.teal, style: StrokeStyle(lineWidth: compact ? 1.5 : 3, dash: [4, 3]))
                     }
-                    Text("平江路")
+                    Text(compact ? file.title : "平江路")
                         .font(.system(size: compact ? 7 : 12, weight: .medium))
                         .padding(compact ? 7 : 14)
                 }
