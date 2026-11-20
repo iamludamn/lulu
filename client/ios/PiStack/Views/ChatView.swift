@@ -67,7 +67,9 @@ struct ChatView: View {
                         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { metrics.bottomMarkerY = $0; updateBottomState() }
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 8)
+                // Include the header gap in the transcript height used for bottom alignment.
+                .padding(.top, topInset + 8)
+                .padding(.bottom, 8)
                 .frame(maxWidth: 720)
                 .frame(maxWidth: .infinity)
                 .background { ChatScrollAnchor(metrics: metrics) }
@@ -75,8 +77,6 @@ struct ChatView: View {
             .defaultScrollAnchor(.bottom)
             .defaultScrollAnchor(revealAnchor == nil && bottomState.pinned ? .bottom : nil, for: .sizeChanges)
             .scrollClipDisabled()
-            .contentMargins(.top, topInset, for: .scrollContent)
-            .contentMargins(.bottom, 0, for: .scrollContent)
             .scrollDismissesKeyboard(.interactively)
             .onScrollPhaseChange { _, phase in
                 metrics.dragging = phase == .interacting || phase == .decelerating
