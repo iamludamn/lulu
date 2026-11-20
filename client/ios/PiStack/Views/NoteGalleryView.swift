@@ -31,9 +31,9 @@ struct NoteFile: Identifiable {
         [
             .init(id: "map", title: "苏州散步地图", ext: "pdf", date: store.sampleDate(day: 0, hour: 9, minute: 32),
                   summary: "平江路 → 拙政园 → 苏州博物馆"),
-            .init(id: "coffee", title: "苏州咖啡店清单", ext: "html", date: store.sampleDate(day: -1, hour: 16, minute: 22),
+            .init(id: "coffee", title: "苏州咖啡店清单", ext: "html", date: store.sampleDate(day: -3, hour: 16, minute: 22),
                   summary: "十全街｜有露台\n平江路｜适合歇脚"),
-            .init(id: "agenda", title: "周五例会议程", ext: "pdf", date: store.sampleDate(day: -1, hour: 11, minute: 17),
+            .init(id: "agenda", title: "周五例会议程", ext: "pdf", date: store.sampleDate(day: -70, hour: 11, minute: 17),
                   summary: "本周进展\n下周安排\n待讨论事项")
         ]
     }
@@ -63,18 +63,21 @@ struct NoteGalleryView: View {
     }
 
     var body: some View {
-        let groups = Dictionary(grouping: entries) { Calendar.current.startOfDay(for: $0.date) }
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        let groups = Dictionary(grouping: entries) { Self.sectionTitle(for: $0.date, today: today, calendar: calendar) }
+            .sorted { ($0.value.first?.date ?? .distantPast) > ($1.value.first?.date ?? .distantPast) }
         return ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                if entries.isEmpty {
+                if groups.isEmpty {
                     Text("没有找到相关内容").foregroundStyle(.secondary)
                 }
-                ForEach(groups.keys.sorted(by: >), id: \.self) { day in
+                ForEach(groups, id: \.key) { group in
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(Self.dayTitle(day)).font(.title3.bold())
+                        Text(group.key).font(.title3.bold())
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top), count: 3),
                                   alignment: .leading, spacing: 14) {
-                            ForEach(groups[day] ?? []) { entry in
+                            ForEach(group.value) { entry in
                                 entryButton(entry)
                             }
                         }
@@ -116,7 +119,7 @@ struct NoteGalleryView: View {
     }
 
     private func galleryCard(_ entry: NoteGalleryEntry) -> some View {
-        let time = entry.date.formatted(.dateTime.hour().minute().locale(Self.locale))
+        let time = Self.cardDate(entry.date)
         return VStack(alignment: .center, spacing: 4) {
             Group {
                 switch entry {
@@ -178,10 +181,29 @@ struct NoteGalleryView: View {
         }
     }
 
-    private static func dayTitle(_ date: Date) -> String {
+    private static func sectionTitle(for date: Date, today: Date, calendar: Calendar) -> String {
+        let day = calendar.startOfDay(for: date)
+        switch calendar.dateComponents([.day], from: day, to: today).day ?? Int.max {
+        case 0: return "今天"
+        case 1: return "昨天"
+        case 2...7: return "过去 7 天"
+        case 8...30: return "过去 30 天"
+        default:
+            if calendar.isDate(date, equalTo: today, toGranularity: .year) {
+                return date.formatted(.dateTime.month(.wide).locale(locale))
+            }
+            return date.formatted(.dateTime.year().locale(locale))
+        }
+    }
+
+    private static func cardDate(_ date: Date) -> String {
         let calendar = Calendar.current
-        if calendar.isDateInToday(date) { return "今天" }
-        if calendar.isDateInYesterday(date) { return "昨天" }
+        if calendar.isDateInToday(date) || calendar.isDateInYesterday(date) {
+            return date.formatted(.dateTime.hour().minute().locale(locale))
+        }
+        if calendar.isDate(date, equalTo: .now, toGranularity: .year) {
+            return date.formatted(.dateTime.month().day().locale(locale))
+        }
         return date.formatted(.dateTime.year().month().day().locale(locale))
     }
 }

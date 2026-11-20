@@ -64,9 +64,9 @@ final class NoteStore {
             Note(title: "出行灵感", body: "挑一段好走的河边路线，留些时间喝咖啡。", date: sampleDate(day: 0, hour: 9, minute: 36)),
             Note(title: "购物清单", body: "周末出门前买齐。", date: sampleDate(day: -1, hour: 18, minute: 55),
                  checks: [.init(text: "燕麦奶"), .init(text: "咖啡豆")]),
-            Note(title: "Lulu 灵感随记", body: "把路上想到的点子先记下来。", date: sampleDate(day: -1, hour: 14, minute: 8)),
-            Note(title: "桌面整理", body: "线材放到桌下，台灯换到左手边。", date: sampleDate(day: -1, hour: 10, minute: 5)),
-            Note(title: "十一月想读的书", body: "周末把读书笔记整理到一起。", date: sampleDate(day: -1, hour: 8, minute: 46))
+            Note(title: "Lulu 灵感随记", body: "把路上想到的点子先记下来。", date: sampleDate(day: -4, hour: 14, minute: 8)),
+            Note(title: "桌面整理", body: "线材放到桌下，台灯换到左手边。", date: sampleDate(day: -16, hour: 10, minute: 5)),
+            Note(title: "十一月想读的书", body: "周末把读书笔记整理到一起。", date: sampleDate(day: -410, hour: 8, minute: 46))
         ]
         append(.user, "周末想去苏州，帮我排个轻松一点的路线。", anchor: nil)
         append(.assistant, Self.routeReply, anchor: nil, id: Self.routeReplyID)
