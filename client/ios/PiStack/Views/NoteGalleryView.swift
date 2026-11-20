@@ -254,13 +254,10 @@ struct NoteDetailView: View {
     @State private var previewFile: NoteFile?
     @Environment(\.openArtifact) private var openArtifact
 
-    private static let locale = Locale(identifier: "zh_CN")
     var body: some View {
         let value = note
         ScrollView {
             VStack(alignment: .leading, spacing: 13) {
-                Text(value.date.formatted(.dateTime.month().day().hour().minute().locale(Self.locale)))
-                    .font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity)
                 TextField("新笔记", text: $note.title, axis: .vertical)
                     .font(.largeTitle.bold())
                     .accessibilityLabel("笔记标题")
@@ -303,7 +300,7 @@ struct NoteDetailView: View {
             }
             .frame(maxWidth: 660)
             .padding(.horizontal, 22)
-            .padding(.top, 15)
+            .padding(.top, 8)
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Color.paper.ignoresSafeArea())
