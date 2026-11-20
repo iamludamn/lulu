@@ -173,7 +173,7 @@ struct ChatView: View {
         .animation(reduceMotion ? nil : .snappy, value: reconnecting)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if snapshot.halt == nil {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 0) {
                     if let note = noteStore.context { noteReference(note) }
                     Composer(draft: $draft, store: store, transcription: transcription, onTranscribed: transcribed, busy: busy, placeholder: placeholder, focused: composing, onSend: send, onVoiceConversation: onVoiceConversation)
                 }
@@ -319,18 +319,31 @@ struct ChatView: View {
     }
 
     private func noteReference(_ note: Note) -> some View {
-        HStack(spacing: 7) {
-            Label(note.displayTitle, systemImage: "note.text")
-                .font(.footnote.weight(.semibold)).lineLimit(1)
-            Button("移除笔记引用", systemImage: "xmark.circle.fill") { noteStore.attach(nil) }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+        HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Text("引用笔记")
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                Text(note.displayTitle)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+            }
+            .font(.footnote)
+            .accessibilityElement(children: .combine)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button { noteStore.attach(nil) } label: {
+                Image(systemName: "xmark")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("移除笔记引用")
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .glassEffect(.regular)
-        .padding(.horizontal, 18)
+        .padding(.leading, 34)
+        .padding(.trailing, 72)
         .frame(maxWidth: 720, alignment: .leading)
         .frame(maxWidth: .infinity)
     }
