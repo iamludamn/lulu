@@ -13,6 +13,7 @@ struct PanelView: View {
     let onDrop: (String) -> Void
     let onCheck: (String, Int, Bool) -> Void
     let onCompose: () -> Void
+    let onVisibleCovers: (Set<String>) -> Void
     @Environment(\.topInset) private var topInset
 
     private static let ideas = ["今天 18:30 提醒我取快递", "做一份出发前的待办清单"]
@@ -34,6 +35,7 @@ struct PanelView: View {
                         }
                     }
                 }
+                .scrollTargetLayout()
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .padding(.bottom, 32)
@@ -41,6 +43,9 @@ struct PanelView: View {
                 .frame(maxWidth: .infinity)
                 .animation(.snappy, value: visibleWidgets.map(\.id))
             }
+        }
+        .onScrollTargetVisibilityChange(idType: String.self, threshold: 0.01) { ids in
+            onVisibleCovers(Set(ids))
         }
         .contentMargins(.top, topInset, for: .scrollContent)
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }

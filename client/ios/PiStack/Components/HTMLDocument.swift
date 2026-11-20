@@ -134,9 +134,10 @@ struct HTMLPage: View {
     let bridge: SpaceBridge?
     var interactive = true
     var showLoading = true
+    var onSettled: () -> Void = {}
 
     var body: some View {
-        HTMLSurface(html: html, bridge: bridge, interactive: interactive, showLoading: showLoading)
+        HTMLSurface(html: html, bridge: bridge, interactive: interactive, showLoading: showLoading, onSettled: onSettled)
             .id(bridge.map { ObjectIdentifier($0) })
     }
 
@@ -158,6 +159,7 @@ private struct HTMLSurface: View {
     let bridge: SpaceBridge?
     let interactive: Bool
     let showLoading: Bool
+    let onSettled: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("pistack.wallpaper") private var theme = WallpaperTheme.sky
     @State private var presentation = HTMLPresentation.loading
@@ -202,9 +204,10 @@ private struct HTMLSurface: View {
             next = .failed
         }
         guard presentation != next else { return }
-        withAnimation(next == .ready && !reduceMotion ? .easeOut(duration: 0.16) : nil) {
+        withAnimation(interactive && next == .ready && !reduceMotion ? .easeOut(duration: 0.16) : nil) {
             presentation = next
         }
+        onSettled()
     }
 }
 

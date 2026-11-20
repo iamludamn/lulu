@@ -4,13 +4,20 @@ import SwiftUI
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var covers = StartupCovers()
 
-    private var loading: Bool {
+    private var loadingLayout: Bool {
         if let connection = model.connection {
             let snapshot = connection.store.snapshot
             return !snapshot.hasLayout && snapshot.link == .connecting && snapshot.halt == nil
         }
         return model.api != nil
+    }
+
+    private var waitingForCovers: Bool {
+        guard let snapshot = model.connection?.store.snapshot, snapshot.hasLayout, snapshot.halt == nil,
+              snapshot.panel.list.contains(where: \.isSpace) else { return false }
+        return covers.isWaiting(revision: model.connectionRevision, widgets: snapshot.panel.list)
     }
 
     private var loadingAnimation: Animation? {
@@ -23,14 +30,22 @@ struct RootView: View {
     }
 
     var body: some View {
-        let loading = self.loading
+        let revision = model.connectionRevision
+        let waiting = waitingForCovers
+        let loading = loadingLayout || waiting
         ZStack {
-            if !loading, let connection = model.connection {
+            if !loadingLayout, let connection = model.connection {
                 NavigationStack {
-                    HomeView(bot: connection.bot, api: connection.api, store: connection.store)
+                    HomeView(bot: connection.bot, api: connection.api, store: connection.store, onVisibleCovers: { visible in
+                        covers.update(revision: revision) { $0.visible = visible }
+                    }, onCoverSettled: { cover in
+                        covers.update(revision: revision) { $0.settled.insert(cover) }
+                    })
                         .toolbarVisibility(.hidden, for: .navigationBar)
                 }
-                .id(model.connectionRevision)
+                .id(revision)
+                .allowsHitTesting(!loading)
+                .accessibilityHidden(loading)
             } else if model.api == nil {
                 NavigationStack { SettingsView() }
             }
@@ -45,6 +60,14 @@ struct RootView: View {
         }
         .onChange(of: loading, initial: true) { _, value in
             ClientTiming.mark(value ? "startup.loading" : "startup.loading.cleared")
+            if !value, model.connection != nil { covers.finish(revision: revision) }
+        }
+        .task(id: waiting ? revision : nil) {
+            guard waiting else { return }
+            do { try await Task.sleep(for: .seconds(4)) } catch { return }
+            guard revision == model.connectionRevision else { return }
+            ClientTiming.mark("startup.covers.timeout")
+            covers.finish(revision: revision)
         }
         .task(id: loading) {
             guard loading else { return }
@@ -52,6 +75,33 @@ struct RootView: View {
             HTMLPage.preparePreview()
         }
         .task(id: model.connectionRevision) { await model.resolve() }
+    }
+}
+
+private struct StartupCovers {
+    private var revision: Int?
+    private var finished = false
+    var visible: Set<String>?
+    var settled: Set<StartupSpaceCover> = []
+
+    func isWaiting(revision: Int, widgets: [PanelWidget]) -> Bool {
+        guard self.revision == revision else { return true }
+        guard !finished else { return false }
+        guard let visible else { return true }
+        return widgets.contains { widget in
+            guard visible.contains(widget.id), case .space(let src, _, _, let preview) = widget.body else { return false }
+            return !settled.contains(StartupSpaceCover(id: widget.id, reference: preview ?? src))
+        }
+    }
+
+    mutating func update(revision: Int, _ change: (inout Self) -> Void) {
+        if let current = self.revision, current > revision { return }
+        if self.revision != revision { self = Self(revision: revision) }
+        if !finished { change(&self) }
+    }
+
+    mutating func finish(revision: Int) {
+        update(revision: revision) { $0.finished = true }
     }
 }
 

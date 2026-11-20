@@ -1,6 +1,15 @@
 import PiStackKit
 import SwiftUI
 
+struct StartupSpaceCover: Hashable {
+    let id: String
+    let reference: String
+}
+
+extension EnvironmentValues {
+    @Entry var startupSpaceSettled: (StartupSpaceCover) -> Void = { _ in }
+}
+
 struct SpacePreview: View {
     let src: String
     let preview: String?
@@ -11,6 +20,7 @@ struct SpacePreview: View {
     @State private var refreshes = 0
     @State private var failed: Request?
     @State private var loading: Request?
+    @Environment(\.startupSpaceSettled) private var settleCover
 
     private struct Source: Hashable {
         let reference: String
@@ -37,7 +47,10 @@ struct SpacePreview: View {
         ZStack {
             if let page {
                 let refreshing = loading == request && request.refresh > 0
-                HTMLPage(html: page.html, bridge: page.bridge, interactive: false, showLoading: !refreshing)
+                HTMLPage(html: page.html, bridge: page.bridge, interactive: false, showLoading: !refreshing, onSettled: {
+                    settleCover(StartupSpaceCover(id: id, reference: page.source.reference))
+                })
+                    .id(page.source)
                     .overlay(alignment: .topTrailing) {
                         if refreshing {
                             ProgressView().padding(10).background(.regularMaterial, in: Circle()).padding(12)
@@ -79,6 +92,7 @@ struct SpacePreview: View {
         defer { if loading == request { loading = nil } }
         guard let address = ArtifactAddress(request.source.reference) else {
             failed = request
+            settleCover(StartupSpaceCover(id: id, reference: request.source.reference))
             return
         }
         if page?.source != request.source && (page == nil || request.refresh == 0) {
@@ -109,6 +123,9 @@ struct SpacePreview: View {
         } catch {
             guard !Task.isCancelled, request == self.request else { return }
             failed = request
+            if page?.source != request.source {
+                settleCover(StartupSpaceCover(id: id, reference: request.source.reference))
+            }
             if request.refresh > 0, page?.source == request.source { await page?.bridge?.refresh() }
         }
     }
