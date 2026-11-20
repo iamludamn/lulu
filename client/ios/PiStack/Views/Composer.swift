@@ -26,14 +26,18 @@ struct Composer: View {
 
     private var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var showSend: Bool { canSend && !listening }
+    private var tapRecording: Bool { !listening && (transcription.starting || transcription.recording) }
 
     private var voiceHint: String? {
-        guard listening else { return transcription.processing ? "正在识别…" : notice }
-        if voiceTarget == .cancel { return "松手取消" }
-        if voiceTarget == .conversation { return "松手进入语音对话" }
-        if let error = transcription.error { return error }
-        if transcription.recording { return voiceTarget == .text ? "松手转文字" : "松开发送" }
-        return transcription.starting && showPreparation ? "正在准备录音…" : nil
+        if listening {
+            if voiceTarget == .cancel { return "松手取消" }
+            if voiceTarget == .conversation { return "松手进入语音对话" }
+            if let error = transcription.error { return error }
+            if transcription.recording { return voiceTarget == .text ? "松手转文字" : "松开发送" }
+        }
+        if transcription.starting { return showPreparation ? "正在准备录音…" : nil }
+        if transcription.recording { return "轻点停止并转写" }
+        return transcription.processing ? "正在识别…" : notice
     }
 
     var body: some View {
@@ -144,17 +148,19 @@ struct Composer: View {
             if transcription.processing {
                 ProgressView().controlSize(.small)
             } else {
-                Image(systemName: "mic.fill").font(.system(size: 19, weight: .medium))
+                Image(systemName: tapRecording ? "stop.fill" : "mic.fill")
+                    .font(.system(size: 19, weight: .medium))
             }
         }
-        .foregroundStyle(listening ? .primary : .secondary)
+        .foregroundStyle(listening || tapRecording ? .primary : .secondary)
         .frame(width: 48, height: 48)
         .glassEffect(.regular, in: .circle)
         .scaleEffect(listening ? 1.08 : 1)
         .overlay {
             VoiceInteraction(
                 isEnabled: !transcription.processing,
-                onTap: onVoiceConversation,
+                isTapRecording: tapRecording,
+                onTap: toggleTranscription,
                 onHold: beginListening,
                 onDrag: updateListening,
                 onRelease: finishListening,
@@ -163,11 +169,25 @@ struct Composer: View {
         }
     }
 
+    private func toggleTranscription() {
+        guard !listening, !transcription.processing else { return }
+        if tapRecording {
+            transcription.finish { text in onTranscribed(text, false) }
+        } else {
+            startTranscription()
+        }
+    }
+
     private func beginListening() {
+        guard !tapRecording else { return }
+        listening = true
+        startTranscription()
+    }
+
+    private func startTranscription() {
         noticeTask?.cancel()
         notice = nil
         showPreparation = false
-        listening = true
         focused.wrappedValue = false
         transcription.start(store)
     }
@@ -237,6 +257,7 @@ struct Composer: View {
 
 private struct VoiceInteraction: UIViewRepresentable {
     let isEnabled: Bool
+    let isTapRecording: Bool
     let onTap: () -> Void
     let onHold: () -> Void
     let onDrag: (CGSize) -> Void
@@ -251,6 +272,8 @@ private struct VoiceInteraction: UIViewRepresentable {
         view.interaction = self
         view.isUserInteractionEnabled = isEnabled
         view.accessibilityTraits = isEnabled ? .button : [.button, .notEnabled]
+        view.accessibilityLabel = isTapRecording ? "停止录音并转写" : "语音输入"
+        view.accessibilityHint = isTapRecording ? nil : "轻点开始录音，长按展开语音选项"
     }
 
     final class Surface: UIView {
@@ -263,8 +286,6 @@ private struct VoiceInteraction: UIViewRepresentable {
             super.init(frame: .zero)
             backgroundColor = .clear
             isAccessibilityElement = true
-            accessibilityLabel = "语音对话"
-            accessibilityHint = "轻点开始通话，长按展开语音选项"
 
             let tap = TouchDownTapGestureRecognizer(target: self, action: #selector(tapped))
             tap.onTouchDown = { [weak self] in
