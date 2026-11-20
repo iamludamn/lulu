@@ -13,7 +13,10 @@ const ScheduleParams = Type.Object({
     description: "create | list | pause | resume | delete",
   }),
   name: Type.Optional(Type.String({ description: "Short label for create" })),
-  prompt: Type.Optional(Type.String({ description: "Self-contained task the scheduled run executes, for create" })),
+  mode: Type.Optional(Type.Union([Type.Literal("task"), Type.Literal("reminder")], {
+    description: "For create: reminder for an Alarm that sends a Chat reminder; task (default) for work to execute later",
+  })),
+  prompt: Type.Optional(Type.String({ description: "For create: what to remind the user about, or the self-contained task to execute" })),
   kind: Type.Optional(Type.Union([Type.Literal("once"), Type.Literal("daily")], { description: "once (one absolute time) or daily (time of day)" })),
   at: Type.Optional(Type.String({ description: "ISO 8601 timestamp with offset, for kind=once" })),
   time: Type.Optional(Type.String({ description: "HH:MM in 24h, for kind=daily" })),
@@ -51,7 +54,7 @@ function scheduleOf(args: ScheduleArgs, now: number): Schedule | string {
 function describe(job: ScheduledJob): string {
   const when = job.schedule.kind === "once" ? new Date(job.schedule.at).toISOString() : job.schedule.time + " " + job.schedule.tz;
   const next = job.nextRunAt === null ? "none" : new Date(job.nextRunAt).toISOString();
-  return ["id=" + shortId(job.id), "name=" + job.name, "kind=" + job.schedule.kind, "when=" + when, "state=" + job.state, "next=" + next].join("  ");
+  return ["id=" + shortId(job.id), "name=" + job.name, "mode=" + (job.mode ?? "task"), "kind=" + job.schedule.kind, "when=" + when, "state=" + job.state, "next=" + next].join("  ");
 }
 
 function resolve(jobs: readonly ScheduledJob[], input: string): ScheduledJob | string {
@@ -75,7 +78,7 @@ async function create(api: ToolExecutionApi<ScheduleDetails>, args: ScheduleArgs
     const now = Date.now();
     const schedule = scheduleOf(args, now);
     if (typeof schedule === "string") return fail(schedule);
-    const job: ScheduledJob = { id, name, prompt, schedule, state: "active", nextRunAt: nextRunAfter(schedule, now), lastRun: null };
+    const job: ScheduledJob = { id, name, mode: args.mode ?? "task", prompt, schedule, state: "active", nextRunAt: nextRunAfter(schedule, now), lastRun: null };
     draft.jobs.push(job);
     return ok("scheduled " + describe(job), "create", id);
   }, context);
@@ -113,8 +116,8 @@ async function update(api: ToolExecutionApi<ScheduleDetails>, args: ScheduleArgs
 export const ScheduleTool: ToolRegistration = defineTool({
   name: "schedule",
   description: [
-    "Manage scheduled jobs that run a self-contained task later, or every day at a fixed time, and report the result back to this conversation.",
-    "Actions: create (name, prompt, kind=once with at, or kind=daily with time and tz), list, pause, resume, delete (id or unique id prefix).",
+    "Manage Alarms and scheduled tasks. For a user reminder (including a timer), create a Schedule with mode=reminder and put what the user wants to be reminded about in prompt. When due, the main Lulu sends the reminder in Chat. Use mode=task when the user wants work performed at that time.",
+    "Actions: create (name, mode, prompt, kind=once with at, or kind=daily with time and tz), list, pause, resume, delete (id or unique id prefix).",
     "After creating a job, confirm it with send_to_user. If the user has not kept the Schedule Overview on Panel, also send a card with type widget and widget { kind: panel, panel: { body: { kind: schedules } } }. A kept overview updates automatically.",
     "Keep this machinery private: never mention job ids or internal state to the user unless they ask.",
   ].join(" "),

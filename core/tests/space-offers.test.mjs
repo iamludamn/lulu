@@ -129,5 +129,5 @@ test('panel.update refuses to bypass Space swipe approval', async () => {
   const api = { snapshot: async () => ({ order: ['trip'], widgets: { trip: widget(1) } }), commit: async () => { assert.fail('must not commit a Space update'); } };
   const result = await tool.execute({ action: 'update', widget: widget(2) }, api, {});
   assert.equal(result.isError, true);
-  assert.match(result.output[0].text, /swipes/);
+  assert.match(result.output[0].text, /Space revisions are currently unavailable/);
 });

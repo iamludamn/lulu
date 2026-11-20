@@ -1,10 +1,10 @@
 import { ChatDeliveryDoc } from "../conversation/delivery-doc.js";
 import { scheduleOverviewCard } from "../cron/overview.js";
 import { defineTool, LiveDoc, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
-import { SCHEDULE_WIDGET_ID, SPACE_ID } from "../protocol/panel.js";
+import { SCHEDULE_WIDGET_ID } from "../protocol/panel.js";
 import type { SendCard, SendDetails } from "../protocol/send.js";
 import { ARTIFACT_REF, SEND_TOOL, isScheduleOverviewRequest, ModelSendInput } from "../protocol/send.js";
-import { assetRefProblem, spaceRefProblem, spacePreviewProblem } from "../artifact/space.js";
+import { assetRefProblem } from "../artifact/space.js";
 
 const TEXT_LIMIT = { chars: 600, lines: 12 };
 const DOCUMENT_SHAPE = /^(#{1,6} |\|.+\|\s*$)/m;
@@ -18,10 +18,11 @@ const DESCRIPTION = [
   "Long or structured content (a report, plan, list, table, steps, research) goes in body of the same type text call, written as Markdown with a title, the conclusion first, then headings, lists and tables where they help. Put a one-to-three sentence gist in content that tells the user what is behind the tap: the user sees content as a short bubble and taps it to read body. The body is the delivery: do not also save it as a file or offer an asset card for it, and do not mention files, documents or saving in content. Never split long content over several messages.",
   "For a quick answer, send it once with end_turn true. For longer work, send a short acknowledgement first, do the work, then send the result with end_turn true; the acknowledgement does not deliver the result.",
   "Do not run the final call in parallel with work you still need.",
-  "type widget sends one card to Chat. Use kind panel for a Widget the user can keep on Panel and kind asset for a file the user can keep in Assets. Send a Space as a Widget with body { kind: space, src, preview, refresh }. Send a finished HTML Asset as kind asset.",
+  "type widget sends one card to Chat. Offer a Checklist when the user wants items they can check off over time. Use kind panel with body { kind: list, items } and a done boolean on every item. Use size m for up to three short items and l for up to eight. Use kind asset for a requested file, including a finished HTML Asset.",
+  "Use schedule with mode=reminder to set an Alarm. Confirm the time in text after creation succeeds.",
   "Use widget { kind: panel, panel: { body: { kind: schedules } } } to offer the Schedule Overview. The server supplies the job rows. A Schedule Overview already kept on Panel updates from the saved jobs.",
-  "The user swipes a card to accept its Widget or Asset. New versions use the same acceptance flow. For a Space revision, reuse the Widget ID and use a newer artifact ref so acceptance retains its position and saved state. Use a new ID for an explicit copy. Describe the card as ready to accept until the user accepts it.",
-  "A type widget call carries only the card and never content: send the short takeaway as its own type text call first, so the user gets the gist without opening anything. Send at most one card per call. Dispatch any outstanding additions or corrections to delegated work before sending the card. The card is the last call of the turn and carries end_turn true; never end the turn on a text that announces a card you have not sent. One short acknowledgement is enough while work runs in the background: do not send further waiting or filler messages.",
+  "The user swipes a card to accept its Widget or Asset. Describe the card as ready to accept until the user accepts it.",
+  "A type widget call carries only the card and never content: send the short takeaway as its own type text call first, except when the user used the message-to-widget action. Send at most one card per call. Dispatch any outstanding additions or corrections to delegated work before sending the card. The card is the last call of the turn and carries end_turn true; never end the turn on a text that announces a card you have not sent. One short acknowledgement is enough while work runs in the background: do not send further waiting or filler messages.",
 ].join(" ");
 
 function tooLong(content: string): boolean {
@@ -43,35 +44,16 @@ function misuse(input: ModelSendInput): string | undefined {
   const card = input.widget;
   if (isScheduleOverviewRequest(card)) return undefined;
   if (card.kind === "panel" && card.panel.id === SCHEDULE_WIDGET_ID) return "Use widget { kind: panel, panel: { body: { kind: schedules } } } to send the Schedule Overview.";
-  if (card.kind === "panel" && card.panel.body.kind === "space" && !SPACE_ID.test(card.panel.id))
-    return "A space widget id is the key of its saved state, so it must be letters, digits, - or _, start with a letter or digit, and be at most 64 characters. Nothing was sent. Send the card again with a valid id.";
   return undefined;
 }
 
-const cardRef = (card: SendCard): string | undefined => {
-  if (card.kind === "asset") return card.ref;
-  return card.panel.body.kind === "space" ? card.panel.body.src : undefined;
-};
-
-const misplaced = (card: SendCard): string | undefined => {
-  if (card.kind === "asset") return assetRefProblem(card.ref);
-  const body = card.panel.body;
-  const problem = body.kind === "space" ? (spaceRefProblem(card.panel.id.trim(), body.src) ?? spacePreviewProblem(card.panel.id.trim(), body.preview)) : undefined;
-  return problem === undefined ? undefined : problem.replace("Nothing was changed.", "Nothing was sent.");
-};
-
-async function missingAsset(card: SendCard, exists: ArtifactCheck | undefined): Promise<string | undefined> {
-  const ref = cardRef(card);
-  if (ref === undefined) return undefined;
-  const refused = misplaced(card);
+async function missingAsset(ref: string, exists: ArtifactCheck | undefined): Promise<string | undefined> {
+  const refused = assetRefProblem(ref);
   if (refused !== undefined) return refused;
-  if (exists === undefined) return "Artifacts are not available here, so asset and space cards cannot be sent. Nothing was sent.";
-  const preview = card.kind === "panel" && card.panel.body.kind === "space" ? card.panel.body.preview : undefined;
-  for (const reference of preview === undefined ? [ref] : [ref, preview]) {
-    const match = ARTIFACT_REF.exec(reference);
-    if (match === null) return "ref must look like artifact://name@version. Nothing was sent.";
-    if (!await exists(match[1], Number(match[2]))) return `${reference} does not exist. Nothing was sent. Save the file with the artifact tools first and use the ref they return.`;
-  }
+  if (exists === undefined) return "Artifacts are not available here, so asset cards cannot be sent. Nothing was sent.";
+  const match = ARTIFACT_REF.exec(ref);
+  if (match === null) return "ref must look like artifact://name@version. Nothing was sent.";
+  if (!await exists(match[1], Number(match[2]))) return `${ref} does not exist. Nothing was sent. Save the file with the artifact tools first and use the ref they return.`;
   return undefined;
 }
 
@@ -94,8 +76,8 @@ export const createSendTool = (exists: ArtifactCheck | undefined): ToolRegistrat
       if (isScheduleOverviewRequest(input.widget)) {
         widget = await scheduleOverviewCard(api, context);
         if (widget === undefined) return fail("The Schedule Overview is already on Panel. Send a text confirmation about the schedule.");
-      } else if (input.widget !== undefined) {
-        const problem = await missingAsset(input.widget, exists);
+      } else if (input.widget?.kind === "asset") {
+        const problem = await missingAsset(input.widget.ref, exists);
         if (problem !== undefined) return fail(problem);
       }
       const end = input.end_turn === true;

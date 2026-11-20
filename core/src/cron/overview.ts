@@ -10,6 +10,7 @@ export function scheduleRow(job: ScheduledJob, state: ScheduleRow["state"] = job
   return {
     id: job.id,
     name: job.name,
+    ...(job.mode === "reminder" && { mode: job.mode }),
     schedule: job.schedule,
     state,
     nextRunAt: state === "active" ? job.nextRunAt : null,

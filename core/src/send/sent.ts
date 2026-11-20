@@ -1,11 +1,11 @@
 import { defineEntry, type EntryRecord } from "@earendil-works/pi-durable";
 import { SCHEDULE_OFFER_KIND, SCHEDULE_ORIGIN_PREFIX } from "../protocol/panel.js";
-import { SEND_TOOL, isScheduleOverviewRequest, type ModelSendInput, type SendCard, type SendDetails, type SendInput } from "../protocol/send.js";
+import { SEND_TOOL, isScheduleOverviewRequest, type ScheduleOverviewRequest, type SendCard, type SendDetails, type SendInput } from "../protocol/send.js";
 
 export type Sent = { id: string; entry: number; input: SendInput };
 export const LegacyScheduleOfferEntry = defineEntry<{ widget: Extract<SendCard, { kind: "panel" }>; at: number }>(SCHEDULE_OFFER_KIND);
 
-type RecordedSendInput = Omit<ModelSendInput, "widget"> & { widget?: ModelSendInput["widget"] | { kind: "schedule_overview" } };
+type RecordedSendInput = Omit<SendInput, "widget"> & { widget?: SendCard | ScheduleOverviewRequest | { kind: "schedule_overview" } };
 type SendCall = { id: string; entry: number; input: RecordedSendInput };
 
 type Block = { type?: unknown; id?: unknown; name?: unknown; arguments?: unknown };
@@ -42,7 +42,7 @@ export function sentIn(entries: readonly { id?: unknown; kind?: unknown; model?:
 export const sentOf = (entries: readonly { id?: unknown; kind?: unknown; model?: unknown }[], origin: string): SendCall | undefined =>
   sentIn(entries).find((sent) => sent.id === origin);
 
-const quoted = (input: Pick<ModelSendInput, "content" | "body">): string | undefined => [input.content?.trim(), input.body?.trim()].filter((part) => part).join("\n\n") || undefined;
+const quoted = (input: Pick<SendInput, "content" | "body">): string | undefined => [input.content?.trim(), input.body?.trim()].filter((part) => part).join("\n\n") || undefined;
 
 export function assistantText(entries: readonly { id?: unknown; kind?: unknown; model?: unknown }[], origin: string): string | undefined {
   const sent = sentOf(entries, origin);
