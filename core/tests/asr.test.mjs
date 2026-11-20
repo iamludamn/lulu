@@ -14,11 +14,11 @@ function response(text, final = false, gzip = false) {
   packet.set(payload, 12);
   return packet.buffer.slice(packet.byteOffset, packet.byteOffset + packet.length);
 }
-function fixture(connect) {
+function fixture(connect, env = {}) {
   const events = [], sent = [];
   let handlers, closed = 0;
   const upstream = { send: data => sent.push(new Uint8Array(data)), close: () => { closed++; handlers?.close(); } };
-  const host = { env: { VOLC_SPEECH_ASR_API_KEY: 'test' }, connect: async (_url, headers, h) => {
+  const host = { env: { VOLC_SPEECH_ASR_API_KEY: 'test', ...env }, connect: async (_url, headers, h) => {
     assert.equal(headers['X-Api-Resource-Id'], 'volc.seedasr.sauc.duration');
     handlers = h;
     return connect ? connect(upstream) : { status: 101, socket: upstream };
@@ -42,6 +42,22 @@ test('ASR reads partial and final transcripts including gzip', async () => {
 test('ASR commands parse without entering prompt submission', () => {
   for (const type of ['asr.start', 'asr.finish', 'asr.cancel']) assert.deepEqual(parseFrame(JSON.stringify({ type, requestId: 'one' })), { type, requestId: 'one' });
   assert.throws(() => parseFrame(JSON.stringify({ type: 'asr.audio', requestId: 'one', audio: null })), /Unknown command/);
+});
+test('ASR refinement and replacement dictionary are independently opt-in', async () => {
+  const base = { model_name: 'bigmodel', enable_itn: true, enable_punc: true, result_type: 'full' };
+  const refinement = { enable_nonstream: true, enable_ddc: true };
+  const dictionary = { corpus: { correct_table_id: 'terms' } };
+  for (const [env, expected] of [
+    [{}, base],
+    [{ VOLC_SPEECH_ASR_REFINE: 'true', VOLC_SPEECH_ASR_CORRECTION_TABLE_ID: ' ' }, { ...base, ...refinement }],
+    [{ VOLC_SPEECH_ASR_REFINE: 'false', VOLC_SPEECH_ASR_CORRECTION_TABLE_ID: ' terms ' }, { ...base, ...dictionary }],
+    [{ VOLC_SPEECH_ASR_REFINE: 'true', VOLC_SPEECH_ASR_CORRECTION_TABLE_ID: 'terms' }, { ...base, ...refinement, ...dictionary }],
+  ]) {
+    const f = fixture(undefined, env);
+    await f.sessions.start(f.socket, 'one');
+    f.sessions.cancel(f.socket, 'one');
+    assert.deepEqual(JSON.parse(new TextDecoder().decode(f.sent[0].subarray(8))).request, expected);
+  }
 });
 test('finishing waits for final result and closes upstream once', async () => {
   const f = fixture();

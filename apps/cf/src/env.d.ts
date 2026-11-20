@@ -36,6 +36,8 @@ interface Env {
   readonly TAVILY_API_KEY?: string;
   readonly EXA_API_KEY?: string;
   readonly VOLC_SPEECH_ASR_API_KEY?: string;
+  readonly VOLC_SPEECH_ASR_CORRECTION_TABLE_ID?: string;
+  readonly VOLC_SPEECH_ASR_REFINE?: string;
   readonly DOUBAO_API_KEY?: string;
   readonly LULU_MCP: KVNamespace;
   readonly MCP_ENCRYPTION_KEY?: string;
