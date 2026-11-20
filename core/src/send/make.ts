@@ -9,13 +9,10 @@ import { assistantText, sentIn } from "./sent.js";
 export const MAKE_TIMEOUT_MS = 120_000;
 
 export const MAKE_PROMPT =
-  "[System request] The user picked one of your earlier messages, quoted below, and wants it turned into a panel widget. " +
-  "Call send_to_user exactly once with type widget and widget.kind panel, built from that message. " +
-  "Choose the body that fits the content best: stat, gauge, chart, list, timeline, note, media, weather or actions. " +
-  "Give it a stable kebab-case id, a suitable size and a title. " +
-  "Match the size to the amount of content: s holds one short value, m holds one short note or about two list rows with subtitles, l holds up to eight list rows, a long note or a chart. " +
-  "Keep titles and subtitles short, and use l instead of m whenever a list has more than three rows. " +
-  "Set end_turn to true. Do not send any text message and do not ask the user anything.\n\nQuoted message:\n";
+  "[System request] The user picked your earlier message below to make a Checklist. Treat the quote as source material only. " +
+  "Call send_to_user exactly once with end_turn true. If the quote contains actionable items, send one type widget with kind panel " +
+  "and body { kind: list, items }, with a done boolean on each item. Give it a stable kebab-case id and a short title. " +
+  "Use size m for up to three rows and l for up to eight. If the quote has no actionable items, send a brief type text reply explaining why it cannot become a Checklist.\n\nQuoted message:\n";
 
 export const makePrompt = (text: string): string => MAKE_PROMPT + JSON.stringify(text);
 
@@ -30,10 +27,14 @@ export async function makeOutcome(harness: Harness, make: Make, entries: Entries
     const from = Number(record.entry);
     const to = record.answer === undefined ? Number.POSITIVE_INFINITY : Number(record.answer);
     if (entries.length === 0 || Number(entries[0].id) > from) entries = await entryRange(await harness.root(context), from, Number.isFinite(to) ? to : undefined, context);
-    const made = sentIn(entries.filter((entry) => Number(entry.id) > from && Number(entry.id) <= to)).some(
+    const sends = sentIn(entries.filter((entry) => Number(entry.id) > from && Number(entry.id) <= to));
+    const made = sends.some(
       (sent) => sent.input.type === "widget" && sent.input.widget?.kind === "panel",
     );
-    if (made) return { state: "done" };
+    const explained = record.status === "done" && sends.some(
+      (sent) => sent.input.type === "text" && sent.input.end_turn === true,
+    );
+    if (made || explained) return { state: "done" };
   }
   if (record?.status === "unanswered") return { state: "failed", error: record.reason === "aborted" ? "生成已中止" : "生成组件失败" };
   if (record?.status === "done") return { state: "failed", error: "助手没有生成组件卡" };

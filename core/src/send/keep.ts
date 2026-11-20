@@ -7,7 +7,7 @@ import { AssetsDoc } from "./doc.js";
 import { deliveredSentIn } from "./sent.js";
 import { acceptSpace, rememberSpace } from "./space-offers.js";
 import { acceptSchedule } from "./schedule-offers.js";
-import { SCHEDULE_WIDGET_ID } from "../protocol/panel.js";
+import { SCHEDULE_WIDGET_ID, type PanelState } from "../protocol/panel.js";
 
 const MAX_PANEL_WIDGETS = 24;
 
@@ -56,7 +56,7 @@ export async function keepWidget(harness: Harness, entries: readonly EntryRecord
     if (id === SCHEDULE_WIDGET_ID && card.panel.body.kind === "schedules" && requestId !== undefined) {
       acceptSchedule(panel, card.panel, origin, requestId, Date.now());
       if (panel.widgets[id]?.origin !== origin) return;
-      addToOrder(panel.order, id);
+      addToOrder(panel, id);
       return;
     }
     if (id === SCHEDULE_WIDGET_ID || card.panel.body.kind === "schedules") throw new Error("无效的定时任务卡片");
@@ -66,13 +66,17 @@ export async function keepWidget(harness: Harness, entries: readonly EntryRecord
     } else if (["space", "web"].includes(panel.widgets[id]?.body.kind ?? "")) {
       throw new Error("不能将 Space 替换为其他组件，请使用新的 ID");
     }
-    addToOrder(panel.order, id);
+    addToOrder(panel, id);
     if (!isSpace) panel.widgets[id] = { ...card.panel, updatedAt: Date.now(), origin };
   }, BACKGROUND_CONTEXT);
 }
 
-function addToOrder(order: string[], id: string): void {
-  if (order.includes(id)) return;
-  if (order.length >= MAX_PANEL_WIDGETS) throw new Error("视图已满，先移除一个组件");
-  order.push(id);
+function addToOrder(panel: PanelState, id: string): void {
+  if (panel.order.includes(id)) return;
+  const active = panel.order.filter((entry) => {
+    const body = panel.widgets[entry]?.body;
+    return !(body?.kind === "list" && body.items.length > 0 && body.items.every((item) => item.done === true));
+  });
+  if (active.length >= MAX_PANEL_WIDGETS) throw new Error("视图已满，先移除一个组件");
+  panel.order.push(id);
 }

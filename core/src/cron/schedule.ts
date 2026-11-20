@@ -1,3 +1,4 @@
+import type { SubmissionId } from "@earendil-works/pi-durable";
 import type { Schedule } from "../protocol/contract.js";
 
 export const GRACE_MS = 5 * 60 * 1000;
@@ -8,11 +9,12 @@ export type JobState = "active" | "paused" | "done" | "missed";
 export type ScheduledJob = {
   id: string;
   name: string;
+  mode?: "task" | "reminder";
   prompt: string;
   schedule: Schedule;
   state: JobState;
   nextRunAt: number | null;
-  lastRun: { scheduledFor: number; runId: string } | null;
+  lastRun: ({ scheduledFor: number } & ({ runId: string } | { submissionId: SubmissionId })) | null;
 };
 
 type Zoned = { year: number; month: number; day: number; hour: number; minute: number };
