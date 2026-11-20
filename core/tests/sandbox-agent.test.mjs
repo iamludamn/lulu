@@ -1,14 +1,57 @@
 import { test } from 'node:test';
+import { setImmediate } from 'node:timers/promises';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import assert from 'node:assert/strict';
-import { createSession, MemoryStorage } from '@earendil-works/pi-durable';
+import { createSession, Harness, MemoryStorage } from '@earendil-works/pi-durable';
 import { createBashTool } from '@earendil-works/pi-durable/tools';
 import { NOOP_TELEMETRY_CONTEXT } from '@earendil-works/pi-telemetry';
+import { BotSession } from '../dist/conversation/bot.js';
+import { DelegateAgents } from '../dist/delegate/agents.js';
+import { createRun } from '../dist/delegate/spawn.js';
 import { SandboxDoc } from '../dist/sandbox/doc.js';
 import { createEnvironmentExtension } from '../dist/sandbox/extension.js';
 import { createE2bProvider } from '../dist/sandbox/e2b/provider.js';
 
 const context = BACKGROUND_CONTEXT;
+
+test('the main loop omits sandbox tools while delegates keep them', async t => {
+  const codingTools = ['read', 'write', 'edit', 'bash'];
+  const open = t.mock.method(Harness, 'open');
+  const bot = new BotSession({
+    name: 'test',
+    env: {},
+    telemetry: NOOP_TELEMETRY_CONTEXT,
+    storage: { get: async () => undefined },
+    alarm: { get: async () => null, set: async () => {}, delete: async () => {} },
+    sockets: { all: () => [] },
+    sandbox: async () => { throw new Error('unexpected sandbox use'); },
+    abort: reason => assert.fail(reason),
+  });
+  await bot.start(() => new MemoryStorage());
+  const harness = await open.mock.calls[0].result;
+  t.after(async () => {
+    await setImmediate(); // Let the bot finish alarm refreshes triggered by the test commits.
+    await harness.close(context);
+  });
+  const root = await harness.root(context);
+  const main = await root.agent(context);
+  assert.ok(main.extensions.every(extension => extension.name !== 'coding-tools'));
+  assert.ok(main.tools.some(tool => tool.name === 'delegate'));
+  assert.ok(main.tools.some(tool => tool.name === 'send_to_user'));
+  assert.deepEqual([...main.tools, ...main.callable].filter(tool => codingTools.includes(tool.name)).map(tool => tool.name), []);
+
+  const entry = await harness.commit(tx => tx.appendEntry(root.id, { kind: 'test.fork' }), context);
+  for (const forkAt of [null, entry.id]) {
+    const { childId } = await harness.commit(tx => createRun(tx, {
+      runId: `test-${forkAt}`, task: 'Read a file', description: 'Read a file',
+      agent: 'worker', presets: DelegateAgents, token: null, origin: [],
+      parentId: root.id, cwd: null, forkAt, model: null, thinkingLevel: null,
+    }), context);
+    const child = await harness.conversation(childId, context);
+    const agent = await child.agent(context);
+    assert.deepEqual(agent.tools.filter(tool => codingTools.includes(tool.name)).map(tool => tool.name), codingTools);
+  }
+});
 
 async function exerciseBash(provider) {
   const session = createSession(new MemoryStorage());

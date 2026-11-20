@@ -2,7 +2,7 @@ import { reserveDelegate, REQUEST_TIMEOUT_MS } from "./limits.js";
 import { ChatDoc } from "../conversation/progress.js";
 import type { ScheduleMessageSource } from "../conversation/input.js";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { AssistantEntry, ProviderDoc, type ConversationId, type Cursor, type EntryId, type SubmissionId, type Tx } from "@earendil-works/pi-durable";
+import { AssistantEntry, configure, ProviderDoc, type ConversationId, type Cursor, type EntryId, type SubmissionId, type Tx } from "@earendil-works/pi-durable";
 import { SandboxDoc } from "../sandbox/doc.js";
 import { ChildBrief, type DelegatePresets } from "./agents.js";
 import { DelegateAnchor } from "./anchor.js";
@@ -55,6 +55,8 @@ export async function createRun(tx: Tx, start: RunStart): Promise<{ runId: strin
   const anchor = await tx.createTask(DelegateAnchor, { runId: start.runId }, { ownership: { kind: "conversation" }, conversationId: start.parentId, background: true });
   const ownership = { kind: "task", taskId: anchor } as const;
   const child = start.forkAt === null ? await tx.createConversation({ ownership }) : await tx.forkConversation(start.parentId, start.forkAt, { ownership });
+  // Delegates use the default extensions, including the coding tools excluded by the main conversation.
+  await configure(tx, child.id, { extensions: null });
   const binding = await tx.doc(SandboxDoc, child.id);
   binding.key = start.runId;
   binding.owner = start.parentId;

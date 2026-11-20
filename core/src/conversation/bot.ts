@@ -13,6 +13,7 @@ import { entryRange, HISTORY_PAGE_SIZE, observeView } from "./view.js";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { type Conversation, type ConversationView, type EntryId, CompactionEntry, Harness, type Registry, type Storage } from "@earendil-works/pi-durable";
+import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { TelemetryContext, TelemetrySpan } from "@earendil-works/pi-telemetry";
 import type { McpHost, McpServerConfig } from "../agent/mcp.js";
 import { handleMcpRegistry } from "../agent/mcp-registry.js";
@@ -189,8 +190,9 @@ export class BotSession {
     });
     this.#selected = await this.#host.storage.get<ModelRef>(MODEL_KEY);
     const model = chatModelRef(this.#host.env, this.#selected);
-    const root = await harness.root(BACKGROUND_CONTEXT, { agent: { model, thinkingLevel: "off" } });
-    await root.configure({ model, tools: null }, BACKGROUND_CONTEXT);
+    const agent = { model, extensions: { remove: [CodingTools] }, tools: null };
+    const root = await harness.root(BACKGROUND_CONTEXT, { agent: { ...agent, thinkingLevel: "off" } });
+    await root.configure(agent, BACKGROUND_CONTEXT);
     this.#root = root;
     harness.observeCommits({ advance: ({ changes }) => {
       if (changes.some((change) =>
