@@ -44,7 +44,7 @@ struct WidgetBody: View {
         case .actions(let buttons):
             actions(buttons)
         case .schedules(_, let rows):
-            ScheduleSummary(rows: rows)
+            ScheduleSummary(rows: rows, expandsInline: interactive)
         case .unknown:
             Text("客户端暂不支持这种组件").font(.footnote).foregroundStyle(.secondary)
         }
@@ -180,7 +180,7 @@ struct WidgetBody: View {
         let pending = items.indices.filter { items[$0].done == false }
         return VStack(alignment: .leading, spacing: 0) {
             ForEach(pending, id: \.self) { index in
-                if index != pending.first { Divider() }
+                if index != pending.first { checklistDivider }
                 Button {
                     lastCheckedIndex = index
                     onCheck(index, true)
@@ -191,7 +191,7 @@ struct WidgetBody: View {
                 .accessibilityHint("标记为完成")
             }
             if let index = lastCheckedIndex, items.indices.contains(index), items[index].done == true {
-                Divider()
+                checklistDivider
                 HStack {
                     Text("已完成：\(items[index].title)").foregroundStyle(.secondary)
                     Spacer()
@@ -206,6 +206,13 @@ struct WidgetBody: View {
             }
         }
         .sensoryFeedback(.selection, trigger: items.compactMap(\.done))
+    }
+
+    private var checklistDivider: some View {
+        Divider()
+            .opacity(0.3)
+            .padding(.leading, 28)
+            .padding(.trailing, 12)
     }
 
     private func list(_ items: [PanelWidget.Item]) -> some View {

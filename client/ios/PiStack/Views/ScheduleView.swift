@@ -33,20 +33,43 @@ private func scheduleDay(_ date: Date) -> String {
 
 struct ScheduleSummary: View {
     let rows: [ScheduledTaskRow]
+    let expandsInline: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var expanded = false
 
     var body: some View {
+        let sorted = ScheduledTaskRow.upcomingFirst(rows)
+        VStack(alignment: .leading, spacing: 12) {
+            summary(next: sorted.first)
+            if expandsInline && expanded {
+                ForEach(sorted) { row in
+                    Divider().opacity(0.45)
+                    ScheduleDetailRow(row: row)
+                }
+            }
+        }
+    }
+
+    private func summary(next: ScheduledTaskRow?) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Label("定时任务", systemImage: "clock").font(.subheadline.weight(.semibold))
                 Spacer()
-                HStack(spacing: 5) {
-                    Text("全部 \(rows.count) 项")
-                    Image(systemName: "chevron.right").imageScale(.small)
+                if expandsInline && !rows.isEmpty {
+                    Button {
+                        withAnimation(reduceMotion ? nil : .snappy) { expanded.toggle() }
+                    } label: {
+                        disclosure
+                            .padding(.leading, 12)
+                            .frame(minHeight: 44)
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                } else if !expandsInline {
+                    disclosure
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
-            if let row = ScheduledTaskRow.upcomingFirst(rows).first, let next = row.upcomingAt {
+            if let row = next, let next = row.upcomingAt {
                 let date = Date(timeIntervalSince1970: next / 1000)
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .bottom) {
@@ -68,6 +91,21 @@ struct ScheduleSummary: View {
         }
     }
 
+    private var disclosure: some View {
+        HStack(spacing: 5) {
+            if expanded {
+                Text("收起")
+            } else {
+                Text("全部 \(rows.count) 项")
+            }
+            Image(systemName: expandsInline ? (expanded ? "chevron.up" : "chevron.down") : "chevron.right")
+                .imageScale(.small)
+                .accessibilityHidden(true)
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
     private func time(_ date: Date) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("下一次 · \(scheduleDay(date))").font(.caption).foregroundStyle(.secondary)
@@ -85,6 +123,29 @@ struct ScheduleSummary: View {
     }
 }
 
+private struct ScheduleDetailRow: View {
+    let row: ScheduledTaskRow
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(row.name).font(.subheadline.weight(.semibold))
+                Text(row.summaryLabel).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(row.upcomingAt.map(nextLabel) ?? row.state.label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func nextLabel(_ ms: Double) -> String {
+        let date = Date(timeIntervalSince1970: ms / 1000)
+        return "\(scheduleDay(date)) \(date.formatted(.dateTime.hour().minute()))"
+    }
+}
+
 struct ScheduleOverview: View {
     let rows: [ScheduledTaskRow]
     @Environment(\.dismiss) private var dismiss
@@ -92,17 +153,7 @@ struct ScheduleOverview: View {
     var body: some View {
         NavigationStack {
             List(ScheduledTaskRow.upcomingFirst(rows)) { row in
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(row.name).font(.subheadline.weight(.semibold))
-                        Text(row.summaryLabel).font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Text(row.upcomingAt.map(nextLabel) ?? row.state.label)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 4)
+                ScheduleDetailRow(row: row)
             }
             .overlay { if rows.isEmpty { ContentUnavailableView("暂无定时任务", systemImage: "clock") } }
             .navigationTitle("定时任务")
@@ -111,10 +162,6 @@ struct ScheduleOverview: View {
         }
     }
 
-    private func nextLabel(_ ms: Double) -> String {
-        let date = Date(timeIntervalSince1970: ms / 1000)
-        return "\(scheduleDay(date)) \(date.formatted(.dateTime.hour().minute()))"
-    }
 }
 
 struct ScheduleView: View {

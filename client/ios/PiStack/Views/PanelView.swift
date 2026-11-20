@@ -175,7 +175,6 @@ private struct WidgetCard: View {
     let onDrop: (String) -> Void
     let onCheck: (Int, Bool) -> Void
     @Environment(\.openSpace) private var openSpace
-    @State private var showsSchedules = false
 
     var body: some View {
         let card = WidgetFace(widget: widget, botId: botId, api: api, interactive: true, onPrompt: onPrompt, onCheck: onCheck)
@@ -209,10 +208,6 @@ private struct WidgetCard: View {
                         .accessibilityHidden(true)
                 }
                 .artifactSource("space-\(widget.id)", radius: 26)
-        } else if case .schedules(_, let rows) = widget.body {
-            Button { showsSchedules = true } label: { card }
-                .buttonStyle(.plain)
-                .sheet(isPresented: $showsSchedules) { ScheduleOverview(rows: rows) }
         } else {
             card
         }
