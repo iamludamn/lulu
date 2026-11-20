@@ -69,7 +69,7 @@ struct NoteGalleryView: View {
             .sorted { ($0.value.first?.date ?? .distantPast) > ($1.value.first?.date ?? .distantPast) }
         return ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                HomePageHeading(title: "思绪", subtitle: "笔记与文件")
+                HomePageHeading(title: "片刻思绪", subtitle: "笔记与文件")
                 if groups.isEmpty {
                     Text("没有找到相关内容").foregroundStyle(.secondary)
                 }

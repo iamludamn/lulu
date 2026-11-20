@@ -22,7 +22,7 @@ struct PanelView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                HomePageHeading(title: "风物", subtitle: "关注事项")
+                HomePageHeading(title: "四时风物", subtitle: "关注事项")
                     .frame(maxWidth: 740)
                     .padding(.horizontal, 18)
                     .frame(maxWidth: .infinity)
