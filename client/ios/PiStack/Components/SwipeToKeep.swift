@@ -7,13 +7,6 @@ extension EnvironmentValues {
     @Entry var topInset: CGFloat = 0
 }
 
-private let swipeThreshold: CGFloat = 90
-
-private func swipeOffset(_ x: CGFloat, direction: CGFloat) -> CGFloat {
-    let along = max(0, x * direction)
-    return (along > swipeThreshold ? swipeThreshold + (along - swipeThreshold) * 0.3 : along) * direction
-}
-
 struct SwipeToKeep<Content: View>: View {
     let destination: Page
     let onLand: () -> Void
@@ -21,9 +14,11 @@ struct SwipeToKeep<Content: View>: View {
     var holdRow: (Bool) -> Void = { _ in }
     var sending = false
     var confirmed = false
-    var retainsCard = false
+    var horizontalExit = false
+    var failed = false
+    var pendingLabel = "正在收藏…"
     var enabled = true
-    @ViewBuilder let content: (_ send: @escaping () -> Void) -> Content
+    @ViewBuilder let content: (_ send: @escaping () -> Void, _ armed: Bool) -> Content
     @Environment(\.keepTargets) private var targets
     @Environment(\.keepPull) private var pull
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -36,11 +31,17 @@ struct SwipeToKeep<Content: View>: View {
     private enum Phase { case resting, flying, fading, waiting, collapsing }
 
     private var direction: CGFloat { destination == .panel ? -1 : 1 }
+    private var swipeThreshold: CGFloat { horizontalExit ? 84 : 90 }
     private var progress: CGFloat { min(abs(drag) / swipeThreshold, 1) }
     private var armed: Bool { abs(drag) >= swipeThreshold }
+    private var showsPending: Bool {
+        guard !confirmed else { return false }
+        return (phase == .waiting && (horizontalExit || sending)) || (phase == .resting && sending)
+    }
 
     private var scale: CGFloat {
-        switch phase {
+        if horizontalExit { return 1 }
+        return switch phase {
         case .resting: reduceMotion ? 1 : 1 - 0.04 * progress
         case .flying: 0.1
         case .fading: reduceMotion ? 1 : 0.86
@@ -49,18 +50,18 @@ struct SwipeToKeep<Content: View>: View {
     }
 
     var body: some View {
-        content(sendInPlace)
-            .rotationEffect(.degrees(reduceMotion ? 0 : Double(drag) / 36))
+        content(sendInPlace, armed)
+            .rotationEffect(.degrees(horizontalExit || reduceMotion ? 0 : Double(drag) / 36))
             .scaleEffect(scale)
             .opacity(phase == .resting ? 1 : 0)
             .offset(x: drag + flight.width, y: flight.height)
             .allowsHitTesting(phase == .resting)
             .accessibilityHidden(phase != .resting)
             .overlay {
-                if (phase == .waiting || phase == .resting) && sending && !confirmed {
+                if showsPending {
                     HStack(spacing: 5) {
                         ProgressView().controlSize(.mini)
-                        Text("正在收藏…")
+                        Text(pendingLabel)
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -78,36 +79,44 @@ struct SwipeToKeep<Content: View>: View {
             .onChange(of: phase) { settle() }
             .onChange(of: sending) { settle() }
             .onChange(of: confirmed) { settle() }
+            .onChange(of: failed) { settle() }
             .onChange(of: enabled) {
                 if !enabled && phase == .resting && drag != 0 { reset() }
             }
             .onDisappear {
-                if phase == .resting && drag != 0 { pull(destination, 0) }
+                if !horizontalExit && phase == .resting && drag != 0 { pull(destination, 0) }
                 if phase != .resting && phase != .collapsing { holdRow(false) }
                 animationID = nil
                 phase = .resting
                 drag = 0
                 flight = .zero
             }
-            .sensoryFeedback(.impact(weight: .medium), trigger: armed) { _, now in now }
+            .sensoryFeedback(.impact(weight: horizontalExit ? .light : .medium), trigger: armed) { _, now in now }
+    }
+
+    private func swipeOffset(_ x: CGFloat) -> CGFloat {
+        let distance = max(0, x * direction)
+        let resistance = horizontalExit ? 0.22 : 0.3
+        return (min(distance, swipeThreshold) + max(0, distance - swipeThreshold) * resistance) * direction
     }
 
     private func change(_ x: CGFloat) {
         guard enabled, phase == .resting else { return }
-        drag = swipeOffset(x, direction: direction)
-        if !reduceMotion { pull(destination, progress) }
+        drag = swipeOffset(x)
+        if !horizontalExit && !reduceMotion { pull(destination, progress) }
     }
 
     private func reset() {
         guard phase == .resting else { return }
-        pull(destination, 0)
-        withAnimation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.3)) { drag = 0 }
+        if !horizontalExit { pull(destination, 0) }
+        let rebound: Animation = horizontalExit ? .spring(duration: 0.22, bounce: 0.18) : .spring(duration: 0.35, bounce: 0.3)
+        withAnimation(reduceMotion ? nil : rebound) { drag = 0 }
     }
 
     private func end(_ translation: CGFloat, velocity: CGFloat) {
         guard enabled, phase == .resting else { return }
-        drag = swipeOffset(translation, direction: direction)
-        guard armed || velocity * direction > 900 else {
+        drag = swipeOffset(translation)
+        guard armed || (!horizontalExit && velocity * direction > 900) else {
             reset()
             return
         }
@@ -120,23 +129,23 @@ struct SwipeToKeep<Content: View>: View {
 
     private func submit(fromSwipe: Bool) {
         guard enabled, phase == .resting, animationID == nil else { return }
-        if retainsCard {
-            reset()
-            onKeep()
-            return
-        }
-
-        let flies = fromSwipe && !reduceMotion
-        let target = targets[destination] ?? CGPoint(x: center.x + direction * 200, y: 0)
+        let slides = horizontalExit && fromSwipe && !reduceMotion
+        let flies = !horizontalExit && fromSwipe && !reduceMotion
         let next: Phase = flies ? .flying : .fading
-        let animation: Animation = flies ? .easeIn(duration: 0.34) : .easeOut(duration: reduceMotion ? 0.15 : 0.28)
+        let animation: Animation
+        if slides { animation = .timingCurve(0.18, 0.55, 0.5, 1, duration: 0.19) }
+        else if flies { animation = .easeIn(duration: 0.34) }
+        else { animation = .easeOut(duration: reduceMotion ? 0.15 : 0.28) }
         let id = UUID()
         animationID = id
-        pull(destination, 0)
+        if !horizontalExit { pull(destination, 0) }
         holdRow(true)
         onKeep()
         withAnimation(animation, completionCriteria: .logicallyComplete) {
-            if flies {
+            if slides {
+                flight = CGSize(width: direction * 84, height: 0)
+            } else if flies {
+                let target = targets[destination] ?? CGPoint(x: center.x + direction * 200, y: 0)
                 flight = CGSize(width: target.x - center.x - drag, height: target.y - center.y)
             }
             phase = next
@@ -158,8 +167,8 @@ struct SwipeToKeep<Content: View>: View {
         if confirmed {
             onLand()
             phase = .collapsing
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { holdRow(false) }
-        } else if !sending {
+            withAnimation(reduceMotion ? nil : .easeOut(duration: horizontalExit ? 0.19 : 0.25)) { holdRow(false) }
+        } else if failed || (!horizontalExit && !sending) {
             withAnimation(.easeOut(duration: 0.18)) { phase = .resting }
             holdRow(false)
         }

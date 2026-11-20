@@ -13,6 +13,7 @@ struct MessageRow: View, Equatable {
     let holdKeepRow: (Bool) -> Void
     @Environment(\.openSpace) private var openSpace
     @State private var showsSchedules = false
+    @State private var submittingOffer: (state: ViewOfferState, error: String?)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static func == (lhs: MessageRow, rhs: MessageRow) -> Bool { lhs.row == rhs.row && lhs.expanded == rhs.expanded && lhs.botId == rhs.botId && lhs.api.base == rhs.api.base }
@@ -129,8 +130,8 @@ struct MessageRow: View, Equatable {
             if case .space(let src, _, _, _) = widget.body {
                 let source = "chat-\(row.id)"
                 let state = row.viewOffer ?? .add
-                if state.actionable {
-                    viewOfferSwipe(state) {
+                if let offer = submittingOffer?.state ?? (state.actionable ? state : nil) {
+                    viewOfferSwipe(offer) {
                         Button { ArtifactAddress(src).map { openSpace($0, SpaceOpening(id: widget.id, title: widget.title, preview: true), source) } } label: { face }
                             .buttonStyle(.plain)
                             .artifactSource(source, radius: 26)
@@ -139,10 +140,8 @@ struct MessageRow: View, Equatable {
                     HStack(spacing: 10) {
                         Image(systemName: state == .superseded ? "clock.arrow.circlepath" : "checkmark.circle")
                             .foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(widget.title).font(.subheadline)
-                            Text(state.caption).font(.caption).foregroundStyle(.secondary)
-                        }
+                        Text(widget.title).font(.subheadline).lineLimit(1)
+                        Text(state.caption).font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         if state != .superseded {
                             Button("打开当前版本") {
@@ -161,8 +160,19 @@ struct MessageRow: View, Equatable {
             } else if case .schedules(_, let rows) = widget.body {
                 let state = row.viewOffer ?? .superseded
                 Group {
-                    if state.actionable {
-                        viewOfferSwipe(state) { schedulesButton(face) }
+                    if let offer = submittingOffer?.state ?? (state.actionable ? state : nil) {
+                        viewOfferSwipe(offer) { schedulesButton(face) }
+                    } else if case .accepted = state {
+                        Button { showsSchedules = true } label: {
+                            Label("\(widget.title) · \(state.caption)", systemImage: "checkmark.circle")
+                                .font(.subheadline)
+                                .frame(maxWidth: 360, alignment: .leading)
+                                .padding(14)
+                                .frosted(18)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("查看全部定时任务")
+                        .padding(.vertical, 8)
                     } else {
                         VStack(spacing: 8) {
                             schedulesButton(face)
@@ -196,21 +206,40 @@ struct MessageRow: View, Equatable {
 
     private func viewOfferSwipe<Content: View>(_ state: ViewOfferState, @ViewBuilder face: () -> Content) -> some View {
         let label = state == .update ? "更新视图" : "加入视图"
-        let enabled = !row.sending && row.offerAvailable
+        let confirmed = if case .accepted? = row.viewOffer { true } else { row.keepConfirmed }
+        let failed = !row.offerAvailable || row.offerError != nil || row.viewOffer == .superseded
+        let enabled = !row.sending && row.offerAvailable && !confirmed && row.viewOffer?.actionable != false
+        let showsSending = row.sending && submittingOffer == nil
+        // Keep the card at the same height when retry clears the error.
+        let displayedError = if let submittingOffer { submittingOffer.error } else { row.offerError }
         let card = face()
-        return SwipeToKeep(destination: .panel, onLand: {}, onKeep: { store.keep(row.id) }, retainsCard: true, enabled: enabled) { send in
+        return SwipeToKeep(
+            destination: .panel,
+            onLand: { onKept(.panel) },
+            onKeep: { store.keep(row.id) },
+            holdRow: { hold in
+                submittingOffer = hold ? (state, row.offerError) : nil
+                holdKeepRow(hold)
+            },
+            sending: row.sending,
+            confirmed: confirmed,
+            horizontalExit: true,
+            failed: failed,
+            pendingLabel: state == .update ? "正在更新…" : "正在加入…",
+            enabled: enabled
+        ) { send, armed in
             VStack(spacing: 8) {
                 card.contextMenu {
                     Button(label, systemImage: "square.stack.3d.up", action: send).disabled(!enabled)
                 }
                 .accessibilityAction(named: label) { if enabled { send() } }
                 HStack(spacing: 5) {
-                    if row.sending { ProgressView().controlSize(.mini) }
+                    if showsSending { ProgressView().controlSize(.mini) }
                     else { Image(systemName: "arrow.left") }
-                    Text(row.sending ? "正在提交…" : row.offerAvailable ? state.caption : "连接后可滑动")
+                    Text(showsSending ? "正在提交…" : row.offerAvailable ? (armed ? "松手\(label)" : state.caption) : "连接后可滑动")
                 }
                 .font(.caption).foregroundStyle(.secondary)
-                if let error = row.offerError {
+                if let error = displayedError {
                     Text("\(error) · \(row.offerAvailable ? "滑动重试" : "连接后重试")")
                         .font(.caption).foregroundStyle(.red)
                 }
@@ -231,7 +260,7 @@ struct MessageRow: View, Equatable {
             sending: row.sending,
             confirmed: row.keepConfirmed,
             enabled: enabled
-        ) { send in
+        ) { send, _ in
             VStack(spacing: 8) {
                 card.contextMenu {
                     Button(label, systemImage: symbol, action: send)
