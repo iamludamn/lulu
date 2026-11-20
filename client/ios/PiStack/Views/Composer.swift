@@ -19,21 +19,24 @@ struct Composer: View {
     @State private var showPreparation = false
     private enum VoiceTarget { case send, text, cancel, conversation }
     private let voiceRadius: CGFloat = 104
-    private var diagonal: CGFloat { voiceRadius / sqrt(2) }
     @State private var voiceTarget: VoiceTarget = .send
     @State private var notice: String?
     @State private var noticeTask: Task<Void, Never>?
 
     private var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var showSend: Bool { canSend && !listening }
+    private var tapRecording: Bool { !listening && (transcription.starting || transcription.recording) }
 
     private var voiceHint: String? {
-        guard listening else { return transcription.processing ? "正在识别…" : notice }
-        if voiceTarget == .cancel { return "松手取消" }
-        if voiceTarget == .conversation { return "松手进入语音对话" }
-        if let error = transcription.error { return error }
-        if transcription.recording { return voiceTarget == .text ? "松手转文字" : "松开发送" }
-        return transcription.starting && showPreparation ? "正在准备录音…" : nil
+        if listening {
+            if voiceTarget == .cancel { return "松手取消" }
+            if voiceTarget == .conversation { return "松手进入语音对话" }
+            if let error = transcription.error { return error }
+            if transcription.recording { return voiceTarget == .text ? "松手转文字" : "松开发送" }
+        }
+        if transcription.starting { return showPreparation ? "正在准备录音…" : nil }
+        if transcription.recording { return "轻点停止并转写" }
+        return transcription.processing ? "正在识别…" : notice
     }
 
     var body: some View {
@@ -100,15 +103,11 @@ struct Composer: View {
         }
         .overlay(alignment: .bottomTrailing) {
             if listening {
-                ZStack(alignment: .bottomTrailing) {
-                    voiceOption("取消", icon: "xmark", selected: voiceTarget == .cancel)
-                        .offset(x: -diagonal, y: voiceRadius - diagonal)
-                    voiceOption("语音对话", icon: "phone.fill", selected: voiceTarget == .conversation)
-                }.frame(width: 122, height: 96, alignment: .bottomTrailing)
-                .padding(.trailing, 16)
-                .offset(y: -(voiceRadius + 8))
-                .allowsHitTesting(false)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                conversationOption
+                    .padding(.trailing, 16)
+                    .offset(y: -(voiceRadius + 8))
+                    .allowsHitTesting(false)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
         .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: listening)
@@ -144,17 +143,19 @@ struct Composer: View {
             if transcription.processing {
                 ProgressView().controlSize(.small)
             } else {
-                Image(systemName: "mic.fill").font(.system(size: 19, weight: .medium))
+                Image(systemName: tapRecording ? "stop.fill" : "mic.fill")
+                    .font(.system(size: 19, weight: .medium))
             }
         }
-        .foregroundStyle(listening ? .primary : .secondary)
+        .foregroundStyle(listening || tapRecording ? .primary : .secondary)
         .frame(width: 48, height: 48)
         .glassEffect(.regular, in: .circle)
         .scaleEffect(listening ? 1.08 : 1)
         .overlay {
             VoiceInteraction(
                 isEnabled: !transcription.processing,
-                onTap: onVoiceConversation,
+                isTapRecording: tapRecording,
+                onTap: toggleTranscription,
                 onHold: beginListening,
                 onDrag: updateListening,
                 onRelease: finishListening,
@@ -163,11 +164,25 @@ struct Composer: View {
         }
     }
 
+    private func toggleTranscription() {
+        guard !listening, !transcription.processing else { return }
+        if tapRecording {
+            transcription.finish { text in onTranscribed(text, false) }
+        } else {
+            startTranscription()
+        }
+    }
+
     private func beginListening() {
+        guard !tapRecording else { return }
+        listening = true
+        startTranscription()
+    }
+
+    private func startTranscription() {
         noticeTask?.cancel()
         notice = nil
         showPreparation = false
-        listening = true
         focused.wrappedValue = false
         transcription.start(store)
     }
@@ -215,28 +230,25 @@ struct Composer: View {
 
     private func target(for translation: CGSize) -> VoiceTarget {
         let x = translation.width, y = translation.height
-        let cancelDistance = hypot(x + diagonal, y + diagonal)
-        let phoneDistance = hypot(x, y + voiceRadius)
-        if min(cancelDistance, phoneDistance) < 32 && hypot(x, y) > 30 {
-            return cancelDistance < phoneDistance ? .cancel : .conversation
-        }
+        if hypot(x, y + voiceRadius) < 32 { return .conversation }
         if x < -77 && abs(y) < 30 { return .text }
-        return .send
+        return hypot(x, y) <= 30 ? .send : .cancel
     }
 
-    private func voiceOption(_ title: String, icon: String, selected: Bool) -> some View {
-        Image(systemName: icon)
+    private var conversationOption: some View {
+        Image(systemName: "phone.fill")
             .font(.system(size: 19, weight: .medium))
             .foregroundStyle(.secondary)
             .frame(width: 48, height: 48)
             .glassEffect(.regular, in: .circle)
-            .scaleEffect(selected ? 1.1 : 1)
-            .accessibilityLabel(title)
+            .scaleEffect(voiceTarget == .conversation ? 1.1 : 1)
+            .accessibilityLabel("语音对话")
     }
 }
 
 private struct VoiceInteraction: UIViewRepresentable {
     let isEnabled: Bool
+    let isTapRecording: Bool
     let onTap: () -> Void
     let onHold: () -> Void
     let onDrag: (CGSize) -> Void
@@ -251,11 +263,12 @@ private struct VoiceInteraction: UIViewRepresentable {
         view.interaction = self
         view.isUserInteractionEnabled = isEnabled
         view.accessibilityTraits = isEnabled ? .button : [.button, .notEnabled]
+        view.accessibilityLabel = isTapRecording ? "停止录音并转写" : "语音输入"
+        view.accessibilityHint = isTapRecording ? nil : "轻点开始录音，长按展开语音选项"
     }
 
     final class Surface: UIView {
         var interaction: VoiceInteraction
-        private let pressFeedback = UIView()
         private var start = CGPoint.zero
         private let impact = UIImpactFeedbackGenerator(style: .medium)
 
@@ -264,19 +277,11 @@ private struct VoiceInteraction: UIViewRepresentable {
             super.init(frame: .zero)
             backgroundColor = .clear
             isAccessibilityElement = true
-            accessibilityLabel = "语音对话"
-            accessibilityHint = "轻点开始通话，长按展开语音选项"
-            pressFeedback.backgroundColor = UIColor.label.withAlphaComponent(0.2)
-            pressFeedback.isUserInteractionEnabled = false
-            pressFeedback.alpha = 0
-            addSubview(pressFeedback)
 
-            let tap = PressFeedbackTap(target: self, action: #selector(tapped))
-            tap.onPressChanged = { [weak self] pressed in
-                guard let self else { return }
-                let active = pressed && self.interaction.isEnabled
-                if active && self.pressFeedback.alpha == 0 { self.impact.impactOccurred() }
-                self.pressFeedback.alpha = active ? 1 : 0
+            let tap = TouchDownTapGestureRecognizer(target: self, action: #selector(tapped))
+            tap.onTouchDown = { [weak self] in
+                guard let self, self.interaction.isEnabled else { return }
+                self.impact.impactOccurred()
             }
             let hold = UILongPressGestureRecognizer(target: self, action: #selector(held(_:)))
             hold.minimumPressDuration = 0.35
@@ -286,12 +291,6 @@ private struct VoiceInteraction: UIViewRepresentable {
         }
 
         required init?(coder: NSCoder) { return nil }
-
-        override func layoutSubviews() {
-            super.layoutSubviews()
-            pressFeedback.frame = bounds
-            pressFeedback.layer.cornerRadius = min(bounds.width, bounds.height) / 2
-        }
 
         override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
             hypot(point.x - bounds.midX, point.y - bounds.midY) <= min(bounds.width, bounds.height) / 2
@@ -329,27 +328,12 @@ private struct VoiceInteraction: UIViewRepresentable {
     }
 }
 
-private final class PressFeedbackTap: UITapGestureRecognizer {
-    var onPressChanged: ((Bool) -> Void)?
+private final class TouchDownTapGestureRecognizer: UITapGestureRecognizer {
+    var onTouchDown: (() -> Void)?
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        onPressChanged?(true)
+        onTouchDown?()
         super.touchesBegan(touches, with: event)
-    }
-
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
-        onPressChanged?(false)
-        super.touchesEnded(touches, with: event)
-    }
-
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
-        onPressChanged?(false)
-        super.touchesCancelled(touches, with: event)
-    }
-
-    override func reset() {
-        onPressChanged?(false)
-        super.reset()
     }
 }
 
