@@ -6,6 +6,7 @@ struct ChatView: View {
     let bot: BotSummary
     let store: BotStore
     let noteStore: NoteStore
+    let noteFiles: [NoteFile]
     let transcription: VoiceTranscription
     let api: Api
     let containerBottomInset: CGFloat
@@ -49,7 +50,7 @@ struct ChatView: View {
                     ForEach(rows[start...]) { row in
                         Group {
                             if let offer = noteStore.offers[row.id] {
-                                NoteOfferRow(offer: offer, onLand: { onKept(.notes) }, onAccept: { noteStore.accept(offer.id) })
+                                NoteOfferRow(offer: offer, files: noteFiles, onLand: { onKept(.notes) }, onAccept: { noteStore.accept(offer.id) })
                             } else {
                                 MessageRow(row: row, store: store, botId: bot.id, api: api, expanded: row.id == reading?.id,
                                            onRead: { reading = $0 }, onOpen: openArtifact, onKept: onKept,

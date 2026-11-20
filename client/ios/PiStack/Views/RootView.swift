@@ -17,13 +17,10 @@ struct RootView: View {
         let loading = self.loading
         ZStack {
             if let connection = model.connection {
-                NavigationStack {
-                    HomeView(bot: connection.bot, api: connection.api, store: connection.store, mockData: model.mockData)
-                        .toolbarVisibility(.hidden, for: .navigationBar)
-                }
-                .id(model.connectionRevision)
-                .allowsHitTesting(!loading)
-                .accessibilityHidden(loading)
+                HomeView(bot: connection.bot, api: connection.api, store: connection.store, mockData: model.mockData)
+                    .id(model.connectionRevision)
+                    .allowsHitTesting(!loading)
+                    .accessibilityHidden(loading)
             } else if model.api == nil {
                 NavigationStack { SettingsView() }
             }

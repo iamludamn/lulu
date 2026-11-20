@@ -51,6 +51,40 @@ struct HomeView: View {
     }
 
     var body: some View {
+        NavigationStack {
+            homePages
+        }
+        .sensoryFeedback(.selection, trigger: page)
+        .task {
+            guard !noteStore.mockData else { return }
+            store.start()
+            await SpacePush.shared.connect(api: api, botId: bot.id)
+        }
+        .task(id: voiceOpen) {
+            if voiceOpen { await voice.start(store) }
+        }
+        .onDisappear { draft.flush(); transcription.cancel(); voice.stop(); store.stop() }
+        .onChange(of: store.snapshot.halt) { _, halt in
+            guard halt != nil else { return }
+            composing = false
+            reading = nil
+            readerFrame = nil
+        }
+        .onChange(of: phase) { _, next in
+            guard !noteStore.mockData else { return }
+            if next == .active {
+                store.start()
+            } else if next == .background {
+                draft.flush()
+                voice.stop()
+                voiceOpen = false
+                store.stop()
+                if transcription.recording { transcription.cancel() }
+            }
+        }
+    }
+
+    private var homePages: some View {
         ZStack {
             Wallpaper()
             TabView(selection: $page) {
@@ -114,46 +148,17 @@ struct HomeView: View {
                 .ignoresSafeArea()
             }
         }
-        .allowsHitTesting(openedNote == nil)
-        .accessibilityHidden(openedNote != nil)
-        .overlay {
-            if let id = openedNote, let note = noteStore.notes.first(where: { $0.id == id }) {
+        .toolbarVisibility(.hidden, for: .navigationBar)
+        .navigationDestination(item: $openedNote) { id in
+            if let note = noteStore.notes.first(where: { $0.id == id }) {
                 NoteDetailView(note: Binding(get: { noteStore.notes.first { $0.id == id } ?? note }, set: noteStore.update),
                                files: noteFiles, botId: bot.id, api: api,
-                               onDiscuss: discuss, onSource: showNoteSource, onClose: { openedNote = nil }, newNote: newNote)
+                               onDiscuss: discuss, onSource: showNoteSource, newNote: newNote)
                     .id(id)
             }
         }
         .artifactViewer(botId: bot.id, api: api, panel: store.snapshot.panel)
         .sheet(isPresented: $inspector) { InspectorView(store: store, botId: bot.id, api: api) }
-        .sensoryFeedback(.selection, trigger: page)
-        .task {
-            guard !noteStore.mockData else { return }
-            store.start()
-            await SpacePush.shared.connect(api: api, botId: bot.id)
-        }
-        .task(id: voiceOpen) {
-            if voiceOpen { await voice.start(store) }
-        }
-        .onDisappear { draft.flush(); transcription.cancel(); voice.stop(); store.stop() }
-        .onChange(of: store.snapshot.halt) { _, halt in
-            guard halt != nil else { return }
-            composing = false
-            reading = nil
-            readerFrame = nil
-        }
-        .onChange(of: phase) { _, next in
-            guard !noteStore.mockData else { return }
-            if next == .active {
-                store.start()
-            } else if next == .background {
-                draft.flush()
-                voice.stop()
-                voiceOpen = false
-                store.stop()
-                if transcription.recording { transcription.cancel() }
-            }
-        }
     }
 
     @ViewBuilder
@@ -175,7 +180,7 @@ struct HomeView: View {
                 PanelView(widgets: store.snapshot.panel.list, spaceUpdates: store.snapshot.panel.spaceUpdates, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onCheck: store.check, onCompose: fadeToChat)
             }
         case .chat:
-            ChatView(bot: bot, store: store, noteStore: noteStore, transcription: transcription, api: api, containerBottomInset: bottomInset, draft: Binding(get: { draft.text }, set: { draft.text = $0 }), composing: $composing, onKept: land, onVoiceConversation: {
+            ChatView(bot: bot, store: store, noteStore: noteStore, noteFiles: noteFiles, transcription: transcription, api: api, containerBottomInset: bottomInset, draft: Binding(get: { draft.text }, set: { draft.text = $0 }), composing: $composing, onKept: land, onVoiceConversation: {
                 guard !noteStore.mockData else { return }
                 composing = false
                 voiceOpen = true

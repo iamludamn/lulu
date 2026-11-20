@@ -185,7 +185,6 @@ struct NoteDetailView: View {
     let api: Api
     let onDiscuss: (UUID) -> Void
     let onSource: (String) -> Void
-    let onClose: () -> Void
     let newNote: () -> Void
     @State private var showsFiles = false
     @State private var previewFile: NoteFile?
@@ -244,17 +243,12 @@ struct NoteDetailView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Color.paper.ignoresSafeArea())
-        .safeAreaInset(edge: .top, spacing: 0) {
-            HStack {
-                roundButton("返回 Note", icon: "chevron.left", action: onClose)
-                Spacer()
+        .toolbarVisibility(.visible, for: .navigationBar)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
                 Button("带回对话", systemImage: "bubble.left") { onDiscuss(value.id) }
-                .font(.subheadline.weight(.semibold))
-                .buttonStyle(.glass)
             }
-            .padding(.horizontal, 17)
-            .padding(.bottom, 5)
-            .background(Color.paper)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             HStack(spacing: 10) {
