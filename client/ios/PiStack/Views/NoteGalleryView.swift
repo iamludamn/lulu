@@ -42,8 +42,11 @@ struct NoteFile: Identifiable {
 struct NoteGalleryView: View {
     let notes: [Note]
     let files: [NoteFile]
+    let pinnedIDs: Set<String>
+    let noteZoom: Namespace.ID
     let botId: String
     let api: Api
+    let onTogglePin: (String) -> Void
     let onOpenNote: (UUID) -> Void
     let newNote: () -> Void
     let onDropFile: (String) -> Void
@@ -53,7 +56,6 @@ struct NoteGalleryView: View {
     @Environment(\.openArtifact) private var openArtifact
 
     private static let locale = Locale(identifier: "zh_CN")
-    private static let toolbarControlHeight: CGFloat = 48
     private var entries: [NoteGalleryEntry] {
         let all = notes.map(NoteGalleryEntry.note) + files.map(NoteGalleryEntry.file)
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -65,8 +67,12 @@ struct NoteGalleryView: View {
     var body: some View {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
-        let groups = Dictionary(grouping: entries) { Self.sectionTitle(for: $0.date, today: today, calendar: calendar) }
+        let matches = entries
+        let pinned = matches.filter { pinnedIDs.contains($0.id) }
+        let unpinned = matches.filter { !pinnedIDs.contains($0.id) }
+        var groups = Dictionary(grouping: unpinned) { Self.sectionTitle(for: $0.date, today: today, calendar: calendar) }
             .sorted { ($0.value.first?.date ?? .distantPast) > ($1.value.first?.date ?? .distantPast) }
+        if !pinned.isEmpty { groups.insert((key: "置顶", value: pinned), at: 0) }
         return ScrollView {
             VStack(alignment: .leading, spacing: 19) {
                 HomePageHeading(title: "片刻思绪", subtitle: "笔记与文件")
@@ -98,20 +104,9 @@ struct NoteGalleryView: View {
                     TextField("搜索", text: $query).accessibilityLabel("搜索笔记")
                 }
                 .padding(.horizontal, 13)
-                .frame(height: Self.toolbarControlHeight)
+                .frame(height: noteToolbarButtonSize)
                 .glassEffect(.regular, in: .capsule)
-                Button(action: newNote) {
-                    Image(systemName: "square.and.pencil")
-                        .font(.system(size: 21, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        // Balance the pencil tip against the wider square.
-                        .offset(x: -1, y: -1)
-                        .frame(width: Self.toolbarControlHeight, height: Self.toolbarControlHeight)
-                        .contentShape(.circle)
-                }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.interactive(), in: .circle)
-                .accessibilityLabel("新建笔记")
+                noteGlassButton("新建笔记", icon: "square.and.pencil", action: newNote)
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 7)
@@ -121,37 +116,56 @@ struct NoteGalleryView: View {
 
     private func galleryCard(_ entry: NoteGalleryEntry) -> some View {
         let time = Self.cardDate(entry.date)
-        return VStack(alignment: .center, spacing: 4) {
-            Group {
-                switch entry {
-                case .note(let note):
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(note.displayTitle).font(.system(size: 8, weight: .semibold)).lineLimit(1)
-                        Text(note.body).font(.system(size: 6)).lineLimit(3)
-                        if let first = note.checks.first {
-                            Label(first.text, systemImage: first.done ? "checkmark.circle.fill" : "circle")
-                                .font(.system(size: 6)).lineLimit(1)
-                        }
+        let isPinned = pinnedIDs.contains(entry.id)
+        let thumbnail = Group {
+            switch entry {
+            case .note(let note):
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(note.displayTitle).font(.system(size: 8, weight: .semibold)).lineLimit(1)
+                    Text(note.body).font(.system(size: 6)).lineLimit(3)
+                    if let first = note.checks.first {
+                        Label(first.text, systemImage: first.done ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 6)).lineLimit(1)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(7)
-                case .file(let file):
-                    NoteFilePreview(file: file, botId: botId, api: api, compact: true)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(7)
+            case .file(let file):
+                NoteFilePreview(file: file, botId: botId, api: api, compact: true)
             }
-            .frame(height: 73)
-            .frame(maxWidth: .infinity)
-            .background(.background)
-            .clipShape(.rect(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.primary.opacity(0.10)))
-            .shadow(color: .black.opacity(0.06), radius: 2, y: 2)
-            .accessibilityHidden(true)
+        }
+        .frame(height: 73)
+        .frame(maxWidth: .infinity)
+        .background(.background)
+        .clipShape(.rect(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.primary.opacity(0.10)))
+        .overlay(alignment: .topTrailing) {
+            if isPinned {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 19, height: 19)
+                    .background(.regularMaterial, in: .rect(cornerRadius: 4))
+                    .padding(4)
+                    .allowsHitTesting(false)
+            }
+        }
+        .shadow(color: .black.opacity(0.06), radius: 2, y: 2)
+        .accessibilityHidden(true)
+        return VStack(alignment: .center, spacing: 4) {
+            if case .note(let note) = entry {
+                thumbnail.matchedTransitionSource(id: note.id, in: noteZoom) {
+                    $0.clipShape(.rect(cornerRadius: 7))
+                }
+            } else {
+                thumbnail
+            }
             Text(time)
                 .font(.footnote).foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(entry.title))
-        .accessibilityValue(Text(time))
+        .accessibilityValue(Text(isPinned ? "已置顶，\(time)" : time))
     }
 
 
@@ -161,6 +175,7 @@ struct NoteGalleryView: View {
         case .note(let note):
             Button { onOpenNote(note.id) } label: { galleryCard(entry) }
                 .buttonStyle(.plain)
+                .contextMenu { pinButton(entry) }
         case .file(let file):
             let source = "note-gallery-\(file.id)"
             Button {
@@ -174,11 +189,19 @@ struct NoteGalleryView: View {
                 .artifactSource(source, radius: 8)
                 .artifactDownloadFeedback(source)
                 .contextMenu {
+                    pinButton(entry)
                     if let asset = file.asset {
                         Button("拷贝引用", systemImage: "link") { UIPasteboard.general.string = asset.ref }
                         Button("从笔记移除", systemImage: "minus.circle", role: .destructive) { onDropFile(asset.origin) }
                     }
                 }
+        }
+    }
+
+    private func pinButton(_ entry: NoteGalleryEntry) -> some View {
+        let isPinned = pinnedIDs.contains(entry.id)
+        return Button(isPinned ? "取消置顶" : "置顶", systemImage: isPinned ? "pin.slash" : "pin") {
+            onTogglePin(entry.id)
         }
     }
 
@@ -278,21 +301,23 @@ struct NoteDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("带回对话", systemImage: "bubble.left") { onDiscuss(value.id) }
+                noteGlassButton("带回对话", icon: "bubble.left", size: 44) { onDiscuss(value.id) }
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack(spacing: 10) {
-                roundButton("添加清单项", icon: "checklist") {
-                    note.checks.append(.init(text: ""))
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 10) {
+                    noteGlassButton("添加清单项", icon: "checklist") {
+                        note.checks.append(.init(text: ""))
+                    }
+                    noteGlassButton("引用已有文件", icon: "paperclip") { showsFiles = true }
+                    Spacer()
+                    noteGlassButton("新建笔记", icon: "square.and.pencil", action: newNote)
                 }
-                roundButton("引用已有文件", icon: "paperclip") { showsFiles = true }
-                Spacer()
-                roundButton("新建笔记", icon: "square.and.pencil", action: newNote)
             }
-            .padding(.horizontal, 17)
+            .padding(.horizontal, 18)
             .padding(.vertical, 6)
-            .background(Color.paper)
         }
         .sheet(isPresented: $showsFiles) { filePicker }
         .sheet(item: $previewFile) { NoteMockFileSheet(file: $0, botId: botId, api: api) }
@@ -325,13 +350,23 @@ struct NoteDetailView: View {
     }
 }
 
-private func roundButton(_ label: String, icon: String, action: @escaping () -> Void) -> some View {
-    Button(action: action) {
-        Image(systemName: icon).font(.body.weight(.medium)).frame(width: 43, height: 43)
+private let noteToolbarButtonSize: CGFloat = 48
+
+private func noteGlassButton(_ label: LocalizedStringKey, icon: String, size: CGFloat = noteToolbarButtonSize,
+                             action: @escaping () -> Void) -> some View {
+    let isCompose = icon == "square.and.pencil"
+    return Button(action: action) {
+        Image(systemName: icon)
+            .font(.system(size: isCompose ? 21 : 19, weight: .medium))
+            .foregroundStyle(.secondary)
+            // The square-and-pencil symbol needs a small optical correction.
+            .offset(x: isCompose ? -1 : 0, y: isCompose ? -1 : 0)
+            .frame(width: size, height: size)
+            .contentShape(.circle)
     }
-    .buttonStyle(.glass)
-    .buttonBorderShape(.circle)
-    .accessibilityLabel(label)
+    .buttonStyle(.plain)
+    .glassEffect(.regular.interactive(), in: .circle)
+    .accessibilityLabel(Text(label))
 }
 
 private struct NoteMockFileSheet: View {

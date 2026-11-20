@@ -51,6 +51,7 @@ final class NoteStore {
     private(set) var contextID: UUID?
     var requestedRow: String?
     var notes: [Note] = []
+    private(set) var pinnedIDs: Set<String> = []
     let mockData: Bool
     let sessionDate = Date.now
 
@@ -75,6 +76,10 @@ final class NoteStore {
     var context: Note? { notes.first { $0.id == contextID } }
 
     func attach(_ id: UUID?) { contextID = id }
+
+    func togglePin(_ id: String) {
+        if !pinnedIDs.insert(id).inserted { pinnedIDs.remove(id) }
+    }
 
     func create() -> UUID {
         let note = Note()

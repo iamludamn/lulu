@@ -23,7 +23,8 @@ struct HomeView: View {
     let store: BotStore
     @State private var page: Page
     @State private var noteStore: NoteStore
-    @State private var openedNote: UUID?
+    @State private var openedNote: NoteOpening?
+    @Namespace private var noteZoom
     @State private var draft: ChatDraft
     @State private var inspector = false
     @State private var landed: Page?
@@ -149,12 +150,19 @@ struct HomeView: View {
             }
         }
         .toolbarVisibility(.hidden, for: .navigationBar)
-        .navigationDestination(item: $openedNote) { id in
-            if let note = noteStore.notes.first(where: { $0.id == id }) {
-                NoteDetailView(note: Binding(get: { noteStore.notes.first { $0.id == id } ?? note }, set: noteStore.update),
-                               files: noteFiles, botId: bot.id, api: api,
-                               onDiscuss: discuss, onSource: showNoteSource, newNote: newNote)
-                    .id(id)
+        .navigationDestination(item: $openedNote) { opening in
+            if let note = noteStore.notes.first(where: { $0.id == opening.id }) {
+                let detail = NoteDetailView(
+                    note: Binding(get: { noteStore.notes.first { $0.id == opening.id } ?? note }, set: noteStore.update),
+                    files: noteFiles, botId: bot.id, api: api,
+                    onDiscuss: discuss, onSource: showNoteSource, newNote: newNote
+                )
+                .id(opening.id)
+                if opening.fromCard {
+                    detail.navigationTransition(.zoom(sourceID: opening.id, in: noteZoom))
+                } else {
+                    detail
+                }
             }
         }
         .artifactViewer(botId: bot.id, api: api, panel: store.snapshot.panel)
@@ -187,8 +195,8 @@ struct HomeView: View {
             },
                      reading: $reading, onReaderFrame: { readerFrame = $0 })
         case .notes:
-            NoteGalleryView(notes: noteStore.notes, files: noteFiles, botId: bot.id, api: api,
-                            onOpenNote: { openedNote = $0 }, newNote: newNote, onDropFile: store.drop)
+            NoteGalleryView(notes: noteStore.notes, files: noteFiles, pinnedIDs: noteStore.pinnedIDs, noteZoom: noteZoom, botId: bot.id, api: api,
+                            onTogglePin: noteStore.togglePin, onOpenNote: { openedNote = NoteOpening(id: $0, fromCard: true) }, newNote: newNote, onDropFile: store.drop)
         }
     }
 
@@ -197,7 +205,7 @@ struct HomeView: View {
     }
 
     private func newNote() {
-        openedNote = noteStore.create()
+        openedNote = NoteOpening(id: noteStore.create(), fromCard: false)
     }
 
     private func discuss(_ id: UUID) {
@@ -354,6 +362,11 @@ struct HomeView: View {
         if draft.text.isEmpty { draft.text = text }
         composing = true
     }
+}
+
+private struct NoteOpening: Hashable {
+    let id: UUID
+    let fromCard: Bool
 }
 
 struct HomePageHeading: View {
