@@ -66,10 +66,6 @@ struct NoteGalleryView: View {
         let groups = Dictionary(grouping: entries) { Calendar.current.startOfDay(for: $0.date) }
         return ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("全部 Note").font(.largeTitle.bold())
-                    Text("\(entries.count) 项").font(.footnote).foregroundStyle(.secondary)
-                }
                 if entries.isEmpty {
                     Text("没有找到相关内容").foregroundStyle(.secondary)
                 }
