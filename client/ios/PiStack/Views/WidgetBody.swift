@@ -191,18 +191,15 @@ struct WidgetBody: View {
                 .accessibilityHint("标记为完成")
             }
             if let index = lastCheckedIndex, items.indices.contains(index), items[index].done == true {
-                checklistDivider
-                HStack {
-                    Text("已完成：\(items[index].title)").foregroundStyle(.secondary)
-                    Spacer()
-                    Button("撤销") {
-                        lastCheckedIndex = nil
-                        onCheck(index, false)
-                    }
-                    .buttonStyle(.plain)
+                Button {
+                    lastCheckedIndex = nil
+                    onCheck(index, false)
+                } label: {
+                    Text("撤销").frame(minHeight: 44)
                 }
+                .buttonStyle(.plain)
                 .font(.caption)
-                .frame(minHeight: 36)
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
         .sensoryFeedback(.selection, trigger: items.compactMap(\.done))
