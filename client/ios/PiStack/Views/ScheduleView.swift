@@ -37,6 +37,8 @@ struct ScheduleSummary: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expanded = false
 
+    private var showsDetails: Bool { !expandsInline || expanded }
+
     var body: some View {
         let sorted = ScheduledTaskRow.upcomingFirst(rows)
         VStack(alignment: .leading, spacing: 12) {
@@ -108,7 +110,9 @@ struct ScheduleSummary: View {
 
     private func time(_ date: Date) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("下一次 · \(scheduleDay(date))").font(.caption).foregroundStyle(.secondary)
+            Text(showsDetails ? "下一次 · \(scheduleDay(date))" : scheduleDay(date))
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Text(date.formatted(.dateTime.hour().minute()))
                 .font(.largeTitle.weight(.semibold).monospacedDigit())
         }
@@ -117,7 +121,9 @@ struct ScheduleSummary: View {
     private func event(_ row: ScheduledTaskRow, alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: 2) {
             Text(row.name).font(.headline)
-            Text(row.summaryLabel).font(.caption).foregroundStyle(.secondary)
+            if showsDetails {
+                Text(row.summaryLabel).font(.caption).foregroundStyle(.secondary)
+            }
         }
         .multilineTextAlignment(alignment == .trailing ? .trailing : .leading)
     }
