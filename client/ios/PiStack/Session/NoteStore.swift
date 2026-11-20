@@ -33,7 +33,7 @@ final class NoteStore {
 
         var label: String {
             switch self {
-            case .saved: "已存入 Note"
+            case .saved: "已存入笔记"
             case .updated: "已更新原笔记"
             case .outdated: "原笔记已有改动，请重新生成更新"
             }

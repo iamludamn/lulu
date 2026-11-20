@@ -29,7 +29,7 @@ struct NoteOfferRow: View {
                     onLand()
                 }, onKeep: onAccept, confirmed: offer.outcome != nil) { _, armed in
                     offerContent(armed: armed)
-                        .accessibilityAction(named: offer.original == nil ? "存入 Note" : "更新原笔记") {
+                        .accessibilityAction(named: offer.original == nil ? "存入笔记" : "更新原笔记") {
                             onAccept()
                             settled = true
                             onLand()
@@ -62,7 +62,7 @@ struct NoteOfferRow: View {
 
     private func face(armed: Bool, original: Note?) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(original == nil ? "Note" : "Note 更新", systemImage: "note.text")
+            Label(original == nil ? "笔记" : "笔记更新", systemImage: "note.text")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             Text(offer.note.displayTitle).font(.headline)
@@ -82,7 +82,7 @@ struct NoteOfferRow: View {
             } else {
                 Text(offer.note.body).font(.subheadline).lineSpacing(3).lineLimit(5)
             }
-            Label(original == nil ? "右滑存入 Note" : "右滑更新原笔记", systemImage: "arrow.right")
+            Label(original == nil ? "右滑存入笔记" : "右滑更新原笔记", systemImage: "arrow.right")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(armed ? .primary : .secondary)
         }

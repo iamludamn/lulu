@@ -12,7 +12,7 @@ enum Page: Int, CaseIterable, Identifiable {
         switch self {
         case .panel: "视图"
         case .chat: "对话"
-        case .notes: "Note"
+        case .notes: "笔记"
         }
     }
 }

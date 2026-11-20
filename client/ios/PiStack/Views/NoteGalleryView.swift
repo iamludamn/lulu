@@ -94,7 +94,7 @@ struct NoteGalleryView: View {
             HStack(alignment: .center, spacing: 9) {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("搜索", text: $query).accessibilityLabel("搜索 Note")
+                    TextField("搜索", text: $query).accessibilityLabel("搜索笔记")
                 }
                 .padding(.horizontal, 13)
                 .frame(height: Self.toolbarControlHeight)
@@ -175,7 +175,7 @@ struct NoteGalleryView: View {
                 .contextMenu {
                     if let asset = file.asset {
                         Button("拷贝引用", systemImage: "link") { UIPasteboard.general.string = asset.ref }
-                        Button("从 Note 移除", systemImage: "minus.circle", role: .destructive) { onDropFile(asset.origin) }
+                        Button("从笔记移除", systemImage: "minus.circle", role: .destructive) { onDropFile(asset.origin) }
                     }
                 }
         }
