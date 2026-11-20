@@ -32,6 +32,15 @@ Set the Worker bindings `LULU_CRON_ACCOUNT_ID` and `LULU_CRON_WORKER_NAME` to th
 
 The Worker routes Cron events to the existing Bot. Daily jobs can share a UTC rule and use their chosen time zone to select the correct occurrence. One-time jobs register a UTC calendar rule, round up to the next minute when needed, and release the rule after dispatch, expiration, pause, or deletion once no active job uses it. Short timers and unconfirmed registrations use the existing Durable Object Alarm while [Cron Trigger changes propagate](https://developers.cloudflare.com/workers/configuration/cron-triggers/). The same fallback applies when Cron bindings are absent or registration fails.
 
+## iOS dictation correction
+
+With `VOLC_SPEECH_ASR_API_KEY` configured, iOS dictation uses [second-pass recognition and disfluency cleanup](https://docs.volcengine.com/docs/doubao-voice/bidirectional-streaming-automatic-speech-recognition-websocket?lang=zh) and a built-in final-transcript replacement (`库伯内特斯` → `Kubernetes`). These optional string bindings in the Worker's `vars` adjust the defaults.
+
+- Set `VOLC_SPEECH_ASR_REFINE` to `"false"` to disable second-pass recognition and disfluency cleanup. The refined result can take longer to return after recording ends.
+- Set `VOLC_SPEECH_ASR_CORRECTION_TABLE_ID` to use a Doubao Speech replacement table in place of the built-in rule. This works independently of `VOLC_SPEECH_ASR_REFINE`. See [replacement table setup](https://docs.volcengine.com/docs/doubao-voice/replacement-word?lang=zh).
+
+To compare results, tap the microphone in the iOS chat composer, read the same sample with each configuration, and tap again to place the transcript in the draft. Try a sentence with a hesitation and a sentence containing a dictionary entry. Check both the wording and the time from stopping the recording to seeing the draft.
+
 ## Automatic deploy
 
 [GitHub Actions](../.github/workflows/deploy.yml) checks, builds, and deploys pushes to `main` using the checked-in config. To opt in on a fork, first replace deployment settings, then set the `CLOUDFLARE_ACCOUNT_ID` repository variable and `CLOUDFLARE_API_TOKEN` secret.
