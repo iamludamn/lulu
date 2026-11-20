@@ -235,13 +235,9 @@ struct Composer: View {
 
     private func target(for translation: CGSize) -> VoiceTarget {
         let x = translation.width, y = translation.height
-        let cancelDistance = hypot(x + diagonal, y + diagonal)
-        let phoneDistance = hypot(x, y + voiceRadius)
-        if min(cancelDistance, phoneDistance) < 32 && hypot(x, y) > 30 {
-            return cancelDistance < phoneDistance ? .cancel : .conversation
-        }
+        if hypot(x, y + voiceRadius) < 32 { return .conversation }
         if x < -77 && abs(y) < 30 { return .text }
-        return .send
+        return hypot(x, y) <= 30 ? .send : .cancel
     }
 
     private func voiceOption(_ title: String, icon: String, selected: Bool) -> some View {
