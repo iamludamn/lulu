@@ -19,7 +19,6 @@ struct Composer: View {
     @State private var showPreparation = false
     private enum VoiceTarget { case send, text, cancel, conversation }
     private let voiceRadius: CGFloat = 104
-    private var diagonal: CGFloat { voiceRadius / sqrt(2) }
     @State private var voiceTarget: VoiceTarget = .send
     @State private var notice: String?
     @State private var noticeTask: Task<Void, Never>?
@@ -104,15 +103,11 @@ struct Composer: View {
         }
         .overlay(alignment: .bottomTrailing) {
             if listening {
-                ZStack(alignment: .bottomTrailing) {
-                    voiceOption("取消", icon: "xmark", selected: voiceTarget == .cancel)
-                        .offset(x: -diagonal, y: voiceRadius - diagonal)
-                    voiceOption("语音对话", icon: "phone.fill", selected: voiceTarget == .conversation)
-                }.frame(width: 122, height: 96, alignment: .bottomTrailing)
-                .padding(.trailing, 16)
-                .offset(y: -(voiceRadius + 8))
-                .allowsHitTesting(false)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                conversationOption
+                    .padding(.trailing, 16)
+                    .offset(y: -(voiceRadius + 8))
+                    .allowsHitTesting(false)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
         .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: listening)
@@ -240,14 +235,14 @@ struct Composer: View {
         return hypot(x, y) <= 30 ? .send : .cancel
     }
 
-    private func voiceOption(_ title: String, icon: String, selected: Bool) -> some View {
-        Image(systemName: icon)
+    private var conversationOption: some View {
+        Image(systemName: "phone.fill")
             .font(.system(size: 19, weight: .medium))
             .foregroundStyle(.secondary)
             .frame(width: 48, height: 48)
             .glassEffect(.regular, in: .circle)
-            .scaleEffect(selected ? 1.1 : 1)
-            .accessibilityLabel(title)
+            .scaleEffect(voiceTarget == .conversation ? 1.1 : 1)
+            .accessibilityLabel("语音对话")
     }
 }
 
