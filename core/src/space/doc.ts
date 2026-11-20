@@ -16,6 +16,7 @@ export type Refresh = {
   archived: boolean;
   notify: boolean;
   nextAt: number | null;
+  immediatePull?: boolean;
   retryAt: number | null;
   monitor: string | null;
   sealedWebhookSecret?: string;
@@ -57,11 +58,11 @@ export const SpaceRefreshDoc = defineDocFamily<{ entry?: Refresh }, null>({
   initial: () => ({}),
 });
 
-export async function spaceEntry(harness: Harness, id: string): Promise<Refresh | undefined> {
+export async function spaceEntry(harness: Pick<Harness, "snapshot">, id: string): Promise<Refresh | undefined> {
   return (await harness.snapshot(SpaceRefreshDoc, id, context))?.entry;
 }
 
-export async function spaceEntries(harness: Harness, ids?: readonly string[]): Promise<[string, Refresh][]> {
+export async function spaceEntries(harness: Pick<Harness, "snapshot">, ids?: readonly string[]): Promise<[string, Refresh][]> {
   const requested = ids ?? (await harness.snapshot(SpaceRefreshIndex, context))?.ids ?? [];
   const pairs = await Promise.all(requested.map(async (id) => [id, await spaceEntry(harness, id)] as const));
   return pairs.flatMap(([id, entry]) => entry === undefined ? [] : [[id, entry]]);

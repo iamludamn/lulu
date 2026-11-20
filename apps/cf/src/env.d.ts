@@ -1,3 +1,9 @@
+declare namespace Cloudflare {
+  interface GlobalProps {
+    mainModule: typeof import("./worker.js");
+  }
+}
+
 interface Env {
   readonly ASSETS: Fetcher;
   readonly AI?: Ai;

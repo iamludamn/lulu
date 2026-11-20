@@ -1,10 +1,12 @@
 import type { DurableHost } from "../host/types.js";
 import { SPACE_ID } from "../protocol/panel.js";
 import { mcpCatalog } from "./mcp-catalog.js";
+import { savedPanel, savedSpace } from "../conversation/bot-data.js";
+import { spaceError, spaceRefreshResponse } from "../space/refresh.js";
 
 export const BOT_ID = "main";
 
-export type ApiHost = Pick<DurableHost, "env" | "objects" | "telemetry" | "kv"> & { waitUntil(task: Promise<unknown>): void };
+export type ApiHost = Pick<DurableHost, "env" | "objects" | "telemetry" | "kv" | "data"> & { waitUntil(task: Promise<unknown>): void };
 
 const PREFIX = `/api/bots/${BOT_ID}`;
 
@@ -21,6 +23,18 @@ const memoryFile = (request: Request, host: ApiHost): Promise<Response> => {
 };
 
 const schedules = (host: ApiHost): Promise<Response> => host.objects.BOTS.getByName(BOT_ID).fetch("https://bot/schedules");
+
+async function startup(request: Request, host: ApiHost): Promise<Response> {
+  if (!await authorizeSocket(request, host.env.LULU_CHAT_TOKEN)) return unauthorized();
+  try {
+    const data = await host.data?.readStartup();
+    if (data !== undefined) return Response.json(data, { headers: { "Cache-Control": "private, no-store" } });
+    return await host.objects.BOTS.getByName(BOT_ID).fetch("https://bot/startup");
+  } catch (error) {
+    console.error("Startup read failed", error);
+    return json({ error: "Startup data unavailable" }, 503);
+  }
+}
 
 async function artifactFile(request: Request, host: ApiHost): Promise<Response> {
   const params = new URL(request.url).searchParams;
@@ -83,6 +97,7 @@ const reads: Record<string, (request: Request, host: ApiHost) => Promise<Respons
   "/memory": (_request, host) => memoryListing(host),
   "/memory/file": memoryFile,
   "/schedules": (_request, host) => schedules(host),
+  "/startup": startup,
   "/artifacts/file": artifactFile,
 };
 
@@ -132,6 +147,15 @@ async function route(request: Request, host: ApiHost, pathname: string): Promise
     return host.objects.BOTS.getByName(BOT_ID).fetch("https://bot" + path + url.search);
   }
   if (rest === "/spaces/refresh" || rest === "/spaces/device") {
+    if (rest === "/spaces/refresh" && request.method === "GET") {
+      try {
+        const stored = await host.data?.read();
+        if (stored !== undefined) {
+          const id = new URL(request.url).searchParams.get("id") ?? "";
+          return spaceRefreshResponse(id, savedPanel(stored), savedSpace(stored, id), host.env);
+        }
+      } catch (error) { return spaceError(error); }
+    }
     const action = rest === "/spaces/refresh" ? "space-refresh" : "space-device";
     return host.objects.BOTS.getByName(BOT_ID).fetch("https://bot/" + action + new URL(request.url).search, {
       method: request.method, headers: request.headers, body: request.body,

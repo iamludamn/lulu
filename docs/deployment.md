@@ -6,6 +6,12 @@ Use your own Cloudflare account and Wrangler login. Copy [wrangler.jsonc](../app
 
 Use a secret manager for Worker credentials. Chat requires a model provider credential. See [.env.index](../.env.index) and [env.d.ts](../apps/cf/src/env.d.ts) for supported settings. Set `CLOUDFLARE_ACCOUNT_ID` before all Wrangler commands.
 
+## Object storage migration
+
+Use the existing private bucket and S3 Worker credentials. The endpoint must support conditional `PutObject` and destination-conditional `CopyObject`. Existing deployments keep the Artifact Durable Object binding while the Worker imports the legacy index on first use. Keep it available until the import has completed. The files and existing pinned URLs use the same bucket paths after import.
+
+The first Bot start seeds the external app state and the smaller startup projection. Subsequent startup reads use the projection directly. The Bot writes current app state before acknowledging a commit to the selected documents. An interrupted publication is resumed using its pending marker. If native copies are absent, the Bot hydrates them from the external app state. Use the same private bucket when replacing the Bot's local storage.
+
 ## Build and deploy
 
 ```sh

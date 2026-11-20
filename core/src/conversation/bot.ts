@@ -3,8 +3,8 @@ import { ChatDeliveryDoc } from "./delivery-doc.js";
 import { chatDeliveryQuery } from "./delivery-report.js";
 import { SEND_TOOL } from "../protocol/send.js";
 import { nextPushAlarm, sendSpacePushes, spaceDevice } from "../space/push.js";
-import { handleSpaceRefresh, nextSpaceAlarm, receiveSpaceEvent, refreshDueSpaces, spaceError } from "../space/refresh.js";
-import { SpaceRefreshDoc, SpaceRefreshIndex, spaceEntries, spaceStatus } from "../space/doc.js";
+import { calendarPull, handleSpaceRefresh, nextSpaceAlarm, receiveSpaceEvent, refreshDueSpaces, spaceError } from "../space/refresh.js";
+import { SpaceRefreshDoc, SpaceRefreshIndex, spaceEntries, spaceStatus, type Refresh } from "../space/doc.js";
 import { DreamingTriggerDoc, reconcileDreaming } from "../memory/dreaming.js";
 import { admitPrompt, prepareInjection } from "../memory/injection.js";
 import { expireRequests, RequestDeadlinesDoc } from "./deadlines.js";
@@ -25,7 +25,7 @@ import type { McpStatus, ModelRef, SessionProgress } from "../protocol/contract.
 import { abortRuns, dispatchSchedules, fireSchedules, nextScheduleAlarm, scheduleEntries } from "../cron/alarm.js";
 import { cronDueAt } from "../cron/engine.js";
 import { CronTriggerRegistration } from "../cron/registration.js";
-import type { ScheduledJob } from "../cron/schedule.js";
+import { utcDailyCron, type ScheduledJob } from "../cron/schedule.js";
 import { BotAlarm, RECOVERY_ALARM_DELAY_MS } from "./alarm.js";
 import { CRON_KIND } from "../cron/doc.js";
 import { withScheduleOverview } from "../cron/overview.js";
@@ -36,6 +36,7 @@ import { observeSandboxActivity } from "../sandbox/activity.js";
 import { sandboxWindowQuery } from "../sandbox/report-api.js";
 import { checkItem } from "../panel/check.js";
 import { PanelDoc } from "../panel/doc.js";
+import { BotDataPersistence } from "./bot-data.js";
 import { EMPTY_PANEL, type PanelState } from "../protocol/panel.js";
 import type { AssetItem } from "../protocol/send.js";
 import { AssetsDoc, DeliveryDoc, MakeDoc } from "../send/doc.js";
@@ -99,7 +100,7 @@ export class BotSession {
   #waitTimer: ReturnType<typeof setTimeout> | undefined = undefined;
   readonly #deferred: Array<() => void> = [];
   #dirty = false;
-  #spaceWork: Promise<void> | undefined;
+  #spaceWork = Promise.resolve();
   readonly #alarm: BotAlarm;
   readonly #cron: CronTriggerRegistration | undefined;
   #alarmRetryAt = 0;
@@ -167,6 +168,7 @@ export class BotSession {
 
   async #initialize(storage: Storage): Promise<void> {
     await this.#cron?.load();
+    const data = this.#host.data === undefined ? undefined : new BotDataPersistence(storage, this.#host.storage, this.#host.data);
     this.#models = createChatModels(this.#host.env);
     const { options, mcp, host, registry, botServers } = await createChatHarnessOptions(this.#host, this.#models);
     this.#botServers = botServers;
@@ -176,7 +178,7 @@ export class BotSession {
     const telemetry = createHarnessTelemetry(this.#host.telemetry, { "lulu.bot.id": this.#host.name, "lulu.agent": "chat" }, () => this.#root?.id);
     registry.install(telemetry.extension);
     const harness = await Harness.open(
-      storage,
+      data?.storage ?? storage,
       {
         ...options,
         telemetry: telemetry.context,
@@ -186,11 +188,13 @@ export class BotSession {
       BACKGROUND_CONTEXT,
     );
     this.#harness = harness;
+    await data?.start(harness);
     observeDelegateTiming(harness, telemetry.context);
     harness.observeCommits({ advance: (publication) => {
       if (publication.changes.some((change) => change.type === "document" && (change.record.kind === PanelDoc.definition.kind || change.record.kind === AssetsDoc.definition.kind))) void this.#reconcileDreaming();
       if (publication.changes.some((change) => change.type === "submission" || (change.type === "document" && ALARM_DOCUMENT_KINDS.has(change.record.kind)))) this.#alarmChanged();
-      if (publication.changes.some((change) => change.type === "document" && change.record.kind === CRON_KIND)) this.#cronChanged();
+      if (publication.changes.some((change) => change.type === "document" &&
+          (change.record.kind === CRON_KIND || change.record.kind === SpaceRefreshDoc.definition.kind || change.record.kind === SpaceRefreshIndex.definition.kind))) this.#cronChanged();
     }, end: () => {} });
 
     void harness.closed.then((end) => {
@@ -259,15 +263,12 @@ export class BotSession {
       BACKGROUND_CONTEXT,
       this.#snapshotFailed("progress"),
     );
+    const layout = await this.#layout(BACKGROUND_CONTEXT);
+    this.#panel = layout.panel;
+    this.#assets = layout.assets;
     trackSnapshot(
       harness,
-      async (context) => {
-        const panel = await withScheduleOverview(harness, (await harness.snapshot(PanelDoc, context)) ?? EMPTY_PANEL, context);
-        const spaces = await spaceEntries(harness, panel.order.filter((id) => ["space", "web"].includes(panel.widgets[id]?.body.kind ?? "")));
-        const spaceUpdates = Object.fromEntries(spaces
-          .map(([id, entry]) => [id, spaceStatus(entry)]));
-        return { panel: { ...panel, spaceUpdates }, assets: (await harness.snapshot(AssetsDoc, context))?.items ?? [] };
-      },
+      (context) => this.#layout(context),
       {
         replace: (_context, value) => {
           this.#panel = value.panel;
@@ -284,6 +285,14 @@ export class BotSession {
       if (delivery.since !== null) return;
       delivery.since = Math.max(0, ...(await tx.doc(ChatDoc)).messages.map((message) => message.id ?? 0));
     }, BACKGROUND_CONTEXT);
+  }
+
+  async #layout(context: typeof BACKGROUND_CONTEXT): Promise<{ panel: PanelState; assets: AssetItem[] }> {
+    const harness = this.#harness;
+    const panel = await withScheduleOverview(harness, (await harness.snapshot(PanelDoc, context)) ?? EMPTY_PANEL, context);
+    const spaces = await spaceEntries(harness, panel.order.filter((id) => ["space", "web"].includes(panel.widgets[id]?.body.kind ?? "")));
+    const spaceUpdates = Object.fromEntries(spaces.map(([id, entry]) => [id, spaceStatus(entry)]));
+    return { panel: { ...panel, spaceUpdates }, assets: (await harness.snapshot(AssetsDoc, context))?.items ?? [] };
   }
 
   #reconcileDreaming(): Promise<void> {
@@ -305,6 +314,7 @@ export class BotSession {
 
   fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
+    if (pathname === "/startup") return this.#layout(BACKGROUND_CONTEXT).then((data) => Response.json(data, { headers: { "Cache-Control": "private, no-store" } }));
     if (pathname === "/chat-delivery-window") return chatDeliveryQuery(request, this.#harness);
     if (pathname === "/sandbox-window") return this.#accountingReady().then(() => sandboxWindowQuery(request, this.#harness, BACKGROUND_CONTEXT));
     if (pathname === "/memory/sources.changed" && request.method === "POST") return this.#reconcileDreaming().then(() => new Response(null, { status: 204 }));
@@ -348,6 +358,7 @@ export class BotSession {
       this.#harness.resume();
       const fired = await dispatchSchedules(this.#harness, this.#root, selected, Date.now(), cronDueAt(cron, scheduledAt));
       span.setAttributes({ "lulu.cron.fired": fired.length });
+      if (cron === utcDailyCron(scheduledAt)) await this.#runSpaces({ rule: cron, at: scheduledAt });
       await this.#reconcileCron();
     }));
   }
@@ -747,8 +758,7 @@ export class BotSession {
       this.#lastScheduleRunAt = now;
       span.setAttributes({ "lulu.cron.fired": outcome.fired.length, "lulu.cron.expired": outcome.expired.length });
       await abortRuns(this.#harness, outcome.expired);
-      this.#spaceWork ??= refreshDueSpaces(this.#harness, this.#host.env, now).then(() => sendSpacePushes(this.#harness, this.#host.env, Date.now())).finally(() => { this.#spaceWork = undefined; });
-      await this.#spaceWork;
+      await this.#runSpaces();
       this.#alarmRetryAt = 0;
     } catch (error) {
       reportError("Schedule run failed", error);
@@ -766,11 +776,26 @@ export class BotSession {
     const now = Date.now();
     const deadlines = await Promise.all([
       nextScheduleAlarm(this.#harness, this.#lastScheduleRunAt, this.#localSchedules(now)),
-      nextSpaceAlarm(this.#harness),
+      nextSpaceAlarm(this.#harness, (entry) => this.#localSpace(entry, now)),
       nextPushAlarm(this.#harness, this.#host.env),
       nextDeliveryAlarm(this.#harness),
     ]);
     return Math.min(this.#alarmRetryAt || Infinity, this.#cron?.nextWake(now) ?? Infinity, ...deadlines.map((at) => at === undefined ? Infinity : at > now ? at : Math.max(now + 1000, this.#alarmRetryAt)));
+  }
+
+  #localSpace(entry: Refresh, now: number): boolean {
+    if (this.#cron === undefined || entry.mode.kind !== "scheduled" || entry.nextAt === null || !calendarPull(entry, entry.nextAt)) return true;
+    return this.#cron.isLocalSchedule({ kind: "daily", time: entry.mode.time, tz: entry.mode.tz }, now);
+  }
+
+  #runSpaces(cron?: { rule: string; at: number }): Promise<void> {
+    const next = this.#spaceWork.then(async () => {
+      const now = Date.now();
+      await refreshDueSpaces(this.#harness, this.#host.env, now, (entry) => this.#localSpace(entry, now), cron);
+      await sendSpacePushes(this.#harness, this.#host.env, Date.now());
+    });
+    this.#spaceWork = next.catch(() => undefined);
+    return next;
   }
 
   #localSchedules(now: number): ((job: ScheduledJob) => boolean) | undefined {

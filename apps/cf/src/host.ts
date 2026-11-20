@@ -2,9 +2,33 @@ import { createInlineCodemodeSandbox } from "@earendil-works/pi-codemode/cloudfl
 import type { DurableHost, DurableSockets, Environment, KeyValue, Socket } from "@lulu/core/host/types.js";
 import { createTelemetry } from "@lulu/core/telemetry/otlp.js";
 import type { ApiHost } from "@lulu/core/server/api.js";
+import { objectStore } from "@lulu/core/artifact/s3.js";
+import { startupData, type BotData, type BotDataStore, type StartupData } from "@lulu/core/conversation/bot-data.js";
+import type { TelemetryContext } from "@earendil-works/pi-telemetry";
 
-const stringsOf = (env: Env): Environment =>
+export const stringsOf = (env: Env): Environment =>
   Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[0] !== "LULU_CRON_API_TOKEN" && typeof entry[1] === "string"));
+
+const artifactsOf = (ctx: Pick<ExecutionContext, "exports">): DurableHost["objects"]["ARTIFACTS"] => ({
+  getByName: (name) => ctx.exports.ArtifactWorker({ props: { name } }),
+});
+
+export function botDataOf(env: Environment, telemetry: TelemetryContext, name: string): BotDataStore | undefined {
+  const store = objectStore(env, telemetry);
+  if (store === undefined) return;
+  const path = `metadata/${name}/bot-data.json`;
+  const startup = `metadata/${name}/startup.json`;
+  return {
+    key: env.S3_ENDPOINT + "/" + env.S3_BUCKET + "/" + path,
+    read: async () => (await store.readJson<BotData>(path))?.value,
+    readStartup: async () => (await store.readJson<StartupData>(startup))?.value,
+    async save(value) {
+      const [dataTag, startupTag] = await Promise.all([store.etag(path), store.etag(startup)]);
+      if (!await store.writeJson(path, value, dataTag)) throw new Error("Bot data changed while publishing");
+      if (!await store.writeJson(startup, startupData(value), startupTag)) throw new Error("Startup data changed while publishing");
+    },
+  };
+}
 
 const kvOf = (kv: KVNamespace): KeyValue => ({
   get: (key) => kv.get(key),
@@ -65,8 +89,9 @@ export function durableHost(ctx: DurableObjectState, env: Env, cronRegistration?
       delete: () => ctx.storage.deleteAlarm(),
     },
     cronRegistration,
+    data: botDataOf(environment, telemetry, name),
     sockets: socketsOf(ctx),
-    objects: { BOTS: env.BOTS, MEMORY: env.MEMORY, ARTIFACTS: env.ARTIFACTS },
+    objects: { BOTS: env.BOTS, MEMORY: env.MEMORY, ARTIFACTS: artifactsOf(ctx) },
     kv,
     sandbox: createInlineCodemodeSandbox(),
     connect,
@@ -76,11 +101,13 @@ export function durableHost(ctx: DurableObjectState, env: Env, cronRegistration?
 
 export function workerHost(env: Env, ctx: ExecutionContext): ApiHost {
   const environment = stringsOf(env);
+  const telemetry = createTelemetry(environment, (task) => ctx.waitUntil(task));
   return {
     waitUntil: (task) => ctx.waitUntil(task),
     env: environment,
     kv: kvOf(env.LULU_MCP),
-    telemetry: createTelemetry(environment, (task) => ctx.waitUntil(task)),
-    objects: { BOTS: env.BOTS, MEMORY: env.MEMORY, ARTIFACTS: env.ARTIFACTS },
+    telemetry,
+    data: botDataOf(environment, telemetry, "main"),
+    objects: { BOTS: env.BOTS, MEMORY: env.MEMORY, ARTIFACTS: artifactsOf(ctx) },
   };
 }

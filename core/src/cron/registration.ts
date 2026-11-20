@@ -1,6 +1,8 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Harness } from "@earendil-works/pi-durable";
 import type { DurableStorage } from "../host/types.js";
+import type { Schedule } from "../protocol/contract.js";
+import { spaceEntries } from "../space/doc.js";
 import { CronJobsDoc } from "./doc.js";
 import { GRACE_MS, dailyUtcCrons, onceCronTime, utcOnceCron, type ScheduledJob } from "./schedule.js";
 
@@ -31,9 +33,9 @@ export class CronTriggerRegistration {
     this.#applied = new Map(saved);
   }
 
-  #crons(job: ScheduledJob): string[] {
-    if (job.schedule.kind === "once") return [utcOnceCron(onceCronTime(job.schedule.at))];
-    const { time, tz } = job.schedule;
+  #crons(schedule: Schedule): string[] {
+    if (schedule.kind === "once") return [utcOnceCron(onceCronTime(schedule.at))];
+    const { time, tz } = schedule;
     const key = time + " " + tz;
     let crons = this.#rules.get(key);
     if (crons === undefined) {
@@ -45,7 +47,11 @@ export class CronTriggerRegistration {
 
   isLocal(job: ScheduledJob, now: number): boolean {
     if (job.schedule.kind === "once" && now - job.schedule.at > GRACE_MS) return true;
-    return this.#crons(job).some((cron) => (this.#applied.get(cron) ?? Infinity) > now);
+    return this.isLocalSchedule(job.schedule, now);
+  }
+
+  isLocalSchedule(schedule: Schedule, now: number): boolean {
+    return this.#crons(schedule).some((cron) => (this.#applied.get(cron) ?? Infinity) > now);
   }
 
   nextWake(now: number): number {
@@ -56,14 +62,17 @@ export class CronTriggerRegistration {
     const update = this.#queue.then(async () => {
       const now = Date.now();
       const jobs = (await harness.snapshot(CronJobsDoc, BACKGROUND_CONTEXT))?.jobs ?? [];
-      const desired = [...new Set(jobs.flatMap((job) => {
+      const spaceRules = (await spaceEntries(harness)).flatMap(([, entry]) =>
+        entry.enabled && entry.mode.kind === "scheduled" ? this.#crons({ kind: "daily", time: entry.mode.time, tz: entry.mode.tz }) : []);
+      const jobRules = jobs.flatMap((job) => {
         if (job.state !== "active") return [];
-        const crons = this.#crons(job);
+        const crons = this.#crons(job.schedule);
         if (job.schedule.kind === "daily") return crons;
         if (now - job.schedule.at > GRACE_MS) return [];
         if (onceCronTime(job.schedule.at) <= now + PROPAGATION_MS && !this.#applied.has(crons[0])) return [];
         return crons;
-      }))].sort();
+      });
+      const desired = [...new Set([...jobRules, ...spaceRules])].sort();
       if (this.#loaded && desired.length === this.#applied.size && desired.every((cron) => this.#applied.has(cron))) return;
       if (this.#pending?.length === desired.length && desired.every((cron, i) => this.#pending?.[i] === cron) && now < this.#retryAt) return;
       const previous = this.#applied;

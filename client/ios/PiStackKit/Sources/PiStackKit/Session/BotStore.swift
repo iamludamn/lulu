@@ -19,6 +19,7 @@ public final class BotStore {
 
     public struct Snapshot {
         public var hasReceivedState = false
+        public var hasLayout = false
         public var link: Link = .connecting
         public var view: ConversationView?
         public var progress: SessionProgress?
@@ -60,12 +61,15 @@ public final class BotStore {
     private var keepTimers: [String: Task<Void, Never>] = [:]
 
     private let socketURL: URL
+    private let api: Api
+    private let botId: String
     private let token: String
     private let cacheURL: URL
     private let stateTimeout: Duration
     private let retryTimeout: Duration
     private var stateTimer: Task<Void, Never>?
     @ObservationIgnored private var restoration: Task<Void, Never>?
+    @ObservationIgnored private var startup: Task<Void, Never>?
     private var saving: Task<Void, Never>?
     private var latestState: Data?
     private var deliveryReceipts = false
@@ -81,6 +85,8 @@ public final class BotStore {
 
     init(botId: String, server: URL, token: String = "", stateTimeout: Duration, retryTimeout: Duration = .seconds(30)) {
         socketURL = Api.socketURL(base: server, botId: botId)
+        api = Api(base: server)
+        self.botId = botId
         self.token = token
         cacheURL = Cache.url(for: socketURL)
         self.stateTimeout = stateTimeout
@@ -102,6 +108,8 @@ public final class BotStore {
         running = false
         restoration?.cancel()
         restoration = nil
+        startup?.cancel()
+        startup = nil
         timer?.cancel()
         timer = nil
         stateTimer?.cancel()
@@ -221,8 +229,8 @@ public final class BotStore {
             let restored = await Task.detached(priority: .userInitiated) { () -> (Cache, (PanelState, [AssetItem])?)? in
                 guard let cache = Cache.load(url)?.offline else { return nil }
                 if let data = cache.state ?? (try? Data(contentsOf: url.appendingPathExtension("state"))),
-                   let surfaces = try? JSONDecoder().decode(Cache.Surfaces.self, from: data) {
-                    return (cache, (surfaces.panel ?? PanelState(), surfaces.assets ?? []))
+                   let surfaces = try? JSONDecoder().decode(Cache.Surfaces.self, from: data), let panel = surfaces.panel {
+                    return (cache, (panel, surfaces.assets ?? []))
                 }
                 return (cache, nil)
             }.value
@@ -232,9 +240,10 @@ public final class BotStore {
             self.cachedTranscriptEntries = nil
             self.snapshot.view = cache.view
             self.snapshot.progress = cache.progress
-            if !self.snapshot.hasReceivedState, let (panel, assets) = state {
+            if !self.snapshot.hasLayout, let (panel, assets) = state {
                 self.snapshot.panel = panel
                 self.snapshot.assets = assets
+                self.snapshot.hasLayout = true
             }
         }
     }
@@ -263,6 +272,7 @@ public final class BotStore {
         task.maximumMessageSize = 64 << 20
         self.task = task
         task.resume()
+        loadStartup()
         stateTimer?.cancel()
         stateTimer = Task { [weak self] in
             guard let self else { return }
@@ -277,6 +287,22 @@ public final class BotStore {
         receiptedCalls.removeAll()
         transmit(["type": "hello", "incremental": true, "schedules": true])
         Task { await listen(task) }
+    }
+
+    private func loadStartup() {
+        guard !snapshot.hasLayout, startup == nil else { return }
+        let api = self.api
+        let botId = self.botId
+        let token = self.token
+        startup = Task { [weak self] in
+            let layout = try? await api.startup(botId, token: token)
+            guard !Task.isCancelled, let self else { return }
+            self.startup = nil
+            guard let layout, self.running, self.snapshot.halt == nil, !self.snapshot.hasReceivedState else { return }
+            self.snapshot.panel = layout.panel
+            self.snapshot.assets = layout.assets
+            self.snapshot.hasLayout = true
+        }
     }
 
     private func listen(_ task: URLSessionWebSocketTask) async {
@@ -336,6 +362,8 @@ public final class BotStore {
         switch message {
         case .state(let view, let progress, let mcp, let panel, let assets):
             guard let applied = view.applied(to: snapshot.view) else { return }
+            startup?.cancel()
+            startup = nil
             if view.reset == true || view.conversation != snapshot.view?.conversation ||
                 !view.entries.isEmpty || view.order != nil ||
                 progress.hiddenEntries != (snapshot.progress?.hiddenEntries ?? []) {
@@ -353,6 +381,7 @@ public final class BotStore {
             snapshot.panel = panel
             snapshot.assets = assets
             snapshot.hasReceivedState = true
+            snapshot.hasLayout = true
             deliveryReceipts = view.deliveryReceipts == true
             if view.reset == true || !view.entries.isEmpty {
                 receiptFinals(in: applied, source: view.reset == true ? "snapshot" : "live")

@@ -21,6 +21,8 @@ struct HomeView: View {
     let bot: BotSummary
     let api: Api
     let store: BotStore
+    let onVisibleCovers: (Set<String>) -> Void
+    let onCoverSettled: (StartupSpaceCover) -> Void
     @State private var page = Page.panel
     @State private var draft: ChatDraft
     @State private var inspector = false
@@ -39,10 +41,14 @@ struct HomeView: View {
     @FocusState private var composing: Bool
     @Environment(\.scenePhase) private var phase
 
-    init(bot: BotSummary, api: Api, store: BotStore) {
+    init(bot: BotSummary, api: Api, store: BotStore,
+         onVisibleCovers: @escaping (Set<String>) -> Void,
+         onCoverSettled: @escaping (StartupSpaceCover) -> Void) {
         self.bot = bot
         self.api = api
         self.store = store
+        self.onVisibleCovers = onVisibleCovers
+        self.onCoverSettled = onCoverSettled
         _draft = State(initialValue: ChatDraft(botId: bot.id))
     }
 
@@ -150,10 +156,11 @@ struct HomeView: View {
     private func pageContent(_ item: Page) -> some View {
         switch item {
         case .panel:
-            if store.snapshot.view == nil && store.snapshot.link == .offline {
+            if !store.snapshot.hasLayout {
                 connectionUnavailable
             } else {
-                PanelView(widgets: store.snapshot.panel.list, spaceUpdates: store.snapshot.panel.spaceUpdates, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onCheck: store.check, onCompose: fadeToChat)
+                PanelView(widgets: store.snapshot.panel.list, spaceUpdates: store.snapshot.panel.spaceUpdates, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onCheck: store.check, onCompose: fadeToChat, onVisibleCovers: onVisibleCovers)
+                    .environment(\.startupSpaceSettled, onCoverSettled)
             }
         case .chat:
             ChatView(bot: bot, store: store, transcription: transcription, api: api, containerBottomInset: bottomInset, draft: Binding(get: { draft.text }, set: { draft.text = $0 }), composing: $composing, onKept: land, onVoiceConversation: {
@@ -162,7 +169,7 @@ struct HomeView: View {
             },
                      reading: $reading, onReaderFrame: { readerFrame = $0 })
         case .assets:
-            if store.snapshot.view == nil && store.snapshot.link == .offline {
+            if !store.snapshot.hasLayout {
                 connectionUnavailable
             } else {
                 AssetsView(items: store.snapshot.assets, botId: bot.id, api: api, onDrop: store.drop, onOrder: store.reorderAssets)

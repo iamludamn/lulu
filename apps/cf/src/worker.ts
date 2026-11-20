@@ -3,6 +3,7 @@ import { workerHost } from "./host.js";
 import { dispatchCron } from "./cron.js";
 
 export { Artifact, Bot, Memory } from "./objects.js";
+export { ArtifactWorker } from "./artifacts.js";
 
 export default {
   fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

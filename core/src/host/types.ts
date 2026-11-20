@@ -1,6 +1,7 @@
 import type { CodemodeToolOptions } from "@earendil-works/pi-durable/codemode";
 import type { TelemetryContext } from "@earendil-works/pi-telemetry";
 import type { CronRegistration } from "../cron/registration.js";
+import type { BotDataStore } from "../conversation/bot-data.js";
 
 export type Environment = Readonly<Record<string, string | undefined>>;
 
@@ -69,6 +70,7 @@ export interface DurableHost {
   readonly storage: DurableStorage;
   readonly alarm: DurableAlarm;
   readonly cronRegistration?: CronRegistration;
+  readonly data?: BotDataStore;
   readonly sockets: DurableSockets;
   readonly objects: {
     readonly BOTS: ObjectNamespace;

@@ -1,10 +1,10 @@
 import { contextDelivery, contextLifecycle, contextMonitor, contextRuns, createContextMonitor, findContextMonitor, openSecret, sealSecret } from "./context-monitor.js";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { Harness, Tx } from "@earendil-works/pi-durable";
-import { nextDailyAfter } from "../cron/schedule.js";
+import { GRACE_MS, nextDailyAfter, utcDailyCron } from "../cron/schedule.js";
 import type { Environment } from "../host/types.js";
 import { PanelDoc } from "../panel/doc.js";
-import { SPACE_ID, type MonitorProvider } from "../protocol/panel.js";
+import { SPACE_ID, type MonitorProvider, type PanelState } from "../protocol/panel.js";
 import { SpaceRefreshDoc, SpaceRefreshIndex, spaceEntries, spaceEntry, spaceStatus, stopTracking, type Mode, type MonitorRun, type Refresh } from "./doc.js";
 import { bytes, DAY, deliveryOf, json, modeOf, monitorId, monitorRun, provider, pull, record, signed, signingSecret, SourceError } from "./source.js";
 
@@ -18,13 +18,15 @@ const kept = async (tx: Tx, id: string): Promise<boolean> => {
   const panel = await tx.doc(PanelDoc);
   return has(panel.widgets, id) && visible(panel.widgets[id]?.body.kind);
 };
-const deadline = (entry: Refresh): number => Math.min(entry.nextAt ?? Infinity, entry.retryAt ?? Infinity);
+const deadline = (entry: Refresh, local?: (entry: Refresh) => boolean): number =>
+  Math.min(local?.(entry) === false ? Infinity : entry.nextAt ?? Infinity, entry.retryAt ?? Infinity);
 const next = (mode: Mode, now: number): number | null => mode.kind === "scheduled" ? nextDailyAfter(mode.time, mode.tz, now) : null;
 
 function initial(mode: Mode, old: Refresh | undefined, notify: boolean, now: number): Refresh {
   return {
     generation: crypto.randomUUID(), mode, notify, enabled: mode.kind !== "manual", archived: false,
     nextAt: mode.kind === "scheduled" ? now : null, retryAt: mode.kind === "subscription" ? now : null,
+    ...(mode.kind === "scheduled" && { immediatePull: true }),
     monitor: null, providerState: mode.kind === "subscription" ? "create" : null, startedAt: now,
     checkedAt: null, updatedAt: old?.updatedAt ?? null, error: null,
     version: old?.version ?? 0, seen: old?.seen ?? 0, delivered: old?.delivered ?? 0,
@@ -134,11 +136,7 @@ export async function handleSpaceRefresh(harness: Harness, request: Request, env
   const id = url.searchParams.get("id") ?? "";
   if (!SPACE_ID.test(id)) throw new SourceError(400, "Invalid Space ID");
   if (request.method === "GET") {
-    const panel = await harness.snapshot(PanelDoc, context);
-    if (!panel || !has(panel.widgets, id) || !visible(panel.widgets[id]?.body.kind)) throw new SourceError(404, "Space not kept");
-    const entry = await spaceEntry(harness, id);
-    const data = entry === undefined ? null : { version: entry.version, updatedAt: entry.updatedAt, findings: entry.findings, value: entry.value === undefined ? undefined : json(new TextEncoder().encode(entry.value)) };
-    return Response.json({ status: entry === undefined ? null : spaceStatus(entry), data, providers: providers(env) }, { headers: { "Cache-Control": "no-store" } });
+    return spaceRefreshResponse(id, await harness.snapshot(PanelDoc, context), await spaceEntry(harness, id), env);
   }
   const input = record(json(await bytes(request)));
   if (request.method === "POST" && input.action === "configure") {
@@ -189,6 +187,7 @@ export async function handleSpaceRefresh(harness: Harness, request: Request, env
           if (entry.enabled) {
             entry.nextAt = now;
             entry.retryAt = null;
+            entry.immediatePull = true;
           }
           break;
         case "pause":
@@ -200,6 +199,7 @@ export async function handleSpaceRefresh(harness: Harness, request: Request, env
           entry.enabled = enabled;
           entry.archived = false;
           entry.nextAt = enabled ? next(entry.mode, now) : null;
+          delete entry.immediatePull;
           entry.inbox = [];
           if (entry.mode.kind === "subscription") {
             entry.providerState = input.action === "remove" ? "delete" : enabled ? entry.monitor === null ? "create" : "resume" : "pause";
@@ -222,9 +222,25 @@ export async function handleSpaceRefresh(harness: Harness, request: Request, env
   return new Response(null, { status: 204 });
 }
 
-export async function nextSpaceAlarm(harness: Harness): Promise<number | undefined> {
+export function spaceRefreshResponse(id: string, panel: PanelState | undefined, entry: Refresh | undefined, env: Environment): Response {
+  if (!SPACE_ID.test(id)) throw new SourceError(400, "Invalid Space ID");
+  if (!panel || !has(panel.widgets, id) || !visible(panel.widgets[id]?.body.kind)) throw new SourceError(404, "Space not kept");
+  const data = entry === undefined ? null : { version: entry.version, updatedAt: entry.updatedAt, findings: entry.findings, value: entry.value === undefined ? undefined : json(new TextEncoder().encode(entry.value)) };
+  return Response.json({ status: entry === undefined ? null : spaceStatus(entry), data, providers: providers(env) }, { headers: { "Cache-Control": "no-store" } });
+}
+
+export function calendarPull(entry: Refresh, at: number): boolean {
+  return entry.enabled && !entry.immediatePull && entry.mode.kind === "scheduled" && nextDailyAfter(entry.mode.time, entry.mode.tz, at - 1) === at;
+}
+
+export function spaceCronDue(entry: Refresh, cron: string, at: number, now: number): boolean {
+  return at <= now && now - at <= GRACE_MS && cron === utcDailyCron(at) &&
+    entry.nextAt !== null && entry.nextAt <= at && calendarPull(entry, at);
+}
+
+export async function nextSpaceAlarm(harness: Harness, local?: (entry: Refresh) => boolean): Promise<number | undefined> {
   const entries = await spaceEntries(harness);
-  const at = Math.min(...entries.map(([, entry]) => deadline(entry)));
+  const at = Math.min(...entries.map(([, entry]) => deadline(entry, local)));
   return Number.isFinite(at) ? at : undefined;
 }
 
@@ -258,6 +274,7 @@ async function runPull(harness: Harness, id: string, entry: Refresh, env: Enviro
     current.checkedAt = now;
     current.error = null;
     current.nextAt = next(current.mode, now);
+    delete current.immediatePull;
     current.retryAt = null;
   });
 }
@@ -422,9 +439,10 @@ async function runMonitor(harness: Harness, id: string, entry: Refresh, env: Env
   });
 }
 
-export async function refreshDueSpaces(harness: Harness, env: Environment, now: number): Promise<void> {
-  const entries = await spaceEntries(harness);
-  await Promise.all(entries.filter(([, entry]) => deadline(entry) <= now).slice(0, 4).map(async ([id, entry]) => {
+export async function refreshDueSpaces(harness: Harness, env: Environment, now: number, local?: (entry: Refresh) => boolean, cron?: { rule: string; at: number }): Promise<void> {
+  const entries = (await spaceEntries(harness)).filter(([, entry]) =>
+    cron === undefined ? deadline(entry, local) <= now : spaceCronDue(entry, cron.rule, cron.at, now));
+  const refresh = async ([id, entry]: [string, Refresh]): Promise<void> => {
     try {
       if (entry.mode.kind === "scheduled") await runPull(harness, id, entry, env);
       if (entry.mode.kind === "subscription") await runMonitor(harness, id, entry, env);
@@ -434,6 +452,7 @@ export async function refreshDueSpaces(harness: Harness, env: Environment, now: 
         if (entry.mode.kind === "scheduled") {
           if (current.nextAt !== entry.nextAt || current.retryAt !== entry.retryAt) return;
           current.nextAt = next(current.mode, failedAt);
+          delete current.immediatePull;
           current.retryAt = entry.retryAt === null ? failedAt + RETRY : null;
         } else {
           current.retryAt = failedAt + RETRY;
@@ -441,7 +460,11 @@ export async function refreshDueSpaces(harness: Harness, env: Environment, now: 
         current.error = error instanceof SourceError ? error.message : "Refresh failed";
       });
     }
-  }));
+  };
+  for (let start = 0; start < entries.length; start += 4) {
+    await Promise.all(entries.slice(start, start + 4).map(refresh));
+    if (cron === undefined) break;
+  }
 }
 
 export function spaceError(error: unknown): Response {

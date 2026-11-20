@@ -2,7 +2,6 @@ import { DurableObject } from "cloudflare:workers";
 import { openDurableObjectSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/cloudflare";
 import { BotSession } from "@lulu/core/conversation/bot.js";
 import { MemoryObject } from "@lulu/core/memory/object.js";
-import { ArtifactObject } from "@lulu/core/artifact/object.js";
 import { durableHost } from "./host.js";
 import { createMemoryFiles } from "./memory-files.js";
 import { cronRegistration } from "./cron.js";
@@ -70,14 +69,7 @@ export class Memory extends DurableObject<Env> {
 }
 
 export class Artifact extends DurableObject<Env> {
-  readonly #artifact: ArtifactObject;
-
-  constructor(ctx: DurableObjectState, env: Env) {
-    super(ctx, env);
-    this.#artifact = new ArtifactObject(durableHost(ctx, env));
-  }
-
-  override fetch(request: Request): Promise<Response> {
-    return this.#artifact.fetch(request);
+  async exportMetadata(): Promise<Record<string, unknown>> {
+    return Object.fromEntries(await this.ctx.storage.list());
   }
 }

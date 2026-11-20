@@ -48,6 +48,7 @@ public struct Api: Sendable {
         query: [URLQueryItem] = [],
         body: Encodable? = nil,
         data raw: Data? = nil,
+        token: String = "",
         failure: String
     ) async throws -> Data {
         var components = URLComponents(url: base, resolvingAgainstBaseURL: false)!
@@ -55,6 +56,9 @@ public struct Api: Sendable {
         components.queryItems = query.isEmpty ? nil : query
         var request = URLRequest(url: components.url!)
         request.httpMethod = method
+        if base.scheme == "https", !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONEncoder().encode(AnyEncodable(body))
@@ -74,6 +78,15 @@ public struct Api: Sendable {
 
     public func memory(_ id: String) async throws -> MemoryListing {
         try decode(MemoryListing.self, try await call("/api/bots/\(id)/memory", failure: "加载记忆失败"))
+    }
+
+    struct Startup: Decodable {
+        let panel: PanelState
+        let assets: [AssetItem]
+    }
+
+    func startup(_ id: String, token: String) async throws -> Startup {
+        try decode(Startup.self, try await call("/api/bots/\(id)/startup", token: token, failure: "加载视图失败"))
     }
 
     public func memoryFile(_ id: String, path: String) async throws -> String {
