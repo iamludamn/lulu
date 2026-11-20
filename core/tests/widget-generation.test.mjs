@@ -75,3 +75,28 @@ test('historical sends still load, keep and list all their original widget bodie
   assert.equal(incompatibleUpdate.isError, true);
   assert.deepEqual(await session.snapshot(PanelDoc, ctx), kept);
 });
+
+test('completed checklists stay saved without using a visible Panel slot', async t => {
+  const session = createSession(new MemoryStorage());
+  t.after(() => session.close(ctx));
+  const completed = checklist.widget.panel;
+  await session.commit(async tx => {
+    const panel = await tx.doc(PanelDoc);
+    panel.order = [...Array.from({ length: 23 }, (_, index) => 'existing-' + index), completed.id];
+    panel.widgets[completed.id] = { ...completed, updatedAt: 1 };
+  }, ctx);
+
+  const offer = send({ kind: 'list', items: [{ title: 'New item', done: false }] });
+  offer.widget.panel.id = 'new-checklist';
+  const entries = [
+    { id: 1, kind: 'pi.assistant', model: [{ content: [{ type: 'toolCall', name: sendTool.name, id: 'new', arguments: offer }] }] },
+    { id: 2, kind: 'pi.tool-result', model: [{ role: 'toolResult', toolName: sendTool.name, toolCallId: 'new' }] },
+  ];
+
+  await assert.rejects(keepWidget(session, entries, 'new', true), /视图已满/);
+  await checkItem(session, completed.id, 0, true);
+  await keepWidget(session, entries, 'new', true);
+  const panel = await session.snapshot(PanelDoc, ctx);
+  assert.ok(panel.widgets['new-checklist']);
+  assert.equal(panel.widgets[completed.id].body.items[0].done, true);
+});

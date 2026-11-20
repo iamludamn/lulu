@@ -94,6 +94,7 @@ const Schedules = Type.Object({
   rows: Type.Array(Type.Object({
     id: Type.String(),
     name: Type.String(),
+    mode: Type.Optional(enumOf(["task", "reminder"] as const)),
     schedule: Type.Union([
       Type.Object({ kind: Type.Literal("once"), at: Type.Number() }),
       Type.Object({ kind: Type.Literal("daily"), time: Type.String(), tz: Type.String() }),

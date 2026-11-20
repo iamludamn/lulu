@@ -15,15 +15,17 @@ struct PanelView: View {
     let onCompose: () -> Void
     @Environment(\.topInset) private var topInset
 
-    private static let ideas = ["把今天的日程做成一个组件", "每天早上给我一份简报", "追踪一个我关心的数字"]
+    private static let ideas = ["今天 18:30 提醒我取快递", "做一份出发前的待办清单"]
+
+    private var visibleWidgets: [PanelWidget] { widgets.filter { $0.pendingChecklistCount != 0 } }
 
     var body: some View {
         ScrollView {
-            if widgets.isEmpty {
+            if visibleWidgets.isEmpty {
                 empty
             } else {
                 LazyVStack(spacing: 12) {
-                    ForEach(rows(widgets), id: \.first!.id) { row in
+                    ForEach(rows(visibleWidgets), id: \.first!.id) { row in
                         HStack(alignment: .top, spacing: 12) {
                             ForEach(row) { widget in
                                 WidgetCard(widget: widget, update: spaceUpdates[widget.id], botId: botId, api: api, onPrompt: onPrompt, onDrop: onDrop, onCheck: { onCheck(widget.id, $0, $1) })
@@ -37,7 +39,7 @@ struct PanelView: View {
                 .padding(.bottom, 32)
                 .frame(maxWidth: 720)
                 .frame(maxWidth: .infinity)
-                .animation(.snappy, value: widgets.map(\.id))
+                .animation(.snappy, value: visibleWidgets.map(\.id))
             }
         }
         .contentMargins(.top, topInset, for: .scrollContent)
@@ -104,22 +106,35 @@ struct WidgetFace: View {
     /// Two rows of the 158pt cards and the gap between them.
     static let spaceHeight: CGFloat = 328
 
+    private var checklistCount: Int? { interactive ? widget.pendingChecklistCount : nil }
+
+    private var isSchedule: Bool {
+        if case .schedules = widget.body { return true }
+        return false
+    }
+
     private var height: CGFloat? {
         if widget.isSpace { return Self.spaceHeight }
+        if checklistCount != nil || isSchedule { return nil }
         return switch widget.size {
         case .s, .m: 158
         case .l: nil
         }
     }
 
+    private var minHeight: CGFloat? {
+        if widget.isSpace { return Self.spaceHeight }
+        return widget.size == .l && checklistCount == nil && !isSchedule ? 300 : nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if !widget.isSpace { header }
+            if !widget.isSpace && !isSchedule { header }
             WidgetBody(widget: widget, botId: botId, api: api, interactive: interactive, onPrompt: onPrompt, onCheck: onCheck)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .padding(widget.isSpace ? 0 : 14)
-        .frame(maxWidth: .infinity, minHeight: widget.isSpace ? Self.spaceHeight : widget.size == .l ? 300 : nil, maxHeight: height, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: minHeight, maxHeight: height, alignment: .topLeading)
         .clipShape(.rect(cornerRadius: 26, style: .continuous))
     }
 
@@ -138,7 +153,9 @@ struct WidgetFace: View {
                     .padding(.vertical, 2)
                     .background(Color.accentColor.opacity(0.14), in: .capsule)
             }
-            if widget.size != .s || widget.isSpace, let updatedAt = widget.updatedAt {
+            if let checklistCount {
+                Text("还剩 \(checklistCount) 项").font(.caption.monospacedDigit())
+            } else if widget.size != .s || widget.isSpace, let updatedAt = widget.updatedAt {
                 Text(Date(timeIntervalSince1970: updatedAt / 1000), format: .relative(presentation: .named))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)

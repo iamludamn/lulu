@@ -298,6 +298,8 @@ test('simultaneous Alarms wake the main conversation once per occurrence and del
   ]);
   const panel = await withScheduleOverview(harness, await harness.snapshot(PanelDoc, ctx), ctx);
   const [dailyRow, onceRow] = panel.widgets[widgetId].body.rows;
+  assert.equal(dailyRow.mode, 'reminder');
+  assert.equal(onceRow.mode, 'reminder');
   assert.equal(onceRow.state, 'done');
   assert.equal(dailyRow.nextRunAt, scheduledFor + 86_400_000);
   assert.equal(await nextScheduleAlarm(harness, scheduledFor), dailyRow.nextRunAt);
