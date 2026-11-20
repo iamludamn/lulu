@@ -255,7 +255,6 @@ private struct VoiceInteraction: UIViewRepresentable {
 
     final class Surface: UIView {
         var interaction: VoiceInteraction
-        private let pressFeedback = UIView()
         private var start = CGPoint.zero
         private let impact = UIImpactFeedbackGenerator(style: .medium)
 
@@ -266,17 +265,11 @@ private struct VoiceInteraction: UIViewRepresentable {
             isAccessibilityElement = true
             accessibilityLabel = "语音对话"
             accessibilityHint = "轻点开始通话，长按展开语音选项"
-            pressFeedback.backgroundColor = UIColor.label.withAlphaComponent(0.2)
-            pressFeedback.isUserInteractionEnabled = false
-            pressFeedback.alpha = 0
-            addSubview(pressFeedback)
 
-            let tap = PressFeedbackTap(target: self, action: #selector(tapped))
-            tap.onPressChanged = { [weak self] pressed in
-                guard let self else { return }
-                let active = pressed && self.interaction.isEnabled
-                if active && self.pressFeedback.alpha == 0 { self.impact.impactOccurred() }
-                self.pressFeedback.alpha = active ? 1 : 0
+            let tap = TouchDownTapGestureRecognizer(target: self, action: #selector(tapped))
+            tap.onTouchDown = { [weak self] in
+                guard let self, self.interaction.isEnabled else { return }
+                self.impact.impactOccurred()
             }
             let hold = UILongPressGestureRecognizer(target: self, action: #selector(held(_:)))
             hold.minimumPressDuration = 0.35
@@ -286,12 +279,6 @@ private struct VoiceInteraction: UIViewRepresentable {
         }
 
         required init?(coder: NSCoder) { return nil }
-
-        override func layoutSubviews() {
-            super.layoutSubviews()
-            pressFeedback.frame = bounds
-            pressFeedback.layer.cornerRadius = min(bounds.width, bounds.height) / 2
-        }
 
         override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
             hypot(point.x - bounds.midX, point.y - bounds.midY) <= min(bounds.width, bounds.height) / 2
@@ -329,27 +316,12 @@ private struct VoiceInteraction: UIViewRepresentable {
     }
 }
 
-private final class PressFeedbackTap: UITapGestureRecognizer {
-    var onPressChanged: ((Bool) -> Void)?
+private final class TouchDownTapGestureRecognizer: UITapGestureRecognizer {
+    var onTouchDown: (() -> Void)?
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        onPressChanged?(true)
+        onTouchDown?()
         super.touchesBegan(touches, with: event)
-    }
-
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
-        onPressChanged?(false)
-        super.touchesEnded(touches, with: event)
-    }
-
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
-        onPressChanged?(false)
-        super.touchesCancelled(touches, with: event)
-    }
-
-    override func reset() {
-        onPressChanged?(false)
-        super.reset()
     }
 }
 
