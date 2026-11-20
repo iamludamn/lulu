@@ -19,7 +19,7 @@ struct RootView: View {
            snapshot.hasLayout, !snapshot.hasReceivedState {
             return nil
         }
-        return .easeInOut(duration: 0.3)
+        return .easeOut(duration: 0.12)
     }
 
     var body: some View {
@@ -45,6 +45,11 @@ struct RootView: View {
         }
         .onChange(of: loading, initial: true) { _, value in
             ClientTiming.mark(value ? "startup.loading" : "startup.loading.cleared")
+        }
+        .task(id: loading) {
+            guard loading else { return }
+            do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
+            HTMLPage.preparePreview()
         }
         .task(id: model.connectionRevision) { await model.resolve() }
     }

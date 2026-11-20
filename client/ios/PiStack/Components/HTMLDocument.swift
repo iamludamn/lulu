@@ -139,6 +139,10 @@ struct HTMLPage: View {
         HTMLSurface(html: html, bridge: bridge, interactive: interactive, showLoading: showLoading)
             .id(bridge.map { ObjectIdentifier($0) })
     }
+
+    @MainActor static func preparePreview() {
+        WebPage.preparePreview()
+    }
 }
 
 private enum HTMLPresentation {
@@ -211,17 +215,44 @@ private struct WebPage: UIViewRepresentable {
     let present: (HTMLPageEvent) -> Void
     @Environment(\.colorScheme) private var scheme
 
+    @MainActor private static var preparedPreview: WKWebView?
+
+    @MainActor static func preparePreview() {
+        guard preparedPreview == nil else { return }
+        let view = makeWebView()
+        preparedPreview = view
+        view.loadHTMLString("", baseURL: nil)
+        ClientTiming.mark("web.preview.prewarm")
+        Task { [weak view] in
+            try? await Task.sleep(for: .seconds(8))
+            if preparedPreview === view { preparedPreview = nil }
+        }
+    }
+
+    private static func makeWebView() -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        return WKWebView(frame: .zero, configuration: configuration)
+    }
+
     func makeCoordinator() -> Coordinator { Coordinator(present: present) }
 
     func makeUIView(context: Context) -> WKWebView {
         let dark = scheme == .dark
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
+        let view: WKWebView
+        if !interactive, bridge == nil, let prepared = Self.preparedPreview {
+            Self.preparedPreview = nil
+            prepared.stopLoading()
+            ClientTiming.mark("web.preview.prewarm.used")
+            view = prepared
+        } else {
+            view = Self.makeWebView()
+        }
+        let controller = view.configuration.userContentController
         let theme = HTMLTheme.script(dark: dark)
-        configuration.userContentController.addUserScript(WKUserScript(source: theme, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        configuration.userContentController.addUserScript(WKUserScript(source: theme, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
-        bridge?.install(in: configuration.userContentController)
-        let view = WKWebView(frame: .zero, configuration: configuration)
+        controller.addUserScript(WKUserScript(source: theme, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        controller.addUserScript(WKUserScript(source: theme, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        bridge?.install(in: controller)
         view.isOpaque = false
         view.backgroundColor = .clear
         view.scrollView.backgroundColor = .clear
