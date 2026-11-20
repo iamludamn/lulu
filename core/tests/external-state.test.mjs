@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createSession, MemoryStorage } from "@earendil-works/pi-durable";
@@ -9,6 +11,7 @@ import { STORED_DOC_KINDS as kinds } from "../dist/durable-names.js";
 import { PanelDoc } from "../dist/panel/doc.js";
 import { BotDataPersistence, startupData } from "../dist/conversation/bot-data.js";
 import { handleApi } from "../dist/server/api.js";
+import { D1ArtifactMetadata } from "../../apps/cf/src/artifact-metadata.ts";
 import { AssetsDoc } from "../dist/send/doc.js";
 import { SpaceRefreshDoc, SpaceRefreshIndex } from "../dist/space/doc.js";
 import { spaceCronDue } from "../dist/space/refresh.js";
@@ -164,29 +167,65 @@ test("configured Spaces participate in direct Cron registration and release rule
   assert.deepEqual(writes, [[utcDailyCron(tick)], []]);
 });
 
-test("Artifact metadata migrates once and concurrent Worker isolates preserve versions and request IDs", async () => {
-  const objects = new Map();
-  let etag = 0;
-  const set = (key, value) => objects.set(key, { etag: String(++etag), value: structuredClone(value) });
-  const bucket = {
-    async readJson(key) { return structuredClone(objects.get(key)); },
-    async writeJson(key, value, match) {
-      if (objects.get(key)?.etag !== match) return false;
-      set(key, value);
-      return true;
+function artifactDatabase(t) {
+  const sqlite = new DatabaseSync(":memory:");
+  t.after(() => sqlite.close());
+  sqlite.exec(readFileSync(new URL("../../apps/cf/migrations/0001_artifact_metadata.sql", import.meta.url), "utf8"));
+  return {
+    prepare(query) {
+      const statement = sqlite.prepare(query);
+      return {
+        bind(...values) {
+          const bindings = query.includes("?1")
+            ? [Object.fromEntries(values.map((value, index) => [String(index + 1), value]))]
+            : values;
+          const read = () => ({ results: statement.all(...bindings).map((row) => ({ ...row })) });
+          return {
+            all: read, run: read,
+            first(column) {
+              const row = read().results[0];
+              return (column === undefined ? row : row?.[column]) ?? null;
+            },
+          };
+        },
+      };
     },
-    async size(key) { return objects.get(key)?.value.byteLength; },
+    async batch(statements) {
+      sqlite.exec("BEGIN");
+      try {
+        const result = statements.map((statement) => statement.all());
+        sqlite.exec("COMMIT");
+        return result;
+      } catch (error) {
+        sqlite.exec("ROLLBACK");
+        throw error;
+      }
+    },
+  };
+}
+
+test("Artifact metadata migrates to SQL and concurrent Workers preserve versions and request IDs", async (t) => {
+  const db = artifactDatabase(t);
+  const objects = new Map();
+  const set = (key, value) => objects.set(key, structuredClone(value));
+  const bucket = {
+    async size(key) { return objects.get(key)?.byteLength; },
     async writeOnce(key, bytes) { if (!objects.has(key)) set(key, bytes); },
-    async copyOnce(from, to) { if (!objects.has(to) && objects.has(from)) set(to, objects.get(from).value); },
+    async copyOnce(from, to) { if (!objects.has(to) && objects.has(from)) set(to, objects.get(from)); },
     async remove(keys) { for (const key of keys) objects.delete(key); },
     async presign(method, key) { return { url: "https://object.test/" + key, method, expiresInSeconds: 900 }; },
   };
   const legacyVersion = { version: 7, key: "bots/main/plan/v7", size: 3, contentType: "text/plain", createdAt: 1 };
-  const old = new ArtifactService("main", telemetry, bucket, async () => ({
+  const legacy = async () => ({
     "head:plan": { next: 8, latest: 7, deletedAt: null, updatedAt: 1 }, "ver:plan:0000000007": legacyVersion,
-  }));
-  assert.equal((await old.downloadUrl("plan", 7)).url, "https://object.test/bots/main/plan/v7");
-  const worker = () => new ArtifactService("main", telemetry, bucket, () => { assert.fail("unexpected legacy call"); });
+    "upload:original": { ...legacyVersion, name: "plan", uploadId: "original", committed: true },
+    "req:original-request": "original",
+  });
+  const old = () => new ArtifactService(telemetry, bucket, new D1ArtifactMetadata(db, "main", legacy));
+  const firstReads = await Promise.all([old().downloadUrl("plan", 7), old().downloadUrl("plan", 7)]);
+  assert.ok(firstReads.every((result) => result.url === "https://object.test/bots/main/plan/v7"));
+  const worker = () => new ArtifactService(telemetry, bucket, new D1ArtifactMetadata(db, "main", () => { assert.fail("unexpected legacy call"); }));
+  assert.equal((await worker().write("plan", "ignored", "text/plain", "original-request")).version, 7);
   const writes = await Promise.all([worker().write("plan", "one", "text/plain", "same"), worker().write("plan", "one", "text/plain", "same"), worker().write("plan", "two", "text/plain")]);
   assert.equal(writes[0].ref, writes[1].ref);
   assert.notEqual(writes[0].ref, writes[2].ref);
@@ -197,8 +236,58 @@ test("Artifact metadata migrates once and concurrent Worker isolates preserve ve
   const committed = await worker().commit(reserved.uploadId);
   set(staged, new TextEncoder().encode("new"));
   assert.deepEqual(await worker().commit(reserved.uploadId), committed);
-  assert.equal(new TextDecoder().decode(objects.get("bots/main/plan:appendix/v1").value), "old");
+  assert.equal(new TextDecoder().decode(objects.get("bots/main/plan:appendix/v1")), "old");
+  assert.equal(objects.has(staged), false);
+  await worker().write("plan[x]a", "literal", "text/plain");
+  assert.deepEqual((await worker().list("plan[x]", 10)).map(({ name }) => name), ["plan[x]a"]);
+
+  const late = await worker().uploadUrl("plan", 4, "text/plain", "late");
+  set(new URL(late.url).pathname.slice(1), new TextEncoder().encode("late"));
+  const copyStarted = Promise.withResolvers();
+  const finishCopy = Promise.withResolvers();
+  bucket.copyOnce = async (from, to) => {
+    const bytes = objects.get(from);
+    copyStarted.resolve();
+    await finishCopy.promise;
+    set(to, bytes);
+  };
+  const committing = assert.rejects(worker().commit(late.uploadId), /artifact changed/);
+  await copyStarted.promise;
   await worker().delete("plan");
+  finishCopy.resolve();
+  await committing;
+  assert.equal(objects.has("bots/main/plan/v10"), false);
   assert.deepEqual((await worker().stat("plan:appendix")).versions, [1]);
-  assert.equal((await worker().write("plan", "again", "text/plain")).version, 10);
+  assert.equal((await worker().write("plan", "again", "text/plain")).version, 11);
+  for (let count = 0; count < 10; count++) await worker().write("plan", "again", "text/plain");
+  assert.deepEqual((await worker().stat("plan")).versions, [12, 13, 14, 15, 16, 17, 18, 19, 20, 21]);
+  assert.equal(objects.has("bots/main/plan/v11"), false);
+});
+
+test("Artifact SQL keeps quota and edit conflict checks in transactions", async (t) => {
+  const db = artifactDatabase(t);
+  const store = () => new D1ArtifactMetadata(db, "main", async () => ({}));
+  const reserve = (size, fields = {}) => store().reserve({ name: "file", size, quota: 6, contentType: "text/plain", staged: false, ...fields });
+  const first = await reserve(2);
+  await assert.rejects(() => reserve(5), /quota exceeded/);
+  await store().commit(first, 3, 6);
+  const [edit1, edit2] = await Promise.all([reserve(1, { baseVersion: 1 }), reserve(1, { baseVersion: 1 })]);
+  await assert.rejects(() => store().commit(edit1, 3, 6), /quota exceeded/);
+  assert.equal((await store().commit(edit1, 2, 6)).version, 2);
+  assert.equal(await store().commit(edit2, 1, 6), undefined);
+  await assert.rejects(() => reserve(1, { baseVersion: 1 }), /changed during edit/);
+  assert.equal((await reserve(1)).version, 4);
+});
+
+test("Artifact SQL retries a failed import without publishing an incomplete index", async (t) => {
+  const db = artifactDatabase(t);
+  const version = { version: 5, key: "other/legacy-path", size: 3, contentType: "text/plain", createdAt: 1 };
+  const oldVersion = { "ver:test:0000000005": version };
+  await assert.rejects(() => new D1ArtifactMetadata(db, "main", async () => oldVersion).version("test", 5), /FOREIGN KEY/);
+  const reopened = new D1ArtifactMetadata(db, "main", async () => ({
+    ...oldVersion, "head:test": { next: 6, latest: 5, deletedAt: null },
+  }));
+  assert.equal((await reopened.version("test", 5)).key, version.key);
+  const other = new D1ArtifactMetadata(db, "other", async () => ({}));
+  assert.equal(await other.version("test", 5), undefined);
 });

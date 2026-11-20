@@ -8,7 +8,9 @@ Use a secret manager for Worker credentials. Chat requires a model provider cred
 
 ## Object storage migration
 
-Use the existing private bucket and S3 Worker credentials. The endpoint must support conditional `PutObject` and destination-conditional `CopyObject`. Existing deployments keep the Artifact Durable Object binding while the Worker imports the legacy index on first use. Keep it available until the import has completed. The files and existing pinned URLs use the same bucket paths after import.
+Use the existing private bucket and S3 Worker credentials. The endpoint must support conditional `PutObject` and destination-conditional `CopyObject`. Artifact file bodies remain in this bucket. The Worker stores versions, upload reservations, request IDs, and quota in the `ARTIFACT_METADATA` D1 binding.
+
+Apply the D1 schema before deploying the Worker. On first use, the Worker imports the existing bucket index if present, or exports the index from the old Artifact Durable Object. It commits the import and its completion marker together, preserving version numbers, object keys, and pinned references. Keep the legacy Artifact binding available until the import has completed. Run a single deployment against the old data source during this cutover.
 
 The first Bot start seeds the external app state and the smaller startup projection. Subsequent startup reads use the projection directly. The Bot writes current app state before acknowledging a commit to the selected documents. An interrupted publication is resumed using its pending marker. If native copies are absent, the Bot hydrates them from the external app state. Use the same private bucket when replacing the Bot's local storage.
 
@@ -20,11 +22,14 @@ npm ci
 npm run build
 cd apps/cf
 export CLOUDFLARE_ACCOUNT_ID='<your-account-id>'
+# Create once per Cloudflare account.
+npm exec -- wrangler d1 create lulu-artifacts --config wrangler.local.jsonc --update-config=false
+npm exec -- wrangler d1 migrations apply ARTIFACT_METADATA --config wrangler.local.jsonc --remote
 # Provision feature credentials with wrangler secret put NAME --config wrangler.local.jsonc.
 npm exec -- wrangler deploy --config wrangler.local.jsonc
 ```
 
-For local development, run `npm exec -- wrangler dev --config wrangler.local.jsonc` from `apps/cf`. To load bindings from a secret manager's process environment, set `CLOUDFLARE_INCLUDE_PROCESS_ENV=true`. The Worker listens on port 8787 by default. For the Web client, run `npm run dev -w @lulu/client` from the root.
+For local development, apply the D1 schema with `npm exec -- wrangler d1 migrations apply ARTIFACT_METADATA --config wrangler.local.jsonc --local`, then run `npm exec -- wrangler dev --config wrangler.local.jsonc` from `apps/cf`. To load bindings from a secret manager's process environment, set `CLOUDFLARE_INCLUDE_PROCESS_ENV=true`. The Worker listens on port 8787 by default. For the Web client, run `npm run dev -w @lulu/client` from the root.
 
 ## Cloudflare Cron
 
@@ -43,4 +48,4 @@ To compare results, tap the microphone in the iOS chat composer, read the same s
 
 ## Automatic deploy
 
-[GitHub Actions](../.github/workflows/deploy.yml) checks, builds, and deploys pushes to `main` using the checked-in config. To opt in on a fork, first replace deployment settings, then set the `CLOUDFLARE_ACCOUNT_ID` repository variable and `CLOUDFLARE_API_TOKEN` secret.
+[GitHub Actions](../.github/workflows/deploy.yml) checks, builds, and deploys pushes to `main` using the checked-in config. It creates the named D1 database if needed and applies schema migrations before deploying. The deploy token needs D1 Write access. To opt in on a fork, first replace deployment settings, then set the `CLOUDFLARE_ACCOUNT_ID` repository variable and `CLOUDFLARE_API_TOKEN` secret.

@@ -10,6 +10,7 @@ interface Env {
   readonly BOTS: DurableObjectNamespace<import("./objects.js").Bot>;
   readonly MEMORY: DurableObjectNamespace<import("./objects.js").Memory>;
   readonly ARTIFACTS: DurableObjectNamespace<import("./objects.js").Artifact>;
+  readonly ARTIFACT_METADATA: D1Database;
   readonly S3_ENDPOINT?: string;
   readonly S3_BUCKET?: string;
   readonly S3_REGION?: string;

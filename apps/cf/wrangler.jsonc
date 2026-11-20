@@ -28,6 +28,12 @@
       "id": "92e198ee66014ccdb1e69776615c880c",
     },
   ],
+  "d1_databases": [
+    {
+      "binding": "ARTIFACT_METADATA",
+      "database_name": "lulu-artifacts",
+    },
+  ],
   "migrations": [
     {
       "tag": "v1",
