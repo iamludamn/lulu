@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { createSession, MemoryStorage } from "@earendil-works/pi-durable";
+import { createRegistry, Harness, MemoryStorage, UserEntry } from "@earendil-works/pi-durable";
+import { createChatModels } from "../dist/agent/models.js";
 import { BotSession } from "../dist/conversation/bot.js";
 import { PanelDoc } from "../dist/panel/doc.js";
 import { createTelemetry } from "../dist/telemetry/otlp.js";
@@ -23,8 +24,10 @@ test("a cold bot waits for the saved layout before publishing client state", { t
     close() {}
   }
   const storage = new Storage();
-  const seed = createSession(storage);
+  const seed = await Harness.open(storage, { registry: createRegistry(), models: createChatModels({}) }, BACKGROUND_CONTEXT);
+  const root = await seed.root(BACKGROUND_CONTEXT, { agent: { model: { provider: "deepseek", modelId: "deepseek-flash" } } });
   await seed.commit(async (tx) => {
+    await tx.appendEntry(UserEntry, root.id, { model: [{ role: "user", content: "saved conversation" }] });
     const panel = await tx.doc(PanelDoc);
     panel.order.push("note");
     panel.widgets.note = { id: "note", title: "Saved note", size: "m", body: { kind: "note", markdown: "hello" } };
@@ -61,4 +64,27 @@ test("a cold bot waits for the saved layout before publishing client state", { t
   assert.ok(states.length > 0);
   assert.ok(states.every((state) => state.panel.order.join() === "note"));
   assert.equal(states.at(-1).view.reset, true);
+  assert.equal(states.at(-1).view.entries.length, 1);
+
+  async function reconnect(transcriptVersion) {
+    attachment = { role: "client", ready: false };
+    frames.length = 0;
+    await bot.webSocketMessage(socket, JSON.stringify({ type: "hello", incremental: true, schedules: true, transcriptVersion }));
+    return frames.find((frame) => frame.type === "state");
+  }
+
+  const first = await reconnect("");
+  assert.match(first.view.transcriptVersion, /^[a-f0-9]{64}$/);
+  assert.equal(first.view.entries.length, 1);
+
+  const resumed = await reconnect(first.view.transcriptVersion);
+  assert.equal(resumed.view.reset, undefined);
+  assert.deepEqual(resumed.view.entries, []);
+  assert.deepEqual(resumed.view.order, first.view.order);
+  assert.deepEqual(resumed.panel, first.panel);
+  assert.equal(resumed.view.transcriptVersion, first.view.transcriptVersion);
+
+  const stale = await reconnect("0".repeat(64));
+  assert.equal(stale.view.reset, true);
+  assert.deepEqual(stale.view.entries, first.view.entries);
 });

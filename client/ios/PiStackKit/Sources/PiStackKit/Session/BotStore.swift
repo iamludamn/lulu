@@ -69,6 +69,7 @@ public final class BotStore {
     @ObservationIgnored private var restoration: Task<Void, Never>?
     private var saving: Task<Void, Never>?
     private var latestState: Data?
+    private var transcriptVersion: String?
     private var deliveryReceipts = false
     private var receiptedCalls = Set<String>()
     private var task: URLSessionWebSocketTask?
@@ -279,7 +280,7 @@ public final class BotStore {
         }
         deliveryReceipts = false
         receiptedCalls.removeAll()
-        transmit(["type": "hello", "incremental": true, "schedules": true])
+        transmit(["type": "hello", "incremental": true, "schedules": true, "transcriptVersion": transcriptVersion ?? ""])
         Task { await listen(task) }
     }
 
@@ -340,11 +341,12 @@ public final class BotStore {
         switch message {
         case .state(let view, let progress, let mcp, let panel, let assets):
             guard let applied = view.applied(to: snapshot.view) else { return }
-            if view.reset == true || view.conversation != snapshot.view?.conversation ||
-                !view.entries.isEmpty || view.order != nil ||
-                progress.hiddenEntries != (snapshot.progress?.hiddenEntries ?? []) {
+            let changedTranscript = view.reset == true || view.conversation != snapshot.view?.conversation ||
+                !view.entries.isEmpty || (view.order != nil && view.transcriptVersion == nil)
+            if changedTranscript || progress.hiddenEntries != (snapshot.progress?.hiddenEntries ?? []) {
                 cachedTranscriptEntries = nil
             }
+            if changedTranscript || view.transcriptVersion != nil { transcriptVersion = view.transcriptVersion }
             let connected = snapshot.link != .online
             attempts = 0
             stateTimer?.cancel()
@@ -359,8 +361,8 @@ public final class BotStore {
             snapshot.hasLayout = true
             snapshot.hasReceivedState = true
             deliveryReceipts = view.deliveryReceipts == true
-            if view.reset == true || !view.entries.isEmpty {
-                receiptFinals(in: applied, source: view.reset == true ? "snapshot" : "live")
+            if view.reset == true || view.transcriptVersion != nil || !view.entries.isEmpty {
+                receiptFinals(in: applied, source: view.reset == true || view.transcriptVersion != nil ? "snapshot" : "live")
             }
             if !snapshot.requests.isEmpty {
                 let submitted = Set(progress.messages.compactMap(\.requestId))

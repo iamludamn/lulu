@@ -11,7 +11,12 @@ export function parseFrame(text: string): ClientMessage {
 
 function parseClientMessage(value: Record<string, unknown>): ClientMessage {
   const { type, requestId, content, whenBusy, model } = value;
-  if (type === "hello") return { type, incremental: value.incremental === true, schedules: value.schedules === true };
+  if (type === "hello") {
+    const version = value.transcriptVersion;
+    const supported = value.incremental === true && value.schedules === true &&
+      isString(version) && (version === "" || /^[0-9a-f]{64}$/.test(version));
+    return { type, incremental: value.incremental === true, schedules: value.schedules === true, ...(supported ? { transcriptVersion: version } : {}) };
+  }
   if (type === "prompt.submit" && isString(requestId) && isString(content) && (whenBusy === "steer" || whenBusy === "followUp")) {
     return { type, requestId, content, whenBusy };
   }

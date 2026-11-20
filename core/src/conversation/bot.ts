@@ -102,6 +102,7 @@ export class BotSession {
   #prompts: Promise<void> = Promise.resolve();
   #dreaming: Promise<void> = Promise.resolve();
   readonly #handshakes = new WeakMap<Socket, Promise<boolean>>();
+  readonly #transcriptVersions = new WeakMap<ConversationView, Promise<string>>();
   #panel: PanelState = EMPTY_PANEL;
   #assets: AssetItem[] = [];
   #layoutReady = false;
@@ -415,10 +416,27 @@ export class BotSession {
 
   async #hello(socket: Socket, attachment: ClientAttachment, hello: HelloMessage): Promise<boolean> {
     const config = await this.#config();
+    const view = this.#view.value;
+    const version = hello.transcriptVersion === undefined ? undefined : await this.#transcriptVersion(view);
+    const currentVersion = this.#view.value === view ? version : undefined;
+    const resumed = currentVersion !== undefined && currentVersion === hello.transcriptVersion;
+    const state = this.#stateMessage(resumed ? [] : undefined, !resumed);
+    if (currentVersion !== undefined) state.view.transcriptVersion = currentVersion;
     this.#host.sockets.attach(socket, { ...attachment, ready: true, incremental: hello.incremental === true, schedules: hello.schedules === true } satisfies ClientAttachment);
     this.#send(socket, { type: "models", config });
-    this.#send(socket, this.#stateMessage(undefined, true));
+    this.#send(socket, state);
     return true;
+  }
+
+  #transcriptVersion(view: ConversationView): Promise<string> {
+    let version = this.#transcriptVersions.get(view);
+    if (version === undefined) {
+      const bytes = new TextEncoder().encode(JSON.stringify([view.conversation, view.entries]));
+      version = crypto.subtle.digest("SHA-256", bytes).then((digest) =>
+        Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(""));
+      this.#transcriptVersions.set(view, version);
+    }
+    return version;
   }
 
   #detach(socket: Socket): void {
@@ -607,7 +625,7 @@ export class BotSession {
     return chatModelConfig(this.#models, this.#host.env, this.#selected);
   }
 
-  #stateMessage(entries: ConversationView["entries"] = this.#view.value.entries, reset = false): ServerMessage {
+  #stateMessage(entries: ConversationView["entries"] = this.#view.value.entries, reset = false): Extract<ServerMessage, { type: "state" }> {
     const { conversation, docs, before, entries: all } = this.#view.value;
     return {
       type: "state",
@@ -666,7 +684,7 @@ export class BotSession {
     if (!this.#layoutReady) return;
     const all = this.#view.value.entries;
     const changed = all.filter((entry) => this.#sentEntries.get(String(entry.id)) !== entry);
-    const { view, ...rest } = this.#stateMessage(changed) as Extract<ServerMessage, { type: "state" }>;
+    const { view, ...rest } = this.#stateMessage(changed);
     const order = view.order!;
     const orderChanged = order.length !== this.#sentOrder.length || order.some((id, index) => id !== this.#sentOrder[index]);
     const signature = JSON.stringify({ ...rest, view: { ...view, order: undefined, entries: [] } });
