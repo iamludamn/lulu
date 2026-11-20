@@ -5,6 +5,7 @@ struct NotePrototypeView: View {
     private static let reply = "周六下午沿平江路走走，晚上去双塔市集。周日上午去苏州博物馆，记得提前预约。"
     private static let initialReplyID = UUID()
     private static let locale = Locale(identifier: "zh_CN")
+    private static let sampleNow = Date.now
     private static let files: [PrototypeFile] = [
         .init(id: "map", name: "苏州散步地图", ext: "pdf", date: sampleDate(day: 0, hour: 9, minute: 32),
               text: "平江路 → 拙政园 → 苏州博物馆"),
@@ -274,7 +275,7 @@ struct NotePrototypeView: View {
                 }
                 ForEach(groups.keys.sorted(by: >), id: \.self) { day in
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(day.formatted(.relative(presentation: .named).locale(Self.locale))).font(.headline)
+                        Text(Self.dayTitle(day)).font(.headline)
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top), count: 3),
                                   alignment: .leading, spacing: 14) {
                             ForEach(groups[day] ?? []) { entry in
@@ -588,9 +589,16 @@ struct NotePrototypeView: View {
         }
     }
 
+    private static func dayTitle(_ date: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return "今天" }
+        if calendar.isDateInYesterday(date) { return "昨天" }
+        return date.formatted(.dateTime.year().month().day().locale(locale))
+    }
+
     private static func sampleDate(day: Int, hour: Int, minute: Int) -> Date {
         let calendar = Calendar.current
-        let now = Date.now
+        let now = sampleNow
         let start = calendar.startOfDay(for: now)
         let offset = DateComponents(day: day, hour: hour, minute: minute)
         let sample = calendar.date(byAdding: offset, to: start) ?? start
