@@ -71,7 +71,7 @@ struct NoteGalleryView: View {
                 }
                 ForEach(groups.keys.sorted(by: >), id: \.self) { day in
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(Self.dayTitle(day)).font(.headline)
+                        Text(Self.dayTitle(day)).font(.title3.bold())
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top), count: 3),
                                   alignment: .leading, spacing: 14) {
                             ForEach(groups[day] ?? []) { entry in
@@ -123,10 +123,10 @@ struct NoteGalleryView: View {
                 case .note(let note):
                     VStack(alignment: .leading, spacing: 3) {
                         Text(note.displayTitle).font(.system(size: 8, weight: .semibold)).lineLimit(1)
-                        Text(note.body).font(.system(size: 7)).lineLimit(3)
+                        Text(note.body).font(.system(size: 6)).lineLimit(3)
                         if let first = note.checks.first {
                             Label(first.text, systemImage: first.done ? "checkmark.circle.fill" : "circle")
-                                .font(.system(size: 7)).lineLimit(1)
+                                .font(.system(size: 6)).lineLimit(1)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -143,7 +143,7 @@ struct NoteGalleryView: View {
             .shadow(color: .black.opacity(0.06), radius: 2, y: 2)
             .accessibilityHidden(true)
             Text(time)
-                .font(.caption2).foregroundStyle(.secondary)
+                .font(.footnote).foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(entry.title))
@@ -361,13 +361,13 @@ private struct NoteFilePreview: View {
                         .stroke(.teal, style: StrokeStyle(lineWidth: compact ? 1.5 : 3, dash: [4, 3]))
                     }
                     Text(compact ? file.title : "平江路")
-                        .font(.system(size: compact ? 7 : 12, weight: .medium))
+                        .font(.system(size: compact ? 8 : 12, weight: compact ? .semibold : .medium))
                         .padding(compact ? 7 : 14)
                 }
             } else {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(file.title).font(compact ? .system(size: 8, weight: .semibold) : .headline)
-                    Text(file.summary ?? "").font(compact ? .system(size: 7) : .subheadline)
+                    Text(file.summary ?? "").font(compact ? .system(size: 6) : .subheadline)
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
