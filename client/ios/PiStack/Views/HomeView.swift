@@ -187,7 +187,7 @@ struct HomeView: View {
             },
                      reading: $reading, onReaderFrame: { readerFrame = $0 })
         case .notes:
-            NoteGalleryView(notes: noteStore.notes, files: noteFiles, botId: bot.id, api: api, bottomInset: bottomInset,
+            NoteGalleryView(notes: noteStore.notes, files: noteFiles, botId: bot.id, api: api,
                             onOpenNote: { openedNote = $0 }, newNote: newNote, onDropFile: store.drop)
         }
     }

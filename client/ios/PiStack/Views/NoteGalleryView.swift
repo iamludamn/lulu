@@ -44,7 +44,6 @@ struct NoteGalleryView: View {
     let files: [NoteFile]
     let botId: String
     let api: Api
-    let bottomInset: CGFloat
     let onOpenNote: (UUID) -> Void
     let newNote: () -> Void
     let onDropFile: (String) -> Void
@@ -54,6 +53,7 @@ struct NoteGalleryView: View {
     @Environment(\.openArtifact) private var openArtifact
 
     private static let locale = Locale(identifier: "zh_CN")
+    private static let toolbarControlHeight: CGFloat = 48
     private var entries: [NoteGalleryEntry] {
         let all = notes.map(NoteGalleryEntry.note) + files.map(NoteGalleryEntry.file)
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -92,19 +92,26 @@ struct NoteGalleryView: View {
         .contentMargins(.top, topInset, for: .scrollContent)
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack(spacing: 9) {
+            HStack(alignment: .center, spacing: 9) {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField("搜索", text: $query).accessibilityLabel("搜索 Note")
                 }
                 .padding(.horizontal, 13)
-                .frame(height: 43)
-                .glassEffect(.regular)
-                roundButton("新建笔记", icon: "square.and.pencil", action: newNote)
+                .frame(height: Self.toolbarControlHeight)
+                .glassEffect(.regular, in: .capsule)
+                Button(action: newNote) {
+                    Image(systemName: "square.and.pencil")
+                        .font(.body.weight(.medium))
+                        .frame(width: Self.toolbarControlHeight, height: Self.toolbarControlHeight)
+                        .contentShape(.circle)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: .circle)
+                .accessibilityLabel("新建笔记")
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 7)
-            .padding(.bottom, bottomInset)
         }
         .sheet(item: $previewFile) { NoteMockFileSheet(file: $0, botId: botId, api: api) }
     }
