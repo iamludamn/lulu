@@ -20,12 +20,12 @@ npm exec -- wrangler deploy --config wrangler.local.jsonc
 
 For local development, run `npm exec -- wrangler dev --config wrangler.local.jsonc` from `apps/cf`. To load bindings from a secret manager's process environment, set `CLOUDFLARE_INCLUDE_PROCESS_ENV=true`. The Worker listens on port 8787 by default. For the Web client, run `npm run dev -w @lulu/client` from the root.
 
-## iOS dictation experiment
+## iOS dictation correction
 
-With `VOLC_SPEECH_ASR_API_KEY` configured, set these optional string bindings in the Worker's `vars` to try the provider's [streaming ASR options](https://docs.volcengine.com/docs/doubao-voice/bidirectional-streaming-automatic-speech-recognition-websocket?lang=zh).
+With `VOLC_SPEECH_ASR_API_KEY` configured, iOS dictation uses [second-pass recognition and disfluency cleanup](https://docs.volcengine.com/docs/doubao-voice/bidirectional-streaming-automatic-speech-recognition-websocket?lang=zh) and a built-in final-transcript replacement (`库伯内特斯` → `Kubernetes`). These optional string bindings in the Worker's `vars` adjust the defaults.
 
-- `VOLC_SPEECH_ASR_REFINE` set to `"true"` enables second-pass recognition and disfluency cleanup in the existing ASR session. The refined result can take longer to return after recording ends. Omit the binding to use the original recognition settings.
-- `VOLC_SPEECH_ASR_CORRECTION_TABLE_ID` selects an optional replacement dictionary. Create a table with pairs such as `库伯内特斯` → `Kubernetes` in the Doubao Speech console, then set the binding to that table's ID. This works independently of `VOLC_SPEECH_ASR_REFINE`. See [replacement table setup](https://docs.volcengine.com/docs/doubao-voice/replacement-word?lang=zh).
+- Set `VOLC_SPEECH_ASR_REFINE` to `"false"` to disable second-pass recognition and disfluency cleanup. The refined result can take longer to return after recording ends.
+- Set `VOLC_SPEECH_ASR_CORRECTION_TABLE_ID` to use a Doubao Speech replacement table in place of the built-in rule. This works independently of `VOLC_SPEECH_ASR_REFINE`. See [replacement table setup](https://docs.volcengine.com/docs/doubao-voice/replacement-word?lang=zh).
 
 To compare results, tap the microphone in the iOS chat composer, read the same sample with each configuration, and tap again to place the transcript in the draft. Try a sentence with a hesitation and a sentence containing a dictionary entry. Check both the wording and the time from stopping the recording to seeing the draft.
 

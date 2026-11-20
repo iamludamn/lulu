@@ -43,12 +43,13 @@ test('ASR commands parse without entering prompt submission', () => {
   for (const type of ['asr.start', 'asr.finish', 'asr.cancel']) assert.deepEqual(parseFrame(JSON.stringify({ type, requestId: 'one' })), { type, requestId: 'one' });
   assert.throws(() => parseFrame(JSON.stringify({ type: 'asr.audio', requestId: 'one', audio: null })), /Unknown command/);
 });
-test('ASR refinement and replacement dictionary are independently opt-in', async () => {
+test('ASR refines by default and accepts an independent provider dictionary', async () => {
   const base = { model_name: 'bigmodel', enable_itn: true, enable_punc: true, result_type: 'full' };
   const refinement = { enable_nonstream: true, enable_ddc: true };
   const dictionary = { corpus: { correct_table_id: 'terms' } };
   for (const [env, expected] of [
-    [{}, base],
+    [{}, { ...base, ...refinement }],
+    [{ VOLC_SPEECH_ASR_REFINE: 'false' }, base],
     [{ VOLC_SPEECH_ASR_REFINE: 'true', VOLC_SPEECH_ASR_CORRECTION_TABLE_ID: ' ' }, { ...base, ...refinement }],
     [{ VOLC_SPEECH_ASR_REFINE: 'false', VOLC_SPEECH_ASR_CORRECTION_TABLE_ID: ' terms ' }, { ...base, ...dictionary }],
     [{ VOLC_SPEECH_ASR_REFINE: 'true', VOLC_SPEECH_ASR_CORRECTION_TABLE_ID: 'terms' }, { ...base, ...refinement, ...dictionary }],
@@ -57,6 +58,18 @@ test('ASR refinement and replacement dictionary are independently opt-in', async
     await f.sessions.start(f.socket, 'one');
     f.sessions.cancel(f.socket, 'one');
     assert.deepEqual(JSON.parse(new TextDecoder().decode(f.sent[0].subarray(8))).request, expected);
+  }
+});
+test('built-in replacement applies only to the final transcript and yields to a provider dictionary', async () => {
+  for (const [table, expected] of [['', '检查Kubernetes集群。'], ['terms', '检查库伯内特斯集群。']]) {
+    const f = fixture(undefined, { VOLC_SPEECH_ASR_CORRECTION_TABLE_ID: table });
+    await f.sessions.start(f.socket, 'one');
+    f.sessions.finish(f.socket, 'one');
+    f.receive(response('检查库伯内特斯'));
+    f.receive(response('检查库伯内特斯集群。', true));
+    await settle();
+    assert.deepEqual(f.events.slice(1).map(e => e.text), ['检查库伯内特斯', expected]);
+    assert.equal(f.closed(), 1);
   }
 });
 test('finishing waits for final result and closes upstream once', async () => {

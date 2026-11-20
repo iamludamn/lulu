@@ -42,6 +42,8 @@ export class AsrSessions {
     const env = this.host.env;
     const key = env.VOLC_SPEECH_ASR_API_KEY;
     if (!key) throw new Error("语音识别服务未配置");
+    const refine = env.VOLC_SPEECH_ASR_REFINE !== "false";
+    const correctionTable = env.VOLC_SPEECH_ASR_CORRECTION_TABLE_ID?.trim();
     const session: Recognition = { id, timer: setTimeout(() => this.#fail(socket, session, "录音已超过 60 秒，请重试"), 65_000), bytes: 0, finishing: false, chain: Promise.resolve() };
     this.#sessions.set(socket, session);
     try {
@@ -52,6 +54,9 @@ export class AsrSessions {
           session.chain = session.chain.then(async () => {
             if (this.#sessions.get(socket) !== session) return;
             const result = await asrResult(data);
+            if (result.final && !correctionTable) {
+              result.text = result.text.replaceAll("库伯内特斯", "Kubernetes");
+            }
             this.send(socket, { type: "asr.transcript", sessionId: id, ...result });
             if (result.final) this.cancel(socket, id);
           }).catch((error: unknown) => {
@@ -64,8 +69,6 @@ export class AsrSessions {
       if (!result.socket) throw new Error(`语音识别连接失败（${result.status}）`);
       if (this.#sessions.get(socket) !== session) { result.socket.close(); return; }
       session.upstream = result.socket;
-      const refine = env.VOLC_SPEECH_ASR_REFINE === "true";
-      const correctionTable = env.VOLC_SPEECH_ASR_CORRECTION_TABLE_ID?.trim();
       result.socket.send(asrPacket(0x10, new TextEncoder().encode(JSON.stringify({
         user: { uid: "lulu-ios" }, audio: { format: "pcm", rate: 16000, bits: 16, channel: 1 },
         request: {
