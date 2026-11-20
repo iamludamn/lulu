@@ -131,11 +131,16 @@ struct AssetPage: View {
             let cached = await api.loadCachedArtifactText(botId, address: address)
             guard !Task.isCancelled else { return }
             excerpt = cached.map { String($0.prefix(1200)) }
+            if cached != nil {
+                ClientTiming.mark("asset.excerpt.cached")
+                if address.version != nil { return }
+            }
             let loaded = try? await api.artifactText(botId, name: address.name, version: address.version)
             guard !Task.isCancelled else { return }
             if let loaded {
                 let next = String(loaded.prefix(1200))
                 if excerpt != next { excerpt = next }
+                ClientTiming.mark("asset.excerpt.downloaded")
             }
             return
         }

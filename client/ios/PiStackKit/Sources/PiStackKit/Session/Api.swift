@@ -117,11 +117,13 @@ public struct Api: Sendable {
     }
 
     public func download(_ url: URL, as name: String) async throws -> URL {
+        ClientTiming.mark("asset.download.start")
         let data = try await fetch(url)
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let file = folder.appendingPathComponent((name as NSString).lastPathComponent)
         try data.write(to: file)
+        ClientTiming.mark("asset.download.ready")
         return file
     }
 
@@ -147,15 +149,20 @@ public struct Api: Sendable {
     }
 
     public func spaceContent(_ botId: String, space: String) async throws -> Data {
+        ClientTiming.mark("space.data.request")
         let cache = spaceDataCache(botId, space: space)
         let data: Data
         do {
             data = try await call("/api/bots/\(botId)/spaces/refresh", query: [URLQueryItem(name: "id", value: space)], failure: "加载更新失败")
         } catch let error as URLError {
-            if let saved = try? Data(contentsOf: cache) { return saved }
+            if let saved = try? Data(contentsOf: cache) {
+                ClientTiming.mark("space.data.cacheFallback")
+                return saved
+            }
             throw error
         }
         try? data.write(to: cache, options: .atomic)
+        ClientTiming.mark("space.data.ready")
         return data
     }
 

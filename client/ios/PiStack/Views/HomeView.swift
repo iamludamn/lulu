@@ -114,6 +114,12 @@ struct HomeView: View {
         .sheet(isPresented: $inspector) { InspectorView(store: store, botId: bot.id, api: api) }
         .sensoryFeedback(.selection, trigger: page)
         .task { store.start(); await SpacePush.shared.connect(api: api, botId: bot.id) }
+        .onChange(of: page, initial: true) { _, selected in
+            ClientTiming.mark("page.selected.\(selected)")
+        }
+        .onChange(of: availablePage, initial: true) { _, available in
+            if let available { ClientTiming.mark("page.data.ready.\(available)") }
+        }
         .task(id: voiceOpen) {
             if voiceOpen { await voice.start(store) }
         }
@@ -135,6 +141,11 @@ struct HomeView: View {
                 if transcription.recording { transcription.cancel() }
             }
         }
+    }
+
+    private var availablePage: Page? {
+        let hasData = page == .chat ? store.snapshot.view != nil : store.snapshot.hasLayout
+        return phase == .active && hasData ? page : nil
     }
 
     @ViewBuilder

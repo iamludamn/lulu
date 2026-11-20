@@ -1,6 +1,14 @@
 import Foundation
 import Observation
 
+private final class SocketTiming: NSObject, URLSessionWebSocketDelegate {
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
+        ClientTiming.mark("socket.upgraded")
+    }
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {}
+}
+
 @MainActor @Observable
 public final class BotStore {
     public enum Link: Sendable { case connecting, online, offline }
@@ -61,10 +69,12 @@ public final class BotStore {
     private var keepTimers: [String: Task<Void, Never>] = [:]
 
     private let socketURL: URL
-    private let token: String
+    private var token: String?
     private let cacheURL: URL
     private let stateTimeout: Duration
     private let retryTimeout: Duration
+    private let stateRetryGrace: Duration
+    private let socketTiming = SocketTiming()
     private var stateTimer: Task<Void, Never>?
     @ObservationIgnored private var restoration: Task<Void, Never>?
     private var saving: Task<Void, Never>?
@@ -77,23 +87,31 @@ public final class BotStore {
     private var attempts = 0
     private var running = false
 
-    public convenience init(botId: String, server: URL, token: String = "") {
+    public convenience init(botId: String, server: URL, token: String? = "") {
         self.init(botId: botId, server: server, token: token, stateTimeout: .seconds(15), retryTimeout: .seconds(30))
     }
 
-    init(botId: String, server: URL, token: String = "", stateTimeout: Duration, retryTimeout: Duration = .seconds(30)) {
+    init(botId: String, server: URL, token: String? = "", stateTimeout: Duration, retryTimeout: Duration = .seconds(30), stateRetryGrace: Duration = .seconds(3)) {
         socketURL = Api.socketURL(base: server, botId: botId)
         self.token = token
         cacheURL = Cache.url(for: socketURL)
         self.stateTimeout = stateTimeout
         self.retryTimeout = retryTimeout
+        self.stateRetryGrace = stateRetryGrace
     }
 
     public func start() {
         guard !running, snapshot.halt == nil else { return }
+        ClientTiming.mark(snapshot.view == nil ? "session.start.cold" : "session.start.memory")
         running = true
         if snapshot.view != nil { snapshot.link = .offline }
         restore()
+        connect()
+    }
+
+    public func authorize(_ token: String) {
+        guard self.token == nil else { return }
+        self.token = token
         connect()
     }
 
@@ -218,19 +236,22 @@ public final class BotStore {
 
     private func restore() {
         guard snapshot.view == nil else { return }
+        ClientTiming.mark("cache.restore.start")
         let url = cacheURL
+        let reading = Task.detached(priority: .userInitiated) { () -> (Cache, (PanelState, [AssetItem])?)? in
+            guard let cache = Cache.load(url)?.offline else { return nil }
+            if let data = cache.state ?? (try? Data(contentsOf: url.appendingPathExtension("state"))),
+               let surfaces = try? JSONDecoder().decode(Cache.Surfaces.self, from: data),
+               let panel = surfaces.panel, let assets = surfaces.assets,
+               cache.layoutConfirmed == true || !panel.order.isEmpty || !assets.isEmpty {
+                return (cache, (panel, assets))
+            }
+            return (cache, nil)
+        }
         restoration = Task { [weak self] in
-            let restored = await Task.detached(priority: .userInitiated) { () -> (Cache, (PanelState, [AssetItem])?)? in
-                guard let cache = Cache.load(url)?.offline else { return nil }
-                if let data = cache.state ?? (try? Data(contentsOf: url.appendingPathExtension("state"))),
-                   let surfaces = try? JSONDecoder().decode(Cache.Surfaces.self, from: data),
-                   let panel = surfaces.panel, let assets = surfaces.assets,
-                   cache.layoutConfirmed == true || !panel.order.isEmpty || !assets.isEmpty {
-                    return (cache, (panel, assets))
-                }
-                return (cache, nil)
-            }.value
+            let restored = await reading.value
             guard !Task.isCancelled, let self else { return }
+            ClientTiming.mark(restored == nil ? "cache.restore.miss" : "cache.restore.decoded")
             self.restoration = nil
             guard self.snapshot.halt == nil, self.snapshot.view == nil, let (cache, state) = restored else { return }
             self.cachedTranscriptEntries = nil
@@ -240,6 +261,7 @@ public final class BotStore {
                 self.snapshot.panel = panel
                 self.snapshot.assets = assets
                 self.snapshot.hasLayout = true
+                ClientTiming.mark("cache.layout.applied")
             }
         }
     }
@@ -259,14 +281,16 @@ public final class BotStore {
     }
 
     private func connect() {
-        guard running, snapshot.halt == nil else { return }
+        guard running, snapshot.halt == nil, let token else { return }
         var request = URLRequest(url: socketURL)
         if socketURL.scheme == "wss", !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         let task = URLSession.shared.webSocketTask(with: request)
+        task.delegate = socketTiming
         task.maximumMessageSize = 64 << 20
         self.task = task
+        ClientTiming.mark("socket.connect")
         task.resume()
         stateTimer?.cancel()
         stateTimer = Task { [weak self] in
@@ -274,8 +298,10 @@ public final class BotStore {
             do { try await Task.sleep(for: self.stateTimeout) } catch { return }
             guard self.task === task else { return }
             self.snapshot.link = .offline
-            do { try await Task.sleep(for: self.retryTimeout) } catch { return }
+            ClientTiming.mark("socket.state.timeout")
+            do { try await Task.sleep(for: self.stateRetryGrace) } catch { return }
             guard self.task === task else { return }
+            ClientTiming.mark("socket.state.retry")
             self.closed(task)
         }
         deliveryReceipts = false
@@ -285,9 +311,11 @@ public final class BotStore {
     }
 
     private func listen(_ task: URLSessionWebSocketTask) async {
+        var waitingForState = true
         while true {
             do {
                 let message = try await task.receive()
+                let receivedAt = ProcessInfo.processInfo.systemUptime
                 guard self.task === task else { return }
                 let (decoded, state) = await Task.detached { () -> (ServerMessage?, Data?) in
                     let data: Data
@@ -301,7 +329,16 @@ public final class BotStore {
                     return (decoded, nil)
                 }.value
                 guard self.task === task, let decoded else { continue }
+                let initialState = waitingForState && state != nil
+                if initialState {
+                    ClientTiming.mark("socket.state.received", at: receivedAt)
+                    ClientTiming.mark("socket.state.decoded")
+                }
                 receive(decoded, data: state)
+                if initialState && stateTimer == nil {
+                    waitingForState = false
+                    ClientTiming.mark("socket.state.applied")
+                }
             } catch {
                 closed(task)
                 return
@@ -368,7 +405,10 @@ public final class BotStore {
                 let submitted = Set(progress.messages.compactMap(\.requestId))
                 for id in submitted { submitTimers.removeValue(forKey: id)?.cancel() }
                 snapshot.requests.removeAll {
-                    if case .submit = $0.command.kind { return submitted.contains($0.id) }
+                    if case .submit = $0.command.kind, submitted.contains($0.id) {
+                        if $0.state == .sending { ClientTiming.mark("prompt.acknowledged") }
+                        return true
+                    }
                     if case .keep(let origin) = $0.command.kind, panel.scheduleReceipts[origin]?.requestIds.contains($0.id) == true {
                         keepTimers.removeValue(forKey: $0.id)?.cancel()
                         return true
@@ -424,6 +464,7 @@ public final class BotStore {
                 snapshot.requests[index].state = .failed
                 snapshot.requests[index].error = error
             } else if case .submit = snapshot.requests[index].command.kind {
+                if snapshot.requests[index].state == .sending { ClientTiming.mark("prompt.acknowledged") }
                 snapshot.requests[index].state = .acknowledged
             } else {
                 snapshot.requests.remove(at: index)
@@ -466,6 +507,7 @@ public final class BotStore {
         guard snapshot.halt == nil else { return }
         snapshot.requests.removeAll { $0.id == command.requestId }
         snapshot.requests.append(Request(command: command, state: .sending, at: .now))
+        if case .submit = command.kind { ClientTiming.mark("prompt.queued") }
         send(command)
     }
 
@@ -477,6 +519,7 @@ public final class BotStore {
         }
         switch command.kind {
         case .submit:
+            ClientTiming.mark("prompt.sent")
             submitTimers.removeValue(forKey: id)?.cancel()
             submitTimers[id] = Task { [weak self, retryTimeout] in
                 do { try await Task.sleep(for: retryTimeout * 2) } catch { return }

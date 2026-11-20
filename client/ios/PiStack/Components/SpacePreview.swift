@@ -81,14 +81,19 @@ struct SpacePreview: View {
             failed = request
             return
         }
-        if page == nil {
+        if page?.source != request.source && (page == nil || request.refresh == 0) {
             let cached = await api.loadCachedArtifactText(botId, address: address)
             guard !Task.isCancelled, request == self.request else { return }
-            if let cached { page = makePage(cached, source: request.source) }
+            if let cached {
+                page = makePage(cached, source: request.source)
+                ClientTiming.mark("space.cover.cached")
+            }
         }
+        if request.refresh == 0, address.version != nil, page?.source == request.source { return }
         do {
             let html = try await api.artifactText(botId, name: address.name, version: address.version)
             guard !Task.isCancelled, request == self.request else { return }
+            ClientTiming.mark("space.cover.downloaded")
             if page?.source.legacy == request.source.legacy {
                 page?.source = request.source
                 if page?.html != html {

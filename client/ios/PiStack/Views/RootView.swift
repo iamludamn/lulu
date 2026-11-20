@@ -1,3 +1,4 @@
+import PiStackKit
 import SwiftUI
 
 struct RootView: View {
@@ -12,27 +13,39 @@ struct RootView: View {
         return model.api != nil
     }
 
+    private var loadingAnimation: Animation? {
+        guard !reduceMotion else { return nil }
+        if let snapshot = model.connection?.store.snapshot,
+           snapshot.hasLayout, !snapshot.hasReceivedState {
+            return nil
+        }
+        return .easeInOut(duration: 0.3)
+    }
+
     var body: some View {
         let loading = self.loading
         ZStack {
-            if let connection = model.connection {
+            if !loading, let connection = model.connection {
                 NavigationStack {
                     HomeView(bot: connection.bot, api: connection.api, store: connection.store)
                         .toolbarVisibility(.hidden, for: .navigationBar)
                 }
                 .id(model.connectionRevision)
-                .allowsHitTesting(!loading)
-                .accessibilityHidden(loading)
             } else if model.api == nil {
                 NavigationStack { SettingsView() }
             }
-            if loading {
-                LoadingScreen()
-                    .transition(.opacity)
-                    .zIndex(1)
+            ZStack {
+                if loading {
+                    LoadingScreen()
+                        .transition(.opacity)
+                }
             }
+            .animation(loadingAnimation, value: loading)
+            .zIndex(1)
         }
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: loading)
+        .onChange(of: loading, initial: true) { _, value in
+            ClientTiming.mark(value ? "startup.loading" : "startup.loading.cleared")
+        }
         .task(id: model.connectionRevision) { await model.resolve() }
     }
 }
@@ -64,5 +77,6 @@ private struct LoadingScreen: View {
             guard !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { breathing = true }
         }
+        .onDisappear { ClientTiming.mark("startup.transition.disappeared") }
     }
 }

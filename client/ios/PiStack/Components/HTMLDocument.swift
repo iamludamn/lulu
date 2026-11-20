@@ -263,10 +263,14 @@ private struct WebPage: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
             self.navigation = navigation
+            ClientTiming.mark("web.content.start")
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            if let navigation, navigation === self.navigation { present(.finished) }
+            if let navigation, navigation === self.navigation {
+                ClientTiming.mark("web.content.finished")
+                present(.finished)
+            }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {

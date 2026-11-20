@@ -92,6 +92,19 @@ private final class StateServer: @unchecked Sendable {
     #expect(store.snapshot.link == .online)
 }
 
+@Test @MainActor func waitingForCredentialsDoesNotStartConnectionTimeout() async throws {
+    let server = try StateServer(stateDelay: 0)
+    defer { server.stop() }
+    let store = BotStore(botId: UUID().uuidString, server: URL(string: "http://127.0.0.1:\(server.port)")!, token: nil, stateTimeout: .milliseconds(100))
+    defer { store.stop() }
+    store.start()
+    try await Task.sleep(for: .milliseconds(250))
+    #expect(server.connectionCount == 0)
+    #expect(store.snapshot.link == .connecting)
+    store.authorize("")
+    #expect(try await waitFor { store.snapshot.hasReceivedState })
+}
+
 @Test @MainActor func slowInitialStateStillArrivesAfterOfflineNotice() async throws {
     let server = try StateServer(stateDelay: 0.6)
     defer { server.stop() }
@@ -106,7 +119,7 @@ private final class StateServer: @unchecked Sendable {
 @Test @MainActor func stalledConnectionIsRetried() async throws {
     let server = try StateServer(stateDelay: nil)
     defer { server.stop() }
-    let store = BotStore(botId: UUID().uuidString, server: URL(string: "http://127.0.0.1:\(server.port)")!, stateTimeout: .milliseconds(100), retryTimeout: .milliseconds(100))
+    let store = BotStore(botId: UUID().uuidString, server: URL(string: "http://127.0.0.1:\(server.port)")!, stateTimeout: .milliseconds(100), stateRetryGrace: .milliseconds(100))
     defer { store.stop() }
     store.start()
     #expect(try await waitFor { server.connectionCount >= 2 })

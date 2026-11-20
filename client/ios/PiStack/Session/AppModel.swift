@@ -73,9 +73,14 @@ final class AppModel {
         guard connection == nil, let api else { return }
         let revision = connectionRevision
         let server = api.base
-        let token = await Task.detached(priority: .userInitiated) { Self.readChatToken(for: server) }.value
-        guard !Task.isCancelled, revision == connectionRevision, connection == nil else { return }
         let bot = BotSummary(id: Self.botId, name: Self.defaultName)
-        connection = Connection(api: api, bot: bot, store: BotStore(botId: bot.id, server: server, token: token))
+        let store = BotStore(botId: bot.id, server: server, token: nil)
+        store.start()
+        connection = Connection(api: api, bot: bot, store: store)
+        ClientTiming.mark("auth.read.start")
+        let token = await Task.detached(priority: .userInitiated) { Self.readChatToken(for: server) }.value
+        guard revision == connectionRevision else { return }
+        ClientTiming.mark("auth.read.ready")
+        store.authorize(token)
     }
 }
