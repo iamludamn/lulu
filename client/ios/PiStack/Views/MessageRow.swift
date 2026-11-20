@@ -136,22 +136,22 @@ struct MessageRow: View, Equatable {
                             .buttonStyle(.plain)
                             .artifactSource(source, radius: 26)
                     }
+                } else if case .accepted = state {
+                    offerCaption(state.caption) {
+                        guard let current = store.snapshot.panel.widgets[widget.id],
+                              case .space(let ref, _, let refresh, _) = current.body,
+                              let address = ArtifactAddress(ref) else { return }
+                        openSpace(address, SpaceOpening(id: current.id, title: current.title, refresh: refresh), source)
+                    }
+                    .accessibilityHint("打开\(widget.title)的当前版本")
+                    .artifactSource(source, radius: 8)
                 } else {
                     HStack(spacing: 10) {
-                        Image(systemName: state == .superseded ? "clock.arrow.circlepath" : "checkmark.circle")
+                        Image(systemName: "clock.arrow.circlepath")
                             .foregroundStyle(.secondary)
                         Text(widget.title).font(.subheadline).lineLimit(1)
                         Text(state.caption).font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        if state != .superseded {
-                            Button("打开当前版本") {
-                                guard let current = store.snapshot.panel.widgets[widget.id],
-                                      case .space(let ref, _, let refresh, _) = current.body,
-                                      let address = ArtifactAddress(ref) else { return }
-                                openSpace(address, SpaceOpening(id: current.id, title: current.title, refresh: refresh), source)
-                            }
-                            .font(.caption)
-                        }
                     }
                     .padding(14).frame(maxWidth: 360).frosted(18)
                     .artifactSource(source, radius: 18)
@@ -163,16 +163,8 @@ struct MessageRow: View, Equatable {
                     if let offer = submittingOffer?.state ?? (state.actionable ? state : nil) {
                         viewOfferSwipe(offer) { schedulesButton(face) }
                     } else if case .accepted = state {
-                        Button { showsSchedules = true } label: {
-                            Label("\(widget.title) · \(state.caption)", systemImage: "checkmark.circle")
-                                .font(.subheadline)
-                                .frame(maxWidth: 360, alignment: .leading)
-                                .padding(14)
-                                .frosted(18)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityHint("查看全部定时任务")
-                        .padding(.vertical, 8)
+                        offerCaption(state.caption) { showsSchedules = true }
+                            .accessibilityHint("查看全部定时任务")
                     } else {
                         VStack(spacing: 8) {
                             schedulesButton(face)
@@ -196,6 +188,16 @@ struct MessageRow: View, Equatable {
                     .artifactSource(source, radius: 22)
             }
         }
+    }
+
+    private func offerCaption(_ caption: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(caption)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
     }
 
     private func schedulesButton<Content: View>(_ face: Content) -> some View {
