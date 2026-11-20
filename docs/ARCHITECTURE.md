@@ -4,7 +4,7 @@ lulu is a self-hosted personal AI assistant for persistent conversations, memory
 
 ## Repository map
 
-The assistant logic and shared protocol live in [`core/`](../core) and use Pi Durable. [`apps/cf/`](../apps/cf) hosts the core on a Cloudflare Worker and SQLite-backed Durable Objects. [`client/`](../client) contains the iOS and desktop apps and the web MCP administration UI. The iOS target and package retain the PiStack name. Telemetry collection and Grafana dashboards live in [`ops/observability/`](../ops/observability).
+The assistant logic and shared protocol live in [`core/`](../core) and use Pi Durable. [`apps/cf/`](../apps/cf) hosts the core on a Cloudflare Worker and SQLite-backed Durable Objects. [`client/`](../client) contains the iOS and desktop apps and the web MCP administration UI. Telemetry collection and Grafana dashboards live in [`ops/observability/`](../ops/observability).
 
 ## Core APIs
 
