@@ -106,7 +106,17 @@ struct NoteGalleryView: View {
                 .padding(.horizontal, 13)
                 .frame(height: noteToolbarButtonSize)
                 .glassEffect(.regular, in: .capsule)
-                noteGlassButton("新建笔记", icon: "square.and.pencil", action: newNote)
+                Button(action: newNote) {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 21, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .offset(x: -1, y: -1)
+                        .frame(width: noteToolbarButtonSize, height: noteToolbarButtonSize)
+                        .contentShape(.circle)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: .circle)
+                .accessibilityLabel("新建笔记")
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 7)
@@ -297,27 +307,22 @@ struct NoteDetailView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Color.paper.ignoresSafeArea())
-        .toolbarVisibility(.visible, for: .navigationBar)
+        .toolbarVisibility(.visible, for: .navigationBar, .bottomBar)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                noteGlassButton("带回对话", icon: "bubble.left", size: 44) { onDiscuss(value.id) }
+                Button("带回对话", systemImage: "bubble.left") { onDiscuss(value.id) }
             }
-            .sharedBackgroundVisibility(.hidden)
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 10) {
-                    noteGlassButton("添加清单项", icon: "checklist") {
-                        note.checks.append(.init(text: ""))
-                    }
-                    noteGlassButton("引用已有文件", icon: "paperclip") { showsFiles = true }
-                    Spacer()
-                    noteGlassButton("新建笔记", icon: "square.and.pencil", action: newNote)
+            ToolbarItemGroup(placement: .bottomBar) {
+                Button("添加清单项", systemImage: "checklist") {
+                    note.checks.append(.init(text: ""))
                 }
+                Button("引用已有文件", systemImage: "paperclip") { showsFiles = true }
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 6)
+            ToolbarSpacer(.flexible, placement: .bottomBar)
+            ToolbarItem(placement: .bottomBar) {
+                Button("新建笔记", systemImage: "square.and.pencil", action: newNote)
+            }
         }
         .sheet(isPresented: $showsFiles) { filePicker }
         .sheet(item: $previewFile) { NoteMockFileSheet(file: $0, botId: botId, api: api) }
@@ -351,23 +356,6 @@ struct NoteDetailView: View {
 }
 
 private let noteToolbarButtonSize: CGFloat = 48
-
-private func noteGlassButton(_ label: LocalizedStringKey, icon: String, size: CGFloat = noteToolbarButtonSize,
-                             action: @escaping () -> Void) -> some View {
-    let isCompose = icon == "square.and.pencil"
-    return Button(action: action) {
-        Image(systemName: icon)
-            .font(.system(size: isCompose ? 21 : 19, weight: .medium))
-            .foregroundStyle(.secondary)
-            // The square-and-pencil symbol needs a small optical correction.
-            .offset(x: isCompose ? -1 : 0, y: isCompose ? -1 : 0)
-            .frame(width: size, height: size)
-            .contentShape(.circle)
-    }
-    .buttonStyle(.plain)
-    .glassEffect(.regular.interactive(), in: .circle)
-    .accessibilityLabel(Text(label))
-}
 
 private struct NoteMockFileSheet: View {
     let file: NoteFile
