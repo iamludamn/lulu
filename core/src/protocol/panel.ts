@@ -26,18 +26,24 @@ const Chart = Type.Object({
   series: Type.Array(Type.Object({ name: Type.String(), values: Type.Array(Type.Number()), tone: Type.Optional(Tone) }), { minItems: 1, maxItems: 3 }),
 });
 
+const ListItem = Type.Object({
+  title: Type.String(),
+  subtitle: Type.Optional(Type.String()),
+  value: Type.Optional(Type.String()),
+  tone: Type.Optional(Tone),
+  done: Type.Optional(Type.Boolean({ description: "Present makes the item a checklist entry" })),
+});
+
 const List = Type.Object({
   kind: Type.Literal("list"),
-  items: Type.Array(
-    Type.Object({
-      title: Type.String(),
-      subtitle: Type.Optional(Type.String()),
-      value: Type.Optional(Type.String()),
-      tone: Type.Optional(Tone),
-      done: Type.Optional(Type.Boolean({ description: "Present makes the item a checklist entry" })),
-    }),
-    { maxItems: 12 },
-  ),
+  items: Type.Array(ListItem, { maxItems: 12 }),
+});
+
+const Checklist = Type.Object({
+  kind: Type.Literal("list"),
+  items: Type.Array(Type.Object({ ...ListItem.properties, done: Type.Boolean() }), { minItems: 1, maxItems: 8 }),
+}, {
+  description: "A Checklist. Every item must have a done boolean so the user can check it off on Panel.",
 });
 
 const Timeline = Type.Object({
@@ -88,6 +94,7 @@ const Schedules = Type.Object({
   rows: Type.Array(Type.Object({
     id: Type.String(),
     name: Type.String(),
+    mode: Type.Optional(enumOf(["task", "reminder"] as const)),
     schedule: Type.Union([
       Type.Object({ kind: Type.Literal("once"), at: Type.Number() }),
       Type.Object({ kind: Type.Literal("daily"), time: Type.String(), tz: Type.String() }),
@@ -104,18 +111,21 @@ export const SCHEDULE_WIDGET_ID = "lulu:schedules";
 export const SCHEDULE_OFFER_KIND = "lulu.schedules.offer";
 export const SCHEDULE_ORIGIN_PREFIX = "schedules:";
 
-const modelBodies = [Stat, Gauge, Chart, List, Timeline, Note, Media, Space, Weather, Actions] as const;
-
-export const ModelWidgetInput = Type.Object({
+const widgetProperties = {
   id: Type.String({ description: "Stable kebab-case id of letters, digits, - and _, at most 64 characters; the user's panel keeps one widget per id" }),
   size: enumOf(["s", "m", "l"] as const, "s = 1x1, m = 2x1, l = 2x2"),
   title: Type.String(),
   icon: Type.Optional(Type.String({ description: "SF Symbol name, e.g. figure.run" })),
   tone: Type.Optional(Tone),
-  body: Type.Union([...modelBodies]),
-});
+};
 
-export const WidgetInput = Type.Object({ ...ModelWidgetInput.properties, body: Type.Union([...modelBodies, Schedules]) });
+export const ChecklistWidgetInput = Type.Object({ ...widgetProperties, body: Checklist });
+
+// Stored Panel widgets and Chat offers keep their original wire formats.
+export const WidgetInput = Type.Object({
+  ...widgetProperties,
+  body: Type.Union([Stat, Gauge, Chart, List, Timeline, Note, Media, Space, Weather, Actions, Schedules]),
+});
 export type WidgetInput = Static<typeof WidgetInput>;
 export type SchedulesBody = Static<typeof Schedules>;
 export type ScheduleRow = SchedulesBody["rows"][number];

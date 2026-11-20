@@ -712,14 +712,13 @@ export class BotSession {
     if (this.#resumeAfterMcp) await this.#mcpReady;
     const now = Date.now();
     this.#harness.resume();
-    const parentId = this.#root.id;
     const selected = chatModelRef(this.#host.env, this.#selected);
     try {
       await this.#reconcileDreaming();
       await expireRequests(this.#harness, this.#root, now);
       await this.#updateDelivery();
       await recoverMemoryUpdates(this.#harness, this.#root, createMemoryUpdate(this.#host));
-      const outcome = await fireSchedules(this.#harness, parentId, selected, now);
+      const outcome = await fireSchedules(this.#harness, this.#root, selected, now);
       this.#lastScheduleRunAt = now;
       span.setAttributes({ "lulu.cron.fired": outcome.fired.length, "lulu.cron.expired": outcome.expired.length });
       await abortRuns(this.#harness, outcome.expired);

@@ -9,6 +9,7 @@ struct WidgetBody: View {
     let interactive: Bool
     let onPrompt: (String) -> Void
     let onCheck: (Int, Bool) -> Void
+    @State private var lastCheckedIndex: Int?
 
     private var compact: Bool { widget.size == .s }
     private var rowLimit: Int { widget.size == .l ? 8 : compact ? 2 : 3 }
@@ -22,7 +23,11 @@ struct WidgetBody: View {
         case .chart(let bars, let x, let series):
             chart(bars: bars, x: x, series: series)
         case .list(let items):
-            list(items)
+            if interactive && widget.pendingChecklistCount != nil {
+                checklist(items)
+            } else {
+                list(items)
+            }
         case .timeline(let events):
             timeline(events)
         case .note(let markdown):
@@ -39,20 +44,7 @@ struct WidgetBody: View {
         case .actions(let buttons):
             actions(buttons)
         case .schedules(_, let rows):
-            VStack(alignment: .leading, spacing: 6) {
-                if rows.isEmpty {
-                    Text("暂无定时任务").font(.subheadline).foregroundStyle(.secondary)
-                }
-                ForEach(rows.prefix(2)) { row in
-                    HStack(spacing: 8) {
-                        Text(row.name).font(.subheadline.weight(.medium)).lineLimit(1)
-                        Spacer(minLength: 4)
-                        Text(row.state.label).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                Label("共 \(rows.count) 项 · 查看详情", systemImage: "chevron.up")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            ScheduleSummary(rows: rows, expandsInline: interactive)
         case .unknown:
             Text("客户端暂不支持这种组件").font(.footnote).foregroundStyle(.secondary)
         }
@@ -183,6 +175,42 @@ struct WidgetBody: View {
     }
 
     private var defaultSeries: [Color] { [.accentColor, .orange, .green] }
+
+    private func checklist(_ items: [PanelWidget.Item]) -> some View {
+        let pending = items.indices.filter { items[$0].done == false }
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(pending, id: \.self) { index in
+                if index != pending.first { checklistDivider }
+                Button {
+                    lastCheckedIndex = index
+                    onCheck(index, true)
+                } label: {
+                    listRow(items[index]).frame(minHeight: 44).contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("标记为完成")
+            }
+            if let index = lastCheckedIndex, items.indices.contains(index), items[index].done == true {
+                Button {
+                    lastCheckedIndex = nil
+                    onCheck(index, false)
+                } label: {
+                    Text("撤销").frame(minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .font(.caption)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+        .sensoryFeedback(.selection, trigger: items.compactMap(\.done))
+    }
+
+    private var checklistDivider: some View {
+        Divider()
+            .opacity(0.3)
+            .padding(.leading, 28)
+            .padding(.trailing, 12)
+    }
 
     private func list(_ items: [PanelWidget.Item]) -> some View {
         ViewThatFits(in: .vertical) {

@@ -4,13 +4,13 @@ import { defineTool, type ToolExecutionApi, type ToolExecutionResult } from "@ea
 import type { Context } from "@earendil-works/chord/context";
 import { Type, type Static } from "typebox";
 import { withScheduleOverview } from "../cron/overview.js";
-import { EMPTY_PANEL, ModelWidgetInput, SCHEDULE_WIDGET_ID } from "../protocol/panel.js";
+import { ChecklistWidgetInput, EMPTY_PANEL, SCHEDULE_WIDGET_ID, type Widget } from "../protocol/panel.js";
 import { rememberSpace } from "../send/space-offers.js";
 import { PanelDoc } from "./doc.js";
 
 const PanelParams = Type.Object({
   action: Type.Union([Type.Literal("update"), Type.Literal("remove"), Type.Literal("list")], { description: "update | remove | list" }),
-  widget: Type.Optional(ModelWidgetInput),
+  widget: Type.Optional(ChecklistWidgetInput),
   id: Type.Optional(Type.String({ description: "Widget id for remove" })),
 });
 
@@ -25,6 +25,10 @@ function fail(text: string): ToolExecutionResult<PanelDetails> {
   return { output: [{ type: "text", text }], details: { action: "error", id: null }, isError: true };
 }
 
+function isChecklist(widget: Widget): boolean {
+  return widget.body.kind === "list" && widget.body.items.length > 0 && widget.body.items.every((item) => item.done !== undefined);
+}
+
 async function update(api: ToolExecutionApi<PanelDetails>, args: PanelArgs, context: Context): Promise<ToolExecutionResult<PanelDetails>> {
   const widget = args.widget;
   if (!widget) return fail("update requires widget");
@@ -33,17 +37,14 @@ async function update(api: ToolExecutionApi<PanelDetails>, args: PanelArgs, cont
   const current = await api.snapshot(PanelDoc, context);
   const previous = current?.widgets[id];
   if (previous === undefined) return fail(`${id} is not on the panel. Only the user adds widgets: offer a new one with send_to_user type widget kind panel.`);
-  const wasSpace = (previous.body.kind as string) === "space" || (previous.body.kind as string) === "web";
-  if (wasSpace !== (widget.body.kind === "space")) {
-    return fail(`${id} ${wasSpace ? "is a space and cannot become another kind of widget" : "is not a space and cannot become one"}: its saved state would be lost. Nothing was changed. Offer a new widget with a new id instead.`);
-  }
-  if (wasSpace) return fail("Space changes require user approval. Save a new page version, then offer a send_to_user panel card with the same id and new ref. The user swipes to apply it. Nothing was changed.");
+  if (["space", "web"].includes(previous.body.kind)) return fail("Space revisions are currently unavailable. Nothing was changed.");
+  if (!isChecklist(previous)) return fail(`${id} is not a Checklist. Offer a Checklist with a new id so the existing widget stays on Panel.`);
   const updatedAt = Date.now();
   await api.commit(async (tx) => {
     const draft = await tx.doc(PanelDoc);
     const previous = draft.widgets[id];
     if (previous === undefined) throw new Error(`${id} was removed. Nothing was changed.`);
-    if (["space", "web"].includes(previous.body.kind)) throw new Error("Space changes require a preview card and user approval.");
+    if (!isChecklist(previous)) throw new Error(`${id} is no longer a Checklist. Nothing was changed.`);
     draft.widgets[id] = { ...widget, id, updatedAt, ...(previous.origin !== undefined && { origin: previous.origin }) };
   }, context);
   return ok(`updated ${id} (${widget.body.kind}, ${widget.size})`, "update", id);
@@ -73,10 +74,8 @@ export const createPanelTool = (): ToolRegistration =>
     name: "panel",
     description: [
       "Maintain Widgets the user has accepted on Panel.",
-      "update replaces a kept non-space widget by id. Space revisions must instead be offered with send_to_user using the same id and a new artifact ref for the user to swipe and accept; it cannot add new widgets, which only the user does by swiping a card you offer with send_to_user.",
-      "Pick the body kind by the shape of the information: stat for one number or status, gauge for progress toward a limit, chart for a trend, list for items or a checklist, timeline for dated events, note for a short summary, media for one image, actions for ready-made requests, weather for a city's forecast (only the city; the client fetches and refreshes it by itself once a day, so never update it), space for a small app page the user keeps, one that fetches live data or remembers what the user does (an .html artifact; read the `space` skill of the artifact server first). Never change a widget into or out of a space: its saved state would be lost.",
-      "Offer a panel widget only for information the user will check repeatedly and that changes over time, such as a balance, a progress figure, a countdown, a schedule or a short checklist. Do not offer one for a one-off answer; that is a chat reply or a document. Offer at most one widget per conversation topic, and prefer updating a kept widget over offering a new one.",
-      "To keep a widget fresh, create a daily schedule whose prompt updates it by id. Weather and Space have their own refresh settings. Never create chat schedules to refresh their data.",
+      "update replaces a kept Checklist by id. Read the current items with list and preserve the user's checkmarks for unchanged items.",
+      "Only the user can add Widgets by swiping a card you offer with send_to_user.",
     ].join(" "),
     parameters: PanelParams,
     replay: "safe",

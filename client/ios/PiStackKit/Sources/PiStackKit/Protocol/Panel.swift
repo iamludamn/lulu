@@ -10,12 +10,20 @@ public enum SpaceRefresh: String, Decodable, Sendable {
 
 public struct ScheduledTaskRow: Decodable, Equatable, Identifiable, Sendable {
     public enum State: String, Decodable, Sendable { case active, paused, done, missed, deleted }
+    public enum Mode: String, Decodable, Sendable { case task, reminder }
     public let id: String
     public let name: String
+    public let mode: Mode?
     public let schedule: Schedule
     public let state: State
     public let nextRunAt: Double?
     public let lastRunAt: Double?
+
+    public var upcomingAt: Double? { state == .active ? nextRunAt : nil }
+
+    public static func upcomingFirst(_ rows: [Self]) -> [Self] {
+        rows.sorted { ($0.upcomingAt ?? .infinity) < ($1.upcomingAt ?? .infinity) }
+    }
 }
 
 public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
@@ -132,6 +140,11 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
     public var isSpace: Bool {
         if case .space = body { return true }
         return false
+    }
+
+    public var pendingChecklistCount: Int? {
+        guard case .list(let items) = body, !items.isEmpty, items.allSatisfy({ $0.done != nil }) else { return nil }
+        return items.count(where: { $0.done == false })
     }
 
     public let id: String

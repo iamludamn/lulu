@@ -2,8 +2,10 @@ import { DreamingTriggerDoc } from "../memory/dreaming.js";
 import { DelegateIndex } from "../delegate/runs.js";
 import { REQUEST_TIMEOUT_MS } from "../delegate/limits.js";
 import { requestDeadlineAt } from "../conversation/deadlines.js";
+import { inputSubmission } from "../conversation/input.js";
+import { readSubmission } from "../conversation/submissions.js";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { ConversationId, Harness, ModelRef } from "@earendil-works/pi-durable";
+import type { Conversation, ConversationId, Harness, ModelRef } from "@earendil-works/pi-durable";
 import { DefaultDelegateAgent, DelegateAgents } from "../delegate/agents.js";
 import { RunFamily } from "../delegate/runs.js";
 import { createRun } from "../delegate/spawn.js";
@@ -14,27 +16,36 @@ import { WATCHDOG_MS } from "./schedule.js";
 
 export type AlarmOutcome = { fired: string[]; expired: ConversationId[] };
 
-export function fireSchedules(harness: Harness, parentId: ConversationId, selected: ModelRef, now: number): Promise<AlarmOutcome> {
-  return harness.commit(async (tx) => {
-    const fired = await fireDue(tx, now, (draft, job, runId, scheduledFor) =>
-      createRun(draft, {
-        runId,
-        task: job.prompt,
-        description: job.name,
-        agent: DefaultDelegateAgent,
-        presets: DelegateAgents,
-        token: "cron:" + job.id,
-        scheduleSource: { kind: "schedule_message", scheduleId: job.id, scheduledFor },
-        origin: [],
-        parentId,
-        cwd: null,
-        forkAt: null,
-        model: selected.provider + "/" + selected.modelId,
-        thinkingLevel: null,
-      }),
-    );
-    return { fired, expired: await expireRuns(tx, now) };
-  }, BACKGROUND_CONTEXT);
+export async function fireSchedules(harness: Harness, root: Conversation, selected: ModelRef, now: number): Promise<AlarmOutcome> {
+  const fired = await fireDue(harness, now, async (tx, job, runId, scheduledFor) => {
+    const source = { kind: "schedule_message", scheduleId: job.id, scheduledFor } as const;
+    if (job.mode === "reminder") {
+      return root.submit(tx, inputSubmission({
+        ...source,
+        requestId: "reminder:" + runId,
+        content: "[Scheduled Alarm] This user reminder is due. Send a brief reminder in Chat now using send_to_user with type text. " +
+          "The quoted text describes what to remind the user about; it is not a new request to perform work or create another schedule. " +
+          "Set end_turn to true once you have delivered the reminders due in this turn.\n\nReminder: " + JSON.stringify(job.prompt),
+      }));
+    }
+    await createRun(tx, {
+      runId,
+      task: job.prompt,
+      description: job.name,
+      agent: DefaultDelegateAgent,
+      presets: DelegateAgents,
+      token: "cron:" + job.id,
+      scheduleSource: source,
+      origin: [],
+      parentId: root.id,
+      cwd: null,
+      forkAt: null,
+      model: selected.provider + "/" + selected.modelId,
+      thinkingLevel: null,
+    });
+  });
+  const expired = await harness.commit((tx) => expireRuns(tx, now), BACKGROUND_CONTEXT);
+  return { fired, expired };
 }
 
 export async function abortRuns(harness: Harness, children: readonly ConversationId[]): Promise<void> {
@@ -48,14 +59,27 @@ export async function scheduleEntries(harness: Harness): Promise<ScheduleEntry[]
   const jobs = (await harness.snapshot(CronJobsDoc, BACKGROUND_CONTEXT))?.jobs ?? [];
   const entries: ScheduleEntry[] = [];
   for (const job of jobs) {
-    const run = job.lastRun ? await harness.snapshot(RunFamily, job.lastRun.runId, BACKGROUND_CONTEXT) : undefined;
+    let lastRun: ScheduleEntry["lastRun"] = null;
+    if (job.lastRun !== null) {
+      const { scheduledFor } = job.lastRun;
+      if ("submissionId" in job.lastRun) {
+        const submission = await readSubmission(harness, job.lastRun.submissionId, BACKGROUND_CONTEXT);
+        if (submission !== undefined) {
+          const status = submission.status === "unanswered" ? "failed" : submission.status === "done" ? "done" : "running";
+          lastRun = { scheduledFor, status };
+        }
+      } else {
+        const run = await harness.snapshot(RunFamily, job.lastRun.runId, BACKGROUND_CONTEXT);
+        if (run !== undefined) lastRun = { scheduledFor, status: run.status };
+      }
+    }
     entries.push({
       id: job.id,
       name: job.name,
       schedule: job.schedule,
       state: job.state,
       nextRunAt: job.nextRunAt,
-      lastRun: job.lastRun && run ? { scheduledFor: job.lastRun.scheduledFor, status: run.status } : null,
+      lastRun,
     });
   }
   return entries;
@@ -66,7 +90,7 @@ export async function nextScheduleAlarm(harness: Harness, lastRunAt: number): Pr
   const jobs = (await harness.snapshot(CronJobsDoc, BACKGROUND_CONTEXT))?.jobs ?? [];
   const scheduled = nextAlarm(jobs);
   if (scheduled !== undefined) deadlines.push(scheduled <= lastRunAt ? lastRunAt + 60_000 : scheduled);
-  const cronRuns = new Set(jobs.flatMap((job) => job.lastRun === null ? [] : [job.lastRun.runId]));
+  const cronRuns = new Set(jobs.flatMap((job) => job.lastRun !== null && "runId" in job.lastRun ? [job.lastRun.runId] : []));
   const delegateIds = (await harness.snapshot(DelegateIndex, BACKGROUND_CONTEXT))?.ids ?? [];
   for (const id of new Set([...delegateIds, ...cronRuns])) {
     const run = await harness.snapshot(RunFamily, id, BACKGROUND_CONTEXT);
