@@ -102,7 +102,10 @@ struct NoteGalleryView: View {
                 .glassEffect(.regular, in: .capsule)
                 Button(action: newNote) {
                     Image(systemName: "square.and.pencil")
-                        .font(.body.weight(.medium))
+                        .font(.system(size: 21, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        // Balance the pencil tip against the wider square.
+                        .offset(x: -1, y: -1)
                         .frame(width: Self.toolbarControlHeight, height: Self.toolbarControlHeight)
                         .contentShape(.circle)
                 }
