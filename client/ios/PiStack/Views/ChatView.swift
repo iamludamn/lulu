@@ -5,6 +5,7 @@ import UIKit
 struct ChatView: View {
     let bot: BotSummary
     let store: BotStore
+    let noteStore: NoteStore
     let transcription: VoiceTranscription
     let api: Api
     let containerBottomInset: CGFloat
@@ -34,7 +35,8 @@ struct ChatView: View {
     private var reconnecting: Bool { snapshot.link == .offline }
 
     var body: some View {
-        let rows = chatRows(snapshot, entries: store.transcriptEntries, keeping: keeping)
+        let realRows = chatRows(snapshot, entries: store.transcriptEntries, keeping: keeping)
+        let rows = noteStore.transcript(realRows)
         let start = startIndex(in: rows)
         let firstMessage = firstHistoryRowID(in: rows, startingAt: start)
         let measuredRow = revealAnchor?.id ?? firstMessage
@@ -45,11 +47,19 @@ struct ChatView: View {
                         historyControl(rows, start: start, firstMessage: firstMessage)
                     }
                     ForEach(rows[start...]) { row in
-                        MessageRow(row: row, store: store, botId: bot.id, api: api, expanded: row.id == reading?.id, onRead: { reading = $0 }, onOpen: openArtifact, onKept: onKept) { hold in
-                            if hold { keeping.insert(row.id) }
-                            else { keeping.remove(row.id) }
+                        Group {
+                            if let offer = noteStore.offers[row.id] {
+                                NoteOfferRow(offer: offer, onLand: { onKept(.notes) }, onAccept: { noteStore.accept(offer.id) })
+                            } else {
+                                MessageRow(row: row, store: store, botId: bot.id, api: api, expanded: row.id == reading?.id,
+                                           onRead: { reading = $0 }, onOpen: openArtifact, onKept: onKept,
+                                           onSaveNote: { proposeNote(from: row) }) { hold in
+                                    if hold { keeping.insert(row.id) }
+                                    else { keeping.remove(row.id) }
+                                }
+                                .equatable()
+                            }
                         }
-                            .equatable()
                             .padding(.bottom, row.tail && row.id != rows.last?.id ? 12 : 0)
                             .background {
                                 if row.id == measuredRow {
@@ -61,6 +71,15 @@ struct ChatView: View {
                                 }
                             }
                             .transition(reduceMotion ? .identity : .opacity.animation(.easeOut(duration: 0.2)))
+                    }
+                    if noteStore.generating {
+                        HStack(spacing: 7) {
+                            ProgressView().controlSize(.small)
+                            Text("Lulu 正在整理笔记…").font(.footnote)
+                        }
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 8)
                     }
                     Color.clear.frame(height: 1)
                         .id(Self.bottom)
@@ -97,6 +116,19 @@ struct ChatView: View {
                     guard bottomState.pinned else { return }
                     proxy.scrollTo(Self.bottom, anchor: .bottom)
                 }
+            }
+            .onChange(of: noteStore.offers.count) {
+                followLatest()
+                proxy.scrollTo(Self.bottom, anchor: .bottom)
+            }
+            .task(id: noteStore.requestedRow) {
+                guard let id = noteStore.requestedRow else { return }
+                if let index = rows.firstIndex(where: { $0.id == id }) {
+                    if index < start { floor = id }
+                    await Task.yield()
+                    proxy.scrollTo(id, anchor: .center)
+                }
+                if noteStore.requestedRow == id { noteStore.requestedRow = nil }
             }
             .overlay(alignment: .bottom) {
                 if bottomState.showJump {
@@ -140,7 +172,10 @@ struct ChatView: View {
         .animation(reduceMotion ? nil : .snappy, value: reconnecting)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if snapshot.halt == nil {
-                Composer(draft: $draft, store: store, transcription: transcription, onTranscribed: transcribed, busy: busy, placeholder: placeholder, focused: composing, onSend: send, onVoiceConversation: onVoiceConversation)
+                VStack(alignment: .leading, spacing: 4) {
+                    if let note = noteStore.context { noteReference(note) }
+                    Composer(draft: $draft, store: store, transcription: transcription, onTranscribed: transcribed, busy: busy, placeholder: placeholder, focused: composing, onSend: send, onVoiceConversation: onVoiceConversation)
+                }
                     .background {
                         GeometryReader { proxy in
                             let bottom = max(containerBottomInset, proxy.safeAreaInsets.bottom)
@@ -250,7 +285,7 @@ struct ChatView: View {
         if sendImmediately {
             followLatest()
             sent += 1
-            store.submit(text)
+            submit(text)
         } else {
             draft += text
             composing.wrappedValue = true
@@ -262,8 +297,41 @@ struct ChatView: View {
         guard !text.isEmpty else { return }
         followLatest()
         sent += 1
-        store.submit(text)
+        submit(text)
         draft = ""
+    }
+
+    private func proposeNote(from row: ChatRow) {
+        let realRows = chatRows(snapshot, entries: store.transcriptEntries, keeping: keeping)
+        let anchor = realRows.last { $0.isBubble && !$0.typing }?.id
+        let earlier = noteStore.transcript(realRows).prefix { $0.id != row.id }
+        noteStore.propose(from: row, context: Array(earlier), anchor: anchor)
+    }
+
+    private func submit(_ text: String) {
+        let anchor = store.transcriptEntries.last?.id
+        if noteStore.handleSend(text, anchor: anchor) {
+            composing.wrappedValue = false
+        } else {
+            store.submit(text)
+        }
+    }
+
+    private func noteReference(_ note: Note) -> some View {
+        HStack(spacing: 7) {
+            Label(note.displayTitle, systemImage: "note.text")
+                .font(.footnote.weight(.semibold)).lineLimit(1)
+            Button("移除笔记引用", systemImage: "xmark.circle.fill") { noteStore.attach(nil) }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .glassEffect(.regular)
+        .padding(.horizontal, 18)
+        .frame(maxWidth: 720, alignment: .leading)
+        .frame(maxWidth: .infinity)
     }
 
     private func historyControl(_ rows: [ChatRow], start: Int, firstMessage: String?) -> some View {

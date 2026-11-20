@@ -5,6 +5,7 @@ struct RootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var loading: Bool {
+        if model.mockData { return false }
         if let connection = model.connection {
             let snapshot = connection.store.snapshot
             return snapshot.view == nil && snapshot.link == .connecting && snapshot.halt == nil
@@ -17,7 +18,7 @@ struct RootView: View {
         ZStack {
             if let connection = model.connection {
                 NavigationStack {
-                    HomeView(bot: connection.bot, api: connection.api, store: connection.store)
+                    HomeView(bot: connection.bot, api: connection.api, store: connection.store, mockData: model.mockData)
                         .toolbarVisibility(.hidden, for: .navigationBar)
                 }
                 .id(model.connectionRevision)

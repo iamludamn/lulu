@@ -4,7 +4,7 @@ import SwiftUI
 import UIKit
 
 enum Page: Int, CaseIterable, Identifiable {
-    case panel, chat, assets
+    case panel, chat, notes
 
     var id: Int { rawValue }
 
@@ -12,7 +12,7 @@ enum Page: Int, CaseIterable, Identifiable {
         switch self {
         case .panel: "视图"
         case .chat: "对话"
-        case .assets: "资产"
+        case .notes: "Note"
         }
     }
 }
@@ -21,7 +21,9 @@ struct HomeView: View {
     let bot: BotSummary
     let api: Api
     let store: BotStore
-    @State private var page = Page.panel
+    @State private var page: Page
+    @State private var noteStore: NoteStore
+    @State private var openedNote: UUID?
     @State private var draft: ChatDraft
     @State private var inspector = false
     @State private var landed: Page?
@@ -39,11 +41,13 @@ struct HomeView: View {
     @FocusState private var composing: Bool
     @Environment(\.scenePhase) private var phase
 
-    init(bot: BotSummary, api: Api, store: BotStore) {
+    init(bot: BotSummary, api: Api, store: BotStore, mockData: Bool = false) {
         self.bot = bot
         self.api = api
         self.store = store
         _draft = State(initialValue: ChatDraft(botId: bot.id))
+        _page = State(initialValue: mockData ? .chat : .panel)
+        _noteStore = State(initialValue: NoteStore(mockData: mockData))
     }
 
     var body: some View {
@@ -110,10 +114,24 @@ struct HomeView: View {
                 .ignoresSafeArea()
             }
         }
+        .allowsHitTesting(openedNote == nil)
+        .accessibilityHidden(openedNote != nil)
+        .overlay {
+            if let id = openedNote, let note = noteStore.notes.first(where: { $0.id == id }) {
+                NoteDetailView(note: Binding(get: { noteStore.notes.first { $0.id == id } ?? note }, set: noteStore.update),
+                               files: noteFiles, botId: bot.id, api: api,
+                               onDiscuss: discuss, onSource: showNoteSource, onClose: { openedNote = nil }, newNote: newNote)
+                    .id(id)
+            }
+        }
         .artifactViewer(botId: bot.id, api: api, panel: store.snapshot.panel)
         .sheet(isPresented: $inspector) { InspectorView(store: store, botId: bot.id, api: api) }
         .sensoryFeedback(.selection, trigger: page)
-        .task { store.start(); await SpacePush.shared.connect(api: api, botId: bot.id) }
+        .task {
+            guard !noteStore.mockData else { return }
+            store.start()
+            await SpacePush.shared.connect(api: api, botId: bot.id)
+        }
         .task(id: voiceOpen) {
             if voiceOpen { await voice.start(store) }
         }
@@ -125,6 +143,7 @@ struct HomeView: View {
             readerFrame = nil
         }
         .onChange(of: phase) { _, next in
+            guard !noteStore.mockData else { return }
             if next == .active {
                 store.start()
             } else if next == .background {
@@ -150,31 +169,50 @@ struct HomeView: View {
     private func pageContent(_ item: Page) -> some View {
         switch item {
         case .panel:
-            if store.snapshot.view == nil && store.snapshot.link == .offline {
+            if !noteStore.mockData && store.snapshot.view == nil && store.snapshot.link == .offline {
                 connectionUnavailable
             } else {
                 PanelView(widgets: store.snapshot.panel.list, spaceUpdates: store.snapshot.panel.spaceUpdates, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onCheck: store.check, onCompose: fadeToChat)
             }
         case .chat:
-            ChatView(bot: bot, store: store, transcription: transcription, api: api, containerBottomInset: bottomInset, draft: Binding(get: { draft.text }, set: { draft.text = $0 }), composing: $composing, onKept: land, onVoiceConversation: {
+            ChatView(bot: bot, store: store, noteStore: noteStore, transcription: transcription, api: api, containerBottomInset: bottomInset, draft: Binding(get: { draft.text }, set: { draft.text = $0 }), composing: $composing, onKept: land, onVoiceConversation: {
+                guard !noteStore.mockData else { return }
                 composing = false
                 voiceOpen = true
             },
                      reading: $reading, onReaderFrame: { readerFrame = $0 })
-        case .assets:
-            if store.snapshot.view == nil && store.snapshot.link == .offline {
-                connectionUnavailable
-            } else {
-                AssetsView(items: store.snapshot.assets, botId: bot.id, api: api, onDrop: store.drop, onOrder: store.reorderAssets)
-            }
+        case .notes:
+            NoteGalleryView(notes: noteStore.notes, files: noteFiles, botId: bot.id, api: api, bottomInset: bottomInset,
+                            onOpenNote: { openedNote = $0 }, newNote: newNote, onDropFile: store.drop)
         }
+    }
+
+    private var noteFiles: [NoteFile] {
+        noteStore.mockData ? NoteFile.fixtures(noteStore) : store.snapshot.assets.map(NoteFile.init(asset:))
+    }
+
+    private func newNote() {
+        openedNote = noteStore.create()
+    }
+
+    private func discuss(_ id: UUID) {
+        noteStore.attach(id)
+        noteStore.requestedRow = nil
+        openedNote = nil
+        fadeToChat()
+    }
+
+    private func showNoteSource(_ id: String) {
+        noteStore.requestedRow = id
+        openedNote = nil
+        fadeToChat()
     }
 
     private var connectionUnavailable: some View {
         ContentUnavailableView {
             Label("暂时无法连接 lulu", systemImage: "wifi.exclamationmark")
         } description: {
-            Text("连接恢复后会自动加载你的视图和资产。")
+            Text("连接恢复后会自动加载你的视图。")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -302,7 +340,8 @@ struct HomeView: View {
 
     private func send(_ text: String) {
         selectPage(.chat)
-        store.submit(text)
+        let latest = store.transcriptEntries.last?.id
+        if !noteStore.handleSend(text, anchor: latest) { store.submit(text) }
     }
 
     private func compose(_ text: String) {
