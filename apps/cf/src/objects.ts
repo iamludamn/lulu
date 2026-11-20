@@ -5,6 +5,7 @@ import { MemoryObject } from "@lulu/core/memory/object.js";
 import { ArtifactObject } from "@lulu/core/artifact/object.js";
 import { durableHost } from "./host.js";
 import { createMemoryFiles } from "./memory-files.js";
+import { cronRegistration } from "./cron.js";
 
 export class Bot extends DurableObject<Env> {
   readonly #session: BotSession;
@@ -12,7 +13,7 @@ export class Bot extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.#session = new BotSession(durableHost(ctx, env));
+    this.#session = new BotSession(durableHost(ctx, env, cronRegistration(env)));
     void ctx.blockConcurrencyWhile(async () => {
       await this.#session.start(() => openDurableObjectSqliteStorage(ctx.storage));
     }).then(() => this.#session.recover());
@@ -27,6 +28,11 @@ export class Bot extends DurableObject<Env> {
     const cold = this.#cold;
     this.#cold = false;
     return this.#session.alarm(info?.scheduledTime, cold);
+  }
+
+  runCron(cron: string, scheduledAt: number): Promise<void> {
+    this.#cold = false;
+    return this.#session.runCron(cron, scheduledAt);
   }
 
   override webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {

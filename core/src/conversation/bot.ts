@@ -22,7 +22,10 @@ import { ChatDoc, trackProgress, trackSnapshot } from "./progress.js";
 import type { EpisodeSource } from "../memory/doc.js";
 import { episodesOf } from "../memory/episodes.js";
 import type { McpStatus, ModelRef, SessionProgress } from "../protocol/contract.js";
-import { abortRuns, fireSchedules, nextScheduleAlarm, scheduleEntries } from "../cron/alarm.js";
+import { abortRuns, dispatchSchedules, fireSchedules, nextScheduleAlarm, scheduleEntries } from "../cron/alarm.js";
+import { cronDueAt } from "../cron/engine.js";
+import { CronTriggerRegistration } from "../cron/registration.js";
+import type { ScheduledJob } from "../cron/schedule.js";
 import { BotAlarm, RECOVERY_ALARM_DELAY_MS } from "./alarm.js";
 import { CRON_KIND } from "../cron/doc.js";
 import { withScheduleOverview } from "../cron/overview.js";
@@ -98,6 +101,7 @@ export class BotSession {
   #dirty = false;
   #spaceWork: Promise<void> | undefined;
   readonly #alarm: BotAlarm;
+  readonly #cron: CronTriggerRegistration | undefined;
   #alarmRetryAt = 0;
   #lastScheduleRunAt = 0;
   #prompts: Promise<void> = Promise.resolve();
@@ -120,6 +124,7 @@ export class BotSession {
   constructor(host: DurableHost) {
     this.#host = host;
     this.#alarm = new BotAlarm(host.alarm, () => this.#harness.wake(), () => this.#applicationAlarm());
+    if (host.cronRegistration !== undefined) this.#cron = new CronTriggerRegistration(host.cronRegistration, host.storage);
     this.#asr = new AsrSessions(host, (socket, event) => this.#send(socket, { type: "voice", event }));
     this.#voice = new VoiceSession({
       host,
@@ -144,6 +149,7 @@ export class BotSession {
 
   recover(): void {
     void this.#reconcileDreaming();
+    this.#cronChanged();
     this.#mcpReady = this.#alarm.run(async () => {
       try {
         await this.#reconnectMcp();
@@ -160,6 +166,7 @@ export class BotSession {
   }
 
   async #initialize(storage: Storage): Promise<void> {
+    await this.#cron?.load();
     this.#models = createChatModels(this.#host.env);
     const { options, mcp, host, registry, botServers } = await createChatHarnessOptions(this.#host, this.#models);
     this.#botServers = botServers;
@@ -183,6 +190,7 @@ export class BotSession {
     harness.observeCommits({ advance: (publication) => {
       if (publication.changes.some((change) => change.type === "document" && (change.record.kind === PanelDoc.definition.kind || change.record.kind === AssetsDoc.definition.kind))) void this.#reconcileDreaming();
       if (publication.changes.some((change) => change.type === "submission" || (change.type === "document" && ALARM_DOCUMENT_KINDS.has(change.record.kind)))) this.#alarmChanged();
+      if (publication.changes.some((change) => change.type === "document" && change.record.kind === CRON_KIND)) this.#cronChanged();
     }, end: () => {} });
 
     void harness.closed.then((end) => {
@@ -327,6 +335,21 @@ export class BotSession {
       "lulu.alarm.wake_delay_ms": delay,
     };
     return this.#host.telemetry.startSpan({ name: "bot.alarm", attributes }, (span) => this.#alarm.run(() => this.#runAlarm(span)));
+  }
+
+  async runCron(cron: string, scheduledAt: number): Promise<void> {
+    if (this.#cron === undefined) return;
+    if (this.#resumeAfterMcp) await this.#mcpReady;
+    const selected = chatModelRef(this.#host.env, this.#selected);
+    await this.#host.telemetry.startSpan({
+      name: "bot.cron",
+      attributes: { "lulu.bot.id": this.#host.name, "lulu.cron.wake_delay_ms": Date.now() - scheduledAt },
+    }, (span) => this.#alarm.run(async () => {
+      this.#harness.resume();
+      const fired = await dispatchSchedules(this.#harness, this.#root, selected, Date.now(), cronDueAt(cron, scheduledAt));
+      span.setAttributes({ "lulu.cron.fired": fired.length });
+      await this.#reconcileCron();
+    }));
   }
 
   async webSocketMessage(socket: Socket, message: string | ArrayBuffer): Promise<void> {
@@ -720,7 +743,7 @@ export class BotSession {
       await expireRequests(this.#harness, this.#root, now);
       await this.#updateDelivery();
       await recoverMemoryUpdates(this.#harness, this.#root, createMemoryUpdate(this.#host));
-      const outcome = await fireSchedules(this.#harness, this.#root, selected, now);
+      const outcome = await fireSchedules(this.#harness, this.#root, selected, now, this.#localSchedules(now));
       this.#lastScheduleRunAt = now;
       span.setAttributes({ "lulu.cron.fired": outcome.fired.length, "lulu.cron.expired": outcome.expired.length });
       await abortRuns(this.#harness, outcome.expired);
@@ -730,6 +753,8 @@ export class BotSession {
     } catch (error) {
       reportError("Schedule run failed", error);
       this.#alarmRetryAt = Date.now() + RECOVERY_ALARM_DELAY_MS;
+    } finally {
+      await this.#reconcileCron();
     }
   }
 
@@ -740,12 +765,32 @@ export class BotSession {
   async #applicationAlarm(): Promise<number> {
     const now = Date.now();
     const deadlines = await Promise.all([
-      nextScheduleAlarm(this.#harness, this.#lastScheduleRunAt),
+      nextScheduleAlarm(this.#harness, this.#lastScheduleRunAt, this.#localSchedules(now)),
       nextSpaceAlarm(this.#harness),
       nextPushAlarm(this.#harness, this.#host.env),
       nextDeliveryAlarm(this.#harness),
     ]);
-    return Math.min(this.#alarmRetryAt || Infinity, ...deadlines.map((at) => at === undefined ? Infinity : at > now ? at : Math.max(now + 1000, this.#alarmRetryAt)));
+    return Math.min(this.#alarmRetryAt || Infinity, this.#cron?.nextWake(now) ?? Infinity, ...deadlines.map((at) => at === undefined ? Infinity : at > now ? at : Math.max(now + 1000, this.#alarmRetryAt)));
+  }
+
+  #localSchedules(now: number): ((job: ScheduledJob) => boolean) | undefined {
+    const cron = this.#cron;
+    return cron === undefined ? undefined : (job) => cron.isLocal(job, now);
+  }
+
+  #cronChanged(): void {
+    if (this.#cron === undefined) return;
+    void this.#reconcileCron()
+      .then(() => this.#alarm.refresh())
+      .catch((error: unknown) => this.#alarmFailed(error));
+  }
+
+  async #reconcileCron(): Promise<void> {
+    try {
+      await this.#cron?.reconcile(this.#harness);
+    } catch (error) {
+      reportError("Cloudflare Cron registration failed", error);
+    }
   }
 
   #alarmChanged(): void {

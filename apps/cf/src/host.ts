@@ -4,7 +4,7 @@ import { createTelemetry } from "@lulu/core/telemetry/otlp.js";
 import type { ApiHost } from "@lulu/core/server/api.js";
 
 const stringsOf = (env: Env): Environment =>
-  Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+  Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[0] !== "LULU_CRON_API_TOKEN" && typeof entry[1] === "string"));
 
 const kvOf = (kv: KVNamespace): KeyValue => ({
   get: (key) => kv.get(key),
@@ -36,7 +36,7 @@ const connect: DurableHost["connect"] = async (url, headers, handlers) => {
   return { status: response.status, socket: socket as Socket };
 };
 
-export function durableHost(ctx: DurableObjectState, env: Env): DurableHost {
+export function durableHost(ctx: DurableObjectState, env: Env, cronRegistration?: DurableHost["cronRegistration"]): DurableHost {
   const name = ctx.id.name;
   if (name === undefined) throw new Error("Object must be addressed by name");
   const environment = { ...stringsOf(env), LULU_RELEASE: env.CF_VERSION_METADATA?.id };
@@ -64,6 +64,7 @@ export function durableHost(ctx: DurableObjectState, env: Env): DurableHost {
       set: (time) => ctx.storage.setAlarm(time),
       delete: () => ctx.storage.deleteAlarm(),
     },
+    cronRegistration,
     sockets: socketsOf(ctx),
     objects: { BOTS: env.BOTS, MEMORY: env.MEMORY, ARTIFACTS: env.ARTIFACTS },
     kv,
