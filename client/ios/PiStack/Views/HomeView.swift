@@ -286,7 +286,7 @@ struct HomeView: View {
     private func land(_ target: Page) {
         landed = target
         Task {
-            try? await Task.sleep(for: .milliseconds(700))
+            try? await Task.sleep(for: .milliseconds(130))
             if landed == target { landed = nil }
         }
     }
@@ -360,8 +360,8 @@ private struct PageSwitcher: View {
                             }
                         }
                         .contentShape(.capsule)
-                        .scaleEffect(reduceMotion ? 1 : item == landed ? 1.18 : 1 + 0.1 * drawn)
-                        .animation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.55), value: landed)
+                        .scaleEffect(reduceMotion ? 1 : item == landed ? 1.10 : 1 + 0.1 * drawn)
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.13), value: landed)
                         .animation(reduceMotion ? nil : .snappy(duration: 0.15), value: drawn >= 1)
                         .onGeometryChange(for: CGPoint.self) { proxy in
                             let frame = proxy.frame(in: .global)
