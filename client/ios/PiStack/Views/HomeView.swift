@@ -356,6 +356,19 @@ struct HomeView: View {
     }
 }
 
+struct HomePageHeading: View {
+    let title: LocalizedStringKey
+
+    init(_ title: LocalizedStringKey) { self.title = title }
+
+    var body: some View {
+        Text(title)
+            .font(.title.weight(.medium))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
 @Observable
 private final class KeepFeedback {
     private(set) var pull: (page: Page, progress: CGFloat)?

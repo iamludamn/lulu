@@ -21,26 +21,32 @@ struct PanelView: View {
 
     var body: some View {
         ScrollView {
-            if visibleWidgets.isEmpty {
-                empty
-            } else {
-                LazyVStack(spacing: 12) {
-                    ForEach(rows(visibleWidgets), id: \.first!.id) { row in
-                        HStack(alignment: .top, spacing: 12) {
-                            ForEach(row) { widget in
-                                WidgetCard(widget: widget, update: spaceUpdates[widget.id], botId: botId, api: api, onPrompt: onPrompt, onDrop: onDrop, onCheck: { onCheck(widget.id, $0, $1) })
+            VStack(alignment: .leading, spacing: 19) {
+                HomePageHeading("风物")
+                    .frame(maxWidth: 740)
+                    .padding(.horizontal, 18)
+                    .frame(maxWidth: .infinity)
+                if visibleWidgets.isEmpty {
+                    empty
+                } else {
+                    LazyVStack(spacing: 12) {
+                        ForEach(rows(visibleWidgets), id: \.first!.id) { row in
+                            HStack(alignment: .top, spacing: 12) {
+                                ForEach(row) { widget in
+                                    WidgetCard(widget: widget, update: spaceUpdates[widget.id], botId: botId, api: api, onPrompt: onPrompt, onDrop: onDrop, onCheck: { onCheck(widget.id, $0, $1) })
+                                }
+                                if row.count == 1 && row[0].size == .s && !row[0].isSpace { Color.clear.frame(maxWidth: .infinity) }
                             }
-                            if row.count == 1 && row[0].size == .s && !row[0].isSpace { Color.clear.frame(maxWidth: .infinity) }
                         }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 32)
+                    .frame(maxWidth: 720)
+                    .frame(maxWidth: .infinity)
+                    .animation(.snappy, value: visibleWidgets.map(\.id))
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 32)
-                .frame(maxWidth: 720)
-                .frame(maxWidth: .infinity)
-                .animation(.snappy, value: visibleWidgets.map(\.id))
             }
+            .padding(.top, 7)
         }
         .contentMargins(.top, topInset, for: .scrollContent)
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
@@ -73,12 +79,9 @@ struct PanelView: View {
 
     private var empty: some View {
         VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("你的看板").font(.largeTitle.weight(.bold))
-                Text("在对话里告诉 \(botName) 想关注什么。它发来的组件卡片，左滑就能放到这里。")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-            }
+            Text("在对话里告诉 \(botName) 想关注什么。它发来的组件卡片，左滑就能放到这里。")
+                .font(.title3)
+                .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(Self.ideas, id: \.self) { idea in
                     Button { onDraft(idea) } label: {
@@ -89,9 +92,9 @@ struct PanelView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 24)
-        .padding(.top, 40)
+        .frame(maxWidth: 740, alignment: .leading)
+        .padding(.horizontal, 18)
+        .frame(maxWidth: .infinity)
     }
 }
 
