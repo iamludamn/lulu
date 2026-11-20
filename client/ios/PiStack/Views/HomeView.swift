@@ -358,14 +358,18 @@ struct HomeView: View {
 
 struct HomePageHeading: View {
     let title: LocalizedStringKey
-
-    init(_ title: LocalizedStringKey) { self.title = title }
+    let subtitle: LocalizedStringKey
 
     var body: some View {
-        Text(title)
-            .font(.title.weight(.medium))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityAddTraits(.isHeader)
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.largeTitle.bold())
+                .accessibilityAddTraits(.isHeader)
+            Text(subtitle)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
