@@ -7,14 +7,14 @@ import { Type, type Static } from "typebox";
 import { DefaultDelegateAgent, type DelegatePresets } from "./agents.js";
 import { DelegateIndex, RunFamily, formatElapsed, resolveRunId, runIdOf, shortId, updateRun, type RunDoc } from "./runs.js";
 import type { SandboxProvider } from "../sandbox/provider.js";
-import { createRun, entryBeforeCall } from "./spawn.js";
+import { createRun } from "./spawn.js";
 import { DelegateWait } from "./wait.js";
 
 const delegateParams = (presets: DelegatePresets) => Type.Object({
   action: Type.Union([Type.Literal("spawn"), Type.Literal("list"), Type.Literal("send"), Type.Literal("resume"), Type.Literal("close")], {
     description: "spawn | list | send | resume | close",
   }),
-  task: Type.Optional(Type.String({ description: "Task for spawn. The child sees this conversation up to now, then this task" })),
+  task: Type.Optional(Type.String({ description: "Self-contained task for spawn. Include the relevant context, constraints and expected result." })),
   description: Type.Optional(Type.String({ description: "Short display label for spawn, shown in the UI" })),
   id: Type.Optional(Type.String({ description: "Child handle for list/send/resume/close" })),
   message: Type.Optional(Type.String({ description: "Instruction for send, or optional prompt for resume" })),
@@ -43,24 +43,22 @@ async function spawn(api: ToolExecutionApi<DelegateDetails>, args: DelegateArgs,
   const description = args.description?.trim();
   if (!description) return fail("spawn requires description");
   const agentName = args.agent ?? DefaultDelegateAgent;
+  if (!Object.hasOwn(presets, agentName)) return fail("unknown delegate agent: " + agentName);
   const token = args.token?.trim() ? args.token.trim() : null;
   const runId = await runIdOf(String(api.taskId));
   if (!sandboxes) return fail("spawn needs a sandbox, but none is configured");
   const parent = await api.agent(context);
   const created = await api.commit(async (tx) => {
-    const forkAt = await entryBeforeCall(tx, api.conversationId, api.callId);
     const live = await tx.doc(LiveDoc, api.conversationId);
     const run = await createRun(tx, {
       runId,
       task,
       description,
       agent: agentName,
-      presets,
       token,
       origin: live.run?.inputs ?? [],
       parentId: api.conversationId,
       cwd: parent.cwd ?? null,
-      forkAt,
       model: parent.model ? parent.model.provider + "/" + parent.model.modelId : null,
       thinkingLevel: parent.thinkingLevel ?? null,
     });
@@ -170,7 +168,7 @@ export const createDelegateTool = (presets: DelegatePresets, sandboxes: SandboxP
     "Launch a background child agent to handle a complex, multi-step task autonomously, and get its result back automatically.",
     "If a new task needs more than a single tool call, call this tool with action=spawn as your first step.",
     "After spawn, continue other work or end the turn. When the child finishes you are revived automatically with its result.",
-    "Each child sees this conversation up to now and works in a sandbox with the file and command tools that are refused for you. Children share one persistent sandbox; closing a child leaves it untouched.",
+    "Each child starts a fresh conversation. Put the context it needs in the task. Children share one persistent sandbox with file and command tools.",
     "Children cannot message the user: their report comes back to you, and you send any widget or asset card it carries with send_to_user.",
     "Actions: spawn (start a child with a task, returns an id immediately),",
     "list (read-only diagnostic, never a polling loop), send (message a running child),",

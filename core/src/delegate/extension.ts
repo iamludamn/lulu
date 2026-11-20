@@ -1,30 +1,22 @@
-import type { Context } from "@earendil-works/chord/context";
-import { defineExtension, type ToolExecutionApi, type ToolRegistration } from "@earendil-works/pi-durable";
+import { defineExtension, type ToolRegistration } from "@earendil-works/pi-durable";
 import { SEND_TOOL } from "../protocol/send.js";
 import { CODING_TOOLS } from "../sandbox/extension.js";
-import { SandboxDoc } from "../sandbox/doc.js";
 import type { SandboxProvider } from "../sandbox/provider.js";
 import type { DelegatePresets } from "./agents.js";
-import { RunFamily, type RunDoc } from "./runs.js";
+import { findDelegateRun, type RunDoc } from "./runs.js";
 import { createDelegateTool } from "./tool.js";
-import { DelegateToolSection, DelegatingSection } from "./prompt.js";
+import { DelegateToolSection, delegatingSection } from "./prompt.js";
 import { DelegateAnchor } from "./anchor.js";
 import { DelegateWait } from "./wait.js";
 import { RENAMED_TASKS, STORED_EXTENSION_NAMES, withPreviousTaskName } from "../durable-names.js";
 
 const CHILD_REFUSED = ["delegate", SEND_TOOL, "panel"];
 
-async function childRun(api: ToolExecutionApi, context: Context): Promise<RunDoc | undefined> {
-  const key = (await api.snapshot(SandboxDoc, api.conversationId, context))?.key;
-  const run = key ? await api.snapshot(RunFamily, key, context) : undefined;
-  return run?.conversationId === api.conversationId ? run : undefined;
-}
-
 function guard(refusal: (run: RunDoc | undefined, name: string) => string | undefined) {
   return (tool: ToolRegistration): ToolRegistration => ({
     ...tool,
     execute: async (args, api, context) => {
-      const refused = refusal(await childRun(api, context), tool.name);
+      const refused = refusal(await findDelegateRun(api, api.conversationId, context), tool.name);
       return refused === undefined ? tool.execute(args, api, context) : { output: [{ type: "text", text: refused }], isError: true };
     },
   });
@@ -42,7 +34,7 @@ export const createDelegateExtension = (presets: DelegatePresets, sandboxes: San
   defineExtension({
     name: STORED_EXTENSION_NAMES.delegate,
     tools: [createDelegateTool(presets, sandboxes)],
-    sections: [DelegateToolSection, DelegatingSection],
+    sections: [DelegateToolSection, delegatingSection(presets)],
     tasks: [
       ...withPreviousTaskName(DelegateAnchor, RENAMED_TASKS.delegateAnchor.previous),
       ...withPreviousTaskName(DelegateWait, RENAMED_TASKS.delegateWait.previous),

@@ -1,6 +1,8 @@
+import type { Context } from "@earendil-works/chord/context";
 import { defineDoc, defineDocFamily } from "@earendil-works/pi-durable";
-import type { ConversationId, SubmissionId, TaskId, Tx } from "@earendil-works/pi-durable";
+import type { ConversationId, DocumentReader, SubmissionId, TaskId, Tx } from "@earendil-works/pi-durable";
 import { STORED_DOC_KINDS } from "../durable-names.js";
+import { SandboxDoc } from "../sandbox/doc.js";
 
 export type RunStatus = "running" | "done" | "failed" | "closed";
 
@@ -84,6 +86,12 @@ export const DelegateIndex = defineDoc<{ ids: string[] }>({
   checkpointWhen: () => false,
   initial: () => ({ ids: [] }),
 });
+
+export async function findDelegateRun(read: Pick<DocumentReader, "snapshot">, conversationId: ConversationId, context: Context): Promise<RunDoc | undefined> {
+  const key = (await read.snapshot(SandboxDoc, conversationId, context))?.key;
+  const run = key ? await read.snapshot(RunFamily, key, context) : undefined;
+  return run?.conversationId === conversationId ? run : undefined;
+}
 
 export function shortId(id: string): string {
   return id.slice(0, 8);

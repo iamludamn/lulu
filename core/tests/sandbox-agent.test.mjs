@@ -1,14 +1,104 @@
 import { test } from 'node:test';
+import { setImmediate } from 'node:timers/promises';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import assert from 'node:assert/strict';
-import { createSession, MemoryStorage } from '@earendil-works/pi-durable';
+import { AssistantEntry, createSession, Harness, MemoryStorage, ProviderDoc, UserEntry } from '@earendil-works/pi-durable';
 import { createBashTool } from '@earendil-works/pi-durable/tools';
 import { NOOP_TELEMETRY_CONTEXT } from '@earendil-works/pi-telemetry';
+import { BotSession } from '../dist/conversation/bot.js';
+import { RunFamily } from '../dist/delegate/runs.js';
 import { SandboxDoc } from '../dist/sandbox/doc.js';
 import { createEnvironmentExtension } from '../dist/sandbox/extension.js';
 import { createE2bProvider } from '../dist/sandbox/e2b/provider.js';
 
 const context = BACKGROUND_CONTEXT;
+
+test('delegate spawn starts with fresh context and keeps sandbox tools out of the main loop', async t => {
+  const codingTools = ['read', 'write', 'edit', 'bash'];
+  const open = t.mock.method(Harness, 'open');
+  const bot = new BotSession({
+    name: 'test',
+    env: {
+      SANDBOX_BACKEND: 'e2b',
+      S3_ENDPOINT: 'https://s3.example.test',
+      S3_BUCKET: 'test',
+      S3_ACCESS_KEY_ID: 'test',
+      S3_SECRET_ACCESS_KEY: 'test',
+    },
+    telemetry: NOOP_TELEMETRY_CONTEXT,
+    storage: { get: async () => undefined },
+    alarm: { get: async () => null, set: async () => {}, delete: async () => {} },
+    sockets: { all: () => [] },
+    sandbox: async () => { throw new Error('unexpected sandbox use'); },
+    abort: reason => assert.fail(reason),
+  });
+  await bot.start(() => new MemoryStorage());
+  const harness = await open.mock.calls[0].result;
+  t.after(async () => {
+    await setImmediate(); // Let the bot finish alarm refreshes triggered by the test commits.
+    await harness.close(context);
+  });
+  const root = await harness.root(context);
+  const main = await root.agent(context);
+  assert.ok(main.extensions.every(extension => extension.name !== 'coding-tools'));
+  const delegate = main.tools.find(tool => tool.name === 'delegate');
+  assert.ok(delegate);
+  assert.ok(main.tools.some(tool => tool.name === 'send_to_user'));
+  assert.deepEqual([...main.tools, ...main.callable].filter(tool => codingTools.includes(tool.name)).map(tool => tool.name), []);
+
+  const args = { action: 'spawn', task: 'Read a file', description: 'Read a file' };
+  const callId = 'delegate-spawn';
+  await harness.commit(async tx => {
+    await tx.appendEntry(UserEntry, root.id, { model: [{ role: 'user', content: 'Parent history', timestamp: 1 }] });
+    await tx.appendEntry(AssistantEntry, root.id, {
+      model: [{ role: 'assistant', content: [{ type: 'toolCall', id: callId, name: 'delegate', arguments: args }] }],
+    });
+  }, context);
+  const result = await delegate.execute(args, {
+    conversationId: root.id,
+    callId,
+    taskId: 100,
+    agent: () => root.agent(context),
+    snapshot: harness.snapshot.bind(harness),
+    commit: harness.commit.bind(harness),
+    details() {},
+    output() {},
+  }, context);
+  assert.equal(result.details?.action, 'spawn', JSON.stringify(result));
+  const run = await harness.snapshot(RunFamily, result.details.id, context);
+  const child = await harness.conversation(run.conversationId, context);
+  assert.deepEqual((await child.context(context)).messages, []);
+  const parentProvider = await harness.snapshot(ProviderDoc, root.id, context);
+  const childProvider = await harness.snapshot(ProviderDoc, child.id, context);
+  assert.notEqual(childProvider.sessionId, parentProvider.sessionId);
+  const wait = await harness.getTask(run.waitTaskId, context);
+  assert.equal(wait.input.task, 'Read a file');
+  assert.equal(wait.input.prompt, undefined);
+  const agent = await child.agent(context);
+  assert.deepEqual(agent.tools.filter(tool => codingTools.includes(tool.name)).map(tool => tool.name), codingTools);
+
+  const render = (conversation, agent, key, shown = {}) => agent.sections.find(section => section.key === key).render({
+    conversationId: conversation.id,
+    agent,
+    shown,
+    read: harness,
+  }, context);
+  const preamble = await render(root, main, 'preamble');
+  const delegating = await render(root, main, 'delegating');
+  assert.match(preamble, /send_to_user/);
+  assert.match(delegating, /You have no sandbox/);
+  const previousSections = { preamble, delegating };
+  assert.equal(await render(child, agent, 'preamble', previousSections), undefined);
+  assert.equal(await render(child, agent, 'delegate_tool', previousSections), undefined);
+  const childInstructions = await render(child, agent, 'delegating', previousSections);
+  assert.match(childInstructions, /shared sandbox/);
+  assert.match(childInstructions, /You are a worker agent/);
+  assert.doesNotMatch(childInstructions, /You have no sandbox|delegate action=spawn/);
+  assert.match(await render(root, main, 'artifact'), /send_to_user asset card/);
+  const childArtifact = await render(child, agent, 'artifact');
+  assert.match(childArtifact, /reference in your final reply/);
+  assert.doesNotMatch(childArtifact, /send_to_user/);
+});
 
 async function exerciseBash(provider) {
   const session = createSession(new MemoryStorage());

@@ -1,5 +1,7 @@
 # Delegation and scheduling
 
+Each new delegate starts a fresh conversation. The task supplies the context the child needs. Resuming a delegate continues its existing conversation.
+
 ## Core APIs
 
 | API | Purpose |

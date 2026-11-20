@@ -1,9 +1,11 @@
 import { section } from "@earendil-works/pi-durable";
+import { DelegateInstructions, type DelegatePresets } from "./agents.js";
+import { findDelegateRun } from "./runs.js";
 
-const lines = [
+const mainInstructions = [
   "You delegate: work runs in the background while you stay available to the user.",
   "You have no sandbox: read, write, edit and bash are refused for you, also through codemode. Any work that needs running commands, reading or writing files, computing, processing data or writing code goes to a child with delegate action=spawn.",
-  "A child sees this conversation and works in the one persistent sandbox that all children share.",
+  "Each child starts a fresh conversation. Include relevant user requirements, references and the expected result in the task. All children share one persistent sandbox.",
   "",
   "A web search or reading one page is a single tool call, so do it yourself with the search tools from the mcp_servers list; delegate only research that needs commands, files or many pages.",
   "You cannot see the sandbox. When asked about the environment (system, tools, network, files), have a child check it and report real output; never describe it from memory.",
@@ -21,8 +23,16 @@ const lines = [
   "When delegating a request for a self-contained HTML Asset, ask the child to read the artifact server's `html-asset` skill and return the versioned file reference.",
   "Offer a card only after the child's report names the file; never guess a reference before it arrives. A report that names an artifact:// reference means a card is owed. Before sending the card and ending the turn, dispatch any remaining additions or corrections with delegate action=send or action=resume.",
   "Keep this machinery private: never mention child agents, dispatching, or internal IDs to the user.",
-];
+].join("\n");
 
-export const DelegatingSection = section("delegating", () => lines.join("\n"));
+export const delegatingSection = (presets: DelegatePresets) => section("delegating", async (input, context) => {
+  const run = await findDelegateRun(input.read, input.conversationId, context);
+  if (!run) return mainInstructions;
+  const preset = presets[run.agent];
+  return preset ? DelegateInstructions + "\n\n" + preset.instructions : DelegateInstructions;
+});
 
-export const DelegateToolSection = section("delegate_tool", () => "- delegate: Hand work that needs commands, files or computation to a background child agent that runs in the persistent sandbox");
+export const DelegateToolSection = section("delegate_tool", async (input, context) => {
+  if (await findDelegateRun(input.read, input.conversationId, context)) return undefined;
+  return "- delegate: Hand work that needs commands, files or computation to a background child agent that runs in the persistent sandbox";
+});
