@@ -4,6 +4,8 @@ struct Cache: Codable, Sendable {
     let view: ConversationView
     let progress: SessionProgress
     var state: Data? = nil
+    // Older caches can contain the server's initial placeholder layout.
+    var layoutConfirmed: Bool? = nil
 
     struct Surfaces: Decodable {
         let panel: PanelState?
@@ -34,6 +36,6 @@ struct Cache: Codable, Sendable {
         var docs = view.docs
         docs[liveDoc] = nil
         return Cache(view: ConversationView(entries: view.entries, docs: docs, before: view.before, conversation: view.conversation),
-                     progress: progress, state: state)
+                     progress: progress, state: state, layoutConfirmed: layoutConfirmed)
     }
 }

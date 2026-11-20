@@ -31,7 +31,6 @@ struct ChatView: View {
 
     private var snapshot: BotStore.Snapshot { store.snapshot }
     private var busy: Bool { snapshot.link == .online && live(of: snapshot.view).busy }
-    private var reconnecting: Bool { snapshot.link == .offline }
 
     var body: some View {
         let rows = chatRows(snapshot, entries: store.transcriptEntries, keeping: keeping)
@@ -123,21 +122,6 @@ struct ChatView: View {
             .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: bottomState.showJump)
         }
         .overlay { gate(rows) }
-        .overlay(alignment: .top) {
-            if reconnecting && (snapshot.view != nil || !rows.isEmpty) {
-                HStack(spacing: 6) {
-                    Image(systemName: "wifi.exclamationmark")
-                    Text("正在重连…")
-                }
-                .font(.caption.weight(.medium))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .glassEffect(.regular, in: .capsule)
-                .padding(.top, topInset + 4)
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-        .animation(reduceMotion ? nil : .snappy, value: reconnecting)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if snapshot.halt == nil {
                 Composer(draft: $draft, store: store, transcription: transcription, onTranscribed: transcribed, busy: busy, placeholder: placeholder, focused: composing, onSend: send, onVoiceConversation: onVoiceConversation)
@@ -312,7 +296,7 @@ struct ChatView: View {
         if rows.isEmpty {
             if snapshot.view != nil {
                 welcome
-            } else if reconnecting {
+            } else if snapshot.link == .offline {
                 ContentUnavailableView {
                     Label("暂时无法连接 lulu", systemImage: "wifi.exclamationmark")
                 } description: {

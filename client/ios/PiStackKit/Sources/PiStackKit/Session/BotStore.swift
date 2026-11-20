@@ -19,6 +19,7 @@ public final class BotStore {
 
     public struct Snapshot {
         public var hasReceivedState = false
+        public var hasLayout = false
         public var link: Link = .connecting
         public var view: ConversationView?
         public var progress: SessionProgress?
@@ -221,8 +222,10 @@ public final class BotStore {
             let restored = await Task.detached(priority: .userInitiated) { () -> (Cache, (PanelState, [AssetItem])?)? in
                 guard let cache = Cache.load(url)?.offline else { return nil }
                 if let data = cache.state ?? (try? Data(contentsOf: url.appendingPathExtension("state"))),
-                   let surfaces = try? JSONDecoder().decode(Cache.Surfaces.self, from: data) {
-                    return (cache, (surfaces.panel ?? PanelState(), surfaces.assets ?? []))
+                   let surfaces = try? JSONDecoder().decode(Cache.Surfaces.self, from: data),
+                   let panel = surfaces.panel, let assets = surfaces.assets,
+                   cache.layoutConfirmed == true || !panel.order.isEmpty || !assets.isEmpty {
+                    return (cache, (panel, assets))
                 }
                 return (cache, nil)
             }.value
@@ -235,13 +238,14 @@ public final class BotStore {
             if !self.snapshot.hasReceivedState, let (panel, assets) = state {
                 self.snapshot.panel = panel
                 self.snapshot.assets = assets
+                self.snapshot.hasLayout = true
             }
         }
     }
 
     private func persist() {
         guard let view = snapshot.view, let progress = snapshot.progress else { return }
-        let cache = Cache(view: view, progress: progress, state: latestState)
+        let cache = Cache(view: view, progress: progress, state: latestState, layoutConfirmed: snapshot.hasLayout)
         let url = cacheURL
         let previous = saving
         previous?.cancel()
@@ -352,6 +356,7 @@ public final class BotStore {
             snapshot.mcp = mcp
             snapshot.panel = panel
             snapshot.assets = assets
+            snapshot.hasLayout = true
             snapshot.hasReceivedState = true
             deliveryReceipts = view.deliveryReceipts == true
             if view.reset == true || !view.entries.isEmpty {

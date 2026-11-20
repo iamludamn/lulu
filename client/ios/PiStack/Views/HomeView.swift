@@ -150,10 +150,10 @@ struct HomeView: View {
     private func pageContent(_ item: Page) -> some View {
         switch item {
         case .panel:
-            if store.snapshot.view == nil && store.snapshot.link == .offline {
-                connectionUnavailable
-            } else {
+            if store.snapshot.hasLayout {
                 PanelView(widgets: store.snapshot.panel.list, spaceUpdates: store.snapshot.panel.spaceUpdates, botName: bot.name, botId: bot.id, api: api, onPrompt: send, onDraft: compose, onDrop: store.drop, onCheck: store.check, onCompose: fadeToChat)
+            } else if store.snapshot.link == .offline {
+                connectionUnavailable
             }
         case .chat:
             ChatView(bot: bot, store: store, transcription: transcription, api: api, containerBottomInset: bottomInset, draft: Binding(get: { draft.text }, set: { draft.text = $0 }), composing: $composing, onKept: land, onVoiceConversation: {
@@ -162,10 +162,10 @@ struct HomeView: View {
             },
                      reading: $reading, onReaderFrame: { readerFrame = $0 })
         case .assets:
-            if store.snapshot.view == nil && store.snapshot.link == .offline {
-                connectionUnavailable
-            } else {
+            if store.snapshot.hasLayout {
                 AssetsView(items: store.snapshot.assets, botId: bot.id, api: api, onDrop: store.drop, onOrder: store.reorderAssets)
+            } else if store.snapshot.link == .offline {
+                connectionUnavailable
             }
         }
     }

@@ -7,7 +7,7 @@ struct RootView: View {
     private var loading: Bool {
         if let connection = model.connection {
             let snapshot = connection.store.snapshot
-            return snapshot.view == nil && snapshot.link == .connecting && snapshot.halt == nil
+            return !snapshot.hasLayout && snapshot.link == .connecting && snapshot.halt == nil
         }
         return model.api != nil
     }

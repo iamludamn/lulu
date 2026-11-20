@@ -102,8 +102,9 @@ export class BotSession {
   #prompts: Promise<void> = Promise.resolve();
   #dreaming: Promise<void> = Promise.resolve();
   readonly #handshakes = new WeakMap<Socket, Promise<boolean>>();
-    #panel: PanelState = EMPTY_PANEL;
+  #panel: PanelState = EMPTY_PANEL;
   #assets: AssetItem[] = [];
+  #layoutReady = false;
   #chasing: Promise<void> = Promise.resolve();
   #settling: Promise<void> = Promise.resolve();
   readonly #makers = new Map<string, { socket: Socket; make: string }>();
@@ -249,7 +250,7 @@ export class BotSession {
       BACKGROUND_CONTEXT,
       this.#snapshotFailed("progress"),
     );
-    trackSnapshot(
+    const layoutReady = new Promise<void>((resolve, reject) => trackSnapshot(
       harness,
       async (context) => {
         const panel = await withScheduleOverview(harness, (await harness.snapshot(PanelDoc, context)) ?? EMPTY_PANEL, context);
@@ -262,18 +263,23 @@ export class BotSession {
         replace: (_context, value) => {
           this.#panel = value.panel;
           this.#assets = value.assets;
+          this.#layoutReady = true;
+          resolve();
           this.#broadcastState();
         },
       },
       BACKGROUND_CONTEXT,
-      this.#snapshotFailed("layout"),
+      (error) => {
+        this.#snapshotFailed("layout")(error);
+        reject(error);
+      },
       (publication) => publication.changes.some((change) => change.type === "document" && (change.record.kind === PanelDoc.definition.kind || change.record.kind === AssetsDoc.definition.kind || change.record.kind === SpaceRefreshDoc.definition.kind || change.record.kind === CRON_KIND)),
-    );
-    await harness.commit(async (tx) => {
+    ));
+    await Promise.all([layoutReady, harness.commit(async (tx) => {
       const delivery = await tx.doc(DeliveryDoc);
       if (delivery.since !== null) return;
       delivery.since = Math.max(0, ...(await tx.doc(ChatDoc)).messages.map((message) => message.id ?? 0));
-    }, BACKGROUND_CONTEXT);
+    }, BACKGROUND_CONTEXT)]);
   }
 
   #reconcileDreaming(): Promise<void> {
@@ -657,6 +663,7 @@ export class BotSession {
   }
 
   #diffAndSend(): void {
+    if (!this.#layoutReady) return;
     const all = this.#view.value.entries;
     const changed = all.filter((entry) => this.#sentEntries.get(String(entry.id)) !== entry);
     const { view, ...rest } = this.#stateMessage(changed) as Extract<ServerMessage, { type: "state" }>;
