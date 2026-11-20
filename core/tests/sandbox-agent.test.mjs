@@ -18,7 +18,13 @@ test('delegate spawn starts with fresh context and keeps sandbox tools out of th
   const open = t.mock.method(Harness, 'open');
   const bot = new BotSession({
     name: 'test',
-    env: { SANDBOX_BACKEND: 'e2b' },
+    env: {
+      SANDBOX_BACKEND: 'e2b',
+      S3_ENDPOINT: 'https://s3.example.test',
+      S3_BUCKET: 'test',
+      S3_ACCESS_KEY_ID: 'test',
+      S3_SECRET_ACCESS_KEY: 'test',
+    },
     telemetry: NOOP_TELEMETRY_CONTEXT,
     storage: { get: async () => undefined },
     alarm: { get: async () => null, set: async () => {}, delete: async () => {} },
@@ -66,9 +72,32 @@ test('delegate spawn starts with fresh context and keeps sandbox tools out of th
   const childProvider = await harness.snapshot(ProviderDoc, child.id, context);
   assert.notEqual(childProvider.sessionId, parentProvider.sessionId);
   const wait = await harness.getTask(run.waitTaskId, context);
-  assert.ok(wait.input.prompt.endsWith('\nTask:\nRead a file'));
+  assert.equal(wait.input.task, 'Read a file');
+  assert.equal(wait.input.prompt, undefined);
   const agent = await child.agent(context);
   assert.deepEqual(agent.tools.filter(tool => codingTools.includes(tool.name)).map(tool => tool.name), codingTools);
+
+  const render = (conversation, agent, key, shown = {}) => agent.sections.find(section => section.key === key).render({
+    conversationId: conversation.id,
+    agent,
+    shown,
+    read: harness,
+  }, context);
+  const preamble = await render(root, main, 'preamble');
+  const delegating = await render(root, main, 'delegating');
+  assert.match(preamble, /send_to_user/);
+  assert.match(delegating, /You have no sandbox/);
+  const previousSections = { preamble, delegating };
+  assert.equal(await render(child, agent, 'preamble', previousSections), undefined);
+  assert.equal(await render(child, agent, 'delegate_tool', previousSections), undefined);
+  const childInstructions = await render(child, agent, 'delegating', previousSections);
+  assert.match(childInstructions, /shared sandbox/);
+  assert.match(childInstructions, /You are a worker agent/);
+  assert.doesNotMatch(childInstructions, /You have no sandbox|delegate action=spawn/);
+  assert.match(await render(root, main, 'artifact'), /send_to_user asset card/);
+  const childArtifact = await render(child, agent, 'artifact');
+  assert.match(childArtifact, /reference in your final reply/);
+  assert.doesNotMatch(childArtifact, /send_to_user/);
 });
 
 async function exerciseBash(provider) {

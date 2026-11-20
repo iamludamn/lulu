@@ -4,6 +4,7 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
 import { DelegateAgents } from "../delegate/agents.js";
 import { createDelegateExtension } from "../delegate/extension.js";
+import { findDelegateRun } from "../delegate/runs.js";
 import { CronExtension } from "../cron/extension.js";
 import { createPanelExtension } from "../panel/extension.js";
 import { createSendExtension } from "../send/extension.js";
@@ -56,7 +57,10 @@ export const CATALOG: Record<string, (deps: HarnessDeps) => Extension> = {
     defineExtension({
       name: STORED_EXTENSION_NAMES.chat,
       sections: [
-        section("preamble", () => DEFAULT_HARNESS.prompt, { tag: false }),
+        section("preamble", async (input, context) => {
+          if (await findDelegateRun(input.read, input.conversationId, context)) return undefined;
+          return DEFAULT_HARNESS.prompt;
+        }, { tag: false }),
         section("clock", () => `Current time: ${new Date().toISOString().slice(0, 16)}Z.`, { tag: false }),
       ],
     }),

@@ -3,7 +3,6 @@ import { ChatDoc } from "../conversation/progress.js";
 import type { ScheduleMessageSource } from "../conversation/input.js";
 import { configure, type ConversationId, type SubmissionId, type Tx } from "@earendil-works/pi-durable";
 import { SandboxDoc } from "../sandbox/doc.js";
-import { ChildBrief, type DelegatePresets } from "./agents.js";
 import { DelegateAnchor } from "./anchor.js";
 import { DelegateIndex, RunFamily } from "./runs.js";
 import { DelegateWait } from "./wait.js";
@@ -13,7 +12,6 @@ export interface RunStart {
   task: string;
   description: string;
   agent: string;
-  presets: DelegatePresets;
   token: string | null;
   scheduleSource?: ScheduleMessageSource;
   origin: SubmissionId[];
@@ -30,7 +28,6 @@ export async function createRun(tx: Tx, start: RunStart): Promise<{ runId: strin
   if (draft.conversationId !== null) return { runId: start.runId, childId: draft.conversationId };
   const deadlines = (await tx.doc(ChatDoc)).messages.filter((message) => message.id !== null && start.origin.includes(message.id as SubmissionId)).flatMap((message) => message.deadline === undefined ? [] : [message.deadline]);
   draft.deadline = Math.min(Date.now() + REQUEST_TIMEOUT_MS, ...deadlines);
-  const preset = start.presets[start.agent];
   if (!index.ids.includes(start.runId)) index.ids.push(start.runId);
   const anchor = await tx.createTask(DelegateAnchor, { runId: start.runId }, { ownership: { kind: "conversation" }, conversationId: start.parentId, background: true });
   const child = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
@@ -48,7 +45,6 @@ export async function createRun(tx: Tx, start: RunStart): Promise<{ runId: strin
     childId: child.id,
     parentId: start.parentId,
     task: start.task,
-    prompt: [ChildBrief, preset.instructions, "Task:\n" + start.task].join("\n\n"),
     requestId: "delegate:" + start.runId + "#0",
     noticeId: "delegate:notice:" + start.runId + "#0",
     token: start.token,

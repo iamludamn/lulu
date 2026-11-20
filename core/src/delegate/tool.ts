@@ -43,6 +43,7 @@ async function spawn(api: ToolExecutionApi<DelegateDetails>, args: DelegateArgs,
   const description = args.description?.trim();
   if (!description) return fail("spawn requires description");
   const agentName = args.agent ?? DefaultDelegateAgent;
+  if (!Object.hasOwn(presets, agentName)) return fail("unknown delegate agent: " + agentName);
   const token = args.token?.trim() ? args.token.trim() : null;
   const runId = await runIdOf(String(api.taskId));
   if (!sandboxes) return fail("spawn needs a sandbox, but none is configured");
@@ -54,7 +55,6 @@ async function spawn(api: ToolExecutionApi<DelegateDetails>, args: DelegateArgs,
       task,
       description,
       agent: agentName,
-      presets,
       token,
       origin: live.run?.inputs ?? [],
       parentId: api.conversationId,

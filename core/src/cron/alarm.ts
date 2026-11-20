@@ -6,7 +6,7 @@ import { inputSubmission } from "../conversation/input.js";
 import { readSubmission } from "../conversation/submissions.js";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Conversation, ConversationId, Harness, ModelRef } from "@earendil-works/pi-durable";
-import { DefaultDelegateAgent, DelegateAgents } from "../delegate/agents.js";
+import { DefaultDelegateAgent } from "../delegate/agents.js";
 import { RunFamily } from "../delegate/runs.js";
 import { createRun } from "../delegate/spawn.js";
 import type { ScheduleEntry } from "../protocol/contract.js";
@@ -33,7 +33,6 @@ export async function fireSchedules(harness: Harness, root: Conversation, select
       task: job.prompt,
       description: job.name,
       agent: DefaultDelegateAgent,
-      presets: DelegateAgents,
       token: "cron:" + job.id,
       scheduleSource: source,
       origin: [],
