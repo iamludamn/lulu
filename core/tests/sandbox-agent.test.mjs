@@ -35,7 +35,7 @@ test('delegate spawn starts with fresh context and keeps sandbox tools out of th
   await bot.start(() => new MemoryStorage());
   const harness = await open.mock.calls[0].result;
   t.after(async () => {
-    await setImmediate(); // Let the bot finish alarm refreshes triggered by the test commits.
+    await setImmediate();
     await harness.close(context);
   });
   const root = await harness.root(context);

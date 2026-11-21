@@ -67,7 +67,6 @@ struct ChatView: View {
                         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { metrics.bottomMarkerY = $0; updateBottomState() }
                 }
                 .padding(.horizontal, 16)
-                // Include the header gap in the transcript height used for bottom alignment.
                 .padding(.top, topInset + 8)
                 .padding(.bottom, 8)
                 .frame(maxWidth: 720)

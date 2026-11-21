@@ -64,7 +64,6 @@ export function spokenText(sent: readonly SendCall[]): string {
     .join("\n\n");
 }
 
-// An unfinished or failed send is not an actionable offer.
 export function deliveredSentIn(entries: readonly EntryRecord[]): Sent[] {
   const delivered = new Map<string, Result>();
   for (const entry of entries) {

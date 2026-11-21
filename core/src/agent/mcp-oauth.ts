@@ -28,7 +28,6 @@ export async function loginMcp(host: McpStoreHost, name: string, origin: string)
       if (saved?.oauthState !== undefined) await store.save({ ...saved, oauthState: undefined, codeVerifier: undefined });
       let authorizationUrl: string | undefined;
       const oauth = provider(host, origin, config.url, store, (url) => { authorizationUrl = url.href; });
-      // An explicit sign-in opens the provider even if the stored grant can still be refreshed.
       await authorizeMcp(oauth, { serverUrl: config.url, skipRefresh: true, signal: AbortSignal.timeout(15_000) });
       if (authorizationUrl === undefined) throw new Error("The authorization server gave no authorization URL");
       return Response.json({ authorizationUrl });

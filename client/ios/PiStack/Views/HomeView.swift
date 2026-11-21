@@ -93,7 +93,6 @@ struct HomeView: View {
             WindowBottomInsetReader { bottomInset = $0 }
                 .allowsHitTesting(false)
         }
-        // Preserve the reference reader's original canvas while its backdrop covers the screen.
         .overlay {
             if let reading, let text = reading.body, let readerFrame, readerFrame.id == reading.id {
                 GeometryReader { proxy in
@@ -378,7 +377,6 @@ private struct PageSwitcher: View {
     }
 }
 
-/// Preserve the chat page's original reader canvas while drawing its backdrop outside the pager.
 struct ReaderFrame: Equatable {
     let id: String
     let origin: CGRect
@@ -386,7 +384,6 @@ struct ReaderFrame: Equatable {
 }
 
 
-/// Read the container inset from the window so keyboard height is never counted as bottom padding.
 private struct WindowBottomInsetReader: UIViewRepresentable {
     let onChange: (CGFloat) -> Void
 

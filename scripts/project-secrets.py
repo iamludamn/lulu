@@ -34,7 +34,6 @@ def main():
     if check:
         print(f'解密检查通过：{len(secrets)} 个变量；未输出值。')
         return
-    # 显式设置的环境变量优先，便于临时覆盖开发配置。
     child = {**secrets, **os.environ}
     try:
         os.execvpe(args[0], args, child)

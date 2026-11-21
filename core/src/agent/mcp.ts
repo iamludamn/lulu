@@ -55,7 +55,6 @@ export interface McpHost {
 const ENV_REFERENCE = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
 const resolved = new Map<string, string>();
 
-/** A header value: `${VAR}` and `$VAR` read the environment, anything else is literal. */
 function resolveValue(raw: string, label: string, host: McpServices): string {
   const cached = resolved.get(raw);
   if (cached !== undefined) return cached;

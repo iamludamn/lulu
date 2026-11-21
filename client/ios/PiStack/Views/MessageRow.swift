@@ -212,7 +212,6 @@ struct MessageRow: View, Equatable {
         let failed = !row.offerAvailable || row.offerError != nil || row.viewOffer == .superseded
         let enabled = !row.sending && row.offerAvailable && !confirmed && row.viewOffer?.actionable != false
         let showsSending = row.sending && submittingOffer == nil
-        // Keep the card at the same height when retry clears the error.
         let displayedError = if let submittingOffer { submittingOffer.error } else { row.offerError }
         let card = face()
         return SwipeToKeep(

@@ -1,0 +1,18 @@
+[
+  {
+    "path": "client/ios/PiStackKit/Package.swift",
+    "text": "// swift-tools-version: 6.2"
+  },
+  {
+    "path": "scripts/project-secrets.py",
+    "text": "#!/usr/bin/env python3"
+  },
+  {
+    "path": "scripts/t3-ios-doctor.py",
+    "text": "#!/usr/bin/env python3"
+  },
+  {
+    "path": "scripts/test-ios-experience.sh",
+    "text": "#!/bin/sh"
+  }
+]

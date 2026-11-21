@@ -13,7 +13,6 @@ export function mcpAuthStore(host: McpStoreHost) {
   const read = async () => JSON.parse((await storage.readAuth()) ?? "{}") as AuthDoc;
   const write = (doc: AuthDoc) => storage.writeAuth(JSON.stringify(doc));
 
-  // All credential mutations share a lock because the encrypted document contains every server.
   function withLock<T>(run: () => Promise<T>): Promise<T> {
     const next = (authLocks.get(host.storage) ?? Promise.resolve()).then(run);
     authLocks.set(host.storage, next.catch(() => undefined));

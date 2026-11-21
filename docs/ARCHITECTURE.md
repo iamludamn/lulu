@@ -24,3 +24,9 @@ The assistant logic and shared protocol live in [`core/`](../core) and use Pi Du
 | [MCP configuration](../core/src/agent/mcp-store.ts) | Encrypted connection configuration in Workers KV. Bot storage holds OAuth authorization. |
 
 [Deployment](deployment.md) · [Observability](observability.md)
+
+## Source comments
+
+Keep design rationale in [architecture decision records](adr/) and track workarounds in GitHub issues. The `no-comments` check runs as part of `npm run lint` locally and in CI. It uses syntax trees to detect comments in repository JavaScript, TypeScript, HTML, CSS, Go, Swift, Metal, Python, and shell source, including tests and scripts.
+
+The [baseline](../scripts/comment-baseline.json) records each remaining directive by exact text and path. Removing a directive requires removing its matching entry. Pull request CI also checks that entries have only been removed relative to the base branch. Use `npm run lint:comments` to run the rule on its own, or `node scripts/lint-comments.mjs --inventory` to review the parsed comments. The [delete-comment skill](../.agents/skills/delete-comment/SKILL.md) describes the audit and cleanup workflow.

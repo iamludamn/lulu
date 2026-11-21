@@ -16,8 +16,6 @@ export async function fireDue(harness: Pick<Harness, "snapshot" | "commit">, now
   for (const candidate of jobs) {
     if (dueAt(candidate, now) === undefined) continue;
     try {
-      // Pi Durable admits at most one submission per transaction, before any
-      // other table writes. Advance each job atomically with its own dispatch.
       const dispatched = await harness.commit(async (tx) => {
         const job = (await tx.doc(CronJobsDoc)).jobs.find((row) => row.id === candidate.id);
         if (job === undefined) return;
