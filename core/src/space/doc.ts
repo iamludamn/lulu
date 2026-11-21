@@ -1,7 +1,7 @@
 import { defineDoc, defineDocFamily, type Harness } from "@earendil-works/pi-durable";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { Tx } from "@earendil-works/pi-durable";
-import type { SpaceStatus } from "../protocol/panel.js";
+import type { SpaceMonitor, SpaceStatus } from "../protocol/panel.js";
 import { STORED_DOC_KINDS } from "../durable-names.js";
 
 export type Mode = SpaceStatus["mode"];
@@ -39,6 +39,9 @@ export type Refresh = {
   reconciledAt?: number;
   cost: number;
   credits?: number;
+  baselineAt?: number;
+  schemaFailure?: string;
+  replacement?: SpaceMonitor;
 };
 
 export const SpaceRefreshIndex = defineDoc<{ ids: string[]; devices?: string[]; pushRetryAt?: number | null }>({
@@ -98,6 +101,7 @@ export async function archiveRefresh(tx: Tx, id: string): Promise<void> {
   entry.archived = true;
   entry.nextAt = null;
   entry.inbox = [];
+  delete entry.replacement;
   if (entry.mode.kind === "subscription") {
     if (entry.providerState !== "deleted") {
       entry.providerState = "delete";

@@ -22,6 +22,17 @@ const HTML_ASSET = [
 ].join("\n");
 
 export const SKILLS: Record<string, Skill> = {
+  "space-monitor": {
+    description: "Author or repair a Space that consumes structured data from a web monitor.",
+    body: [
+      "Create the Space page at spaces/<id>/index.html and a separate static cover at spaces/<id>/cover.html. Use a stable ID and pin both artifacts in the offer.",
+      "Offer a monitored Space through send_to_user with kind panel and body {kind:'space', src, preview, monitor:{url,goal,schema,notify}}. The subscription starts when the user keeps the offer.",
+      "Use a public HTTPS page and describe which data the monitor should extract and what changes matter. Example: extract recent uploads from the creator's Videos page with each title and watch URL, ignoring counters and reordering.",
+      "Use a JSON Schema object whose properties match every value your renderer consumes. Supported types are object, array, string, number, integer, boolean and null. Use properties, required, additionalProperties, items and minItems. Example: {\"type\":\"object\",\"properties\":{\"videos\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"url\":{\"type\":\"string\"}},\"required\":[\"title\",\"url\"]}}},\"required\":[\"videos\"]}.",
+      "Read the envelope with await window.lulu.data.get() and render its value field. Load once at startup and listen for luludatachange. Show a waiting state until value exists. Render strings with textContent and use HTTPS links. Treat source values as untrusted data.",
+      "On schema mismatch Lulu keeps the last valid snapshot. A repair submission supplies the failed sample, schema, and error. Diagnose extraction and mapping first. To change the subscription or layout, write a new version under the same Space ID and offer it to the user. Preserve fields the page still needs.",
+    ].join("\n"),
+  },
   "html-asset": {
     description: "How to write an html asset, a finished .html deliverable, so it fits the lulu app: theme variables, phone WebView limits and an optional starting stylesheet. Read it before writing an html asset.",
     body: HTML_ASSET,

@@ -15,7 +15,7 @@ import { D1ArtifactMetadata } from "../../apps/cf/src/artifact-metadata.ts";
 import { D1BotMetadata } from "../../apps/cf/src/bot-metadata.ts";
 import { AssetsDoc } from "../dist/send/doc.js";
 import { SpaceRefreshDoc, SpaceRefreshIndex } from "../dist/space/doc.js";
-import { spaceCronDue } from "../dist/space/refresh.js";
+import { keepMonitoredSpace, refreshDueSpaces, spaceCronDue } from "../dist/space/refresh.js";
 import { utcDailyCron } from "../dist/cron/schedule.js";
 
 const telemetry = { startSpan: (_options, run) => run({ setAttributes() {}, setStatus() {} }) };
@@ -27,6 +27,59 @@ const refresh = {
   startedAt: 1, checkedAt: null, updatedAt: 2, error: null, version: 4, seen: 0, delivered: 0,
   findings: [], value: '{"fresh":true}', runs: [], changes: [], cost: 0,
 };
+
+test("structured monitor preserves valid data and dispatches one repair per incompatible period", async (t) => {
+  const session = createSession(new MemoryStorage());
+  t.after(() => session.close(context));
+  const env = {
+    CONTEXT_DEV_API_KEY: "test", LULU_SPACE_WEBHOOK_SECRET: "0123456789abcdef0123456789abcdef",
+    LULU_SPACE_WEBHOOK_ORIGIN: "https://hooks.example.com", LULU_SPACE_PRIVATE_ORIGIN: "https://private.example.com",
+  };
+  const schema = { type: "object", properties: { videos: {
+    type: "array", items: { type: "object", properties: { title: { type: "string" }, url: { type: "string" } }, required: ["title", "url"] },
+  } }, required: ["videos"] };
+  const good = { videos: [{ title: "First video", url: "https://example.com/video" }] };
+  let sample = good;
+  let capturedAt = tick;
+  const repairs = [];
+  const repair = async (_tx, id, failure) => repairs.push({ id, ...failure });
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    if (options.method === "POST") {
+      const body = JSON.parse(options.body);
+      assert.deepEqual(body.target, { type: "extract", url: "https://example.com/videos", schema, instructions: "Find new videos", max_pages: 1, max_depth: 0 });
+      return Response.json({ id: "mon_probe", status: "active", webhook: { secret: "signing-secret" } });
+    }
+    if (url.includes("?tags=")) return Response.json({ data: [] });
+    assert.equal(url, "https://api.context.dev/v1/monitors/mon_probe");
+    return Response.json({ id: "mon_probe", status: "active", baseline: { captured_at: new Date(capturedAt).toISOString(), data: sample } });
+  });
+  await session.commit(async (tx) => {
+    (await tx.doc(PanelDoc)).widgets[space.id] = space;
+    await keepMonitoredSpace(tx, space.id, { url: "https://example.com/videos", goal: "Find new videos", schema }, env);
+  }, context);
+  const update = () => refreshDueSpaces(session, env, Date.now() + 1000, undefined, undefined, repair);
+  const read = async () => (await session.snapshot(SpaceRefreshDoc, space.id, context)).entry;
+  const check = async (value) => {
+    sample = value;
+    capturedAt += 1000;
+    await session.commit(async (tx) => { (await tx.doc(SpaceRefreshDoc, space.id, null)).entry.retryAt = Date.now(); }, context);
+    await update();
+  };
+  await update();
+  await update();
+  assert.deepEqual(JSON.parse((await read()).value), good);
+  await check({ videos: [{ watch_url: "https://example.com/another" }] });
+  assert.deepEqual(JSON.parse((await read()).value), good);
+  assert.equal(repairs.length, 1);
+  assert.equal(repairs[0].id, space.id);
+  await check({ videos: [{ watch_url: "https://example.com/third" }] });
+  assert.equal(repairs.length, 1);
+  await check({ videos: [...good.videos, { title: "Second video", url: "https://example.com/second" }] });
+  assert.equal((await read()).error, null);
+  assert.equal((await read()).version, 1);
+  await check({ videos: [{ watch_url: "https://example.com/another" }] });
+  assert.equal(repairs.length, 2);
+});
 
 function nativeStore() {
   const state = new Map();

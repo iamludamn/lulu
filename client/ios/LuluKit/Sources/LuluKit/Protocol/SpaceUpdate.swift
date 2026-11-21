@@ -6,11 +6,13 @@ public struct SpaceUpdate: Codable, Equatable, Sendable {
             public let kind: String
             public var query: String?
             public var urls: [String]?
+            public var url: String?
 
-            public init(kind: String, query: String? = nil, urls: [String]? = nil) {
+            public init(kind: String, query: String? = nil, urls: [String]? = nil, url: String? = nil) {
                 self.kind = kind
                 self.query = query
                 self.urls = urls
+                self.url = url
             }
         }
 
