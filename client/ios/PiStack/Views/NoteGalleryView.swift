@@ -308,7 +308,7 @@ struct NoteDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("带回对话", systemImage: "bubble.left") { onDiscuss(value.id) }
+                Button("带回对话", systemImage: "arrow.turn.down.left") { onDiscuss(value.id) }
             }
             ToolbarItemGroup(placement: .bottomBar) {
                 Button("添加清单项", systemImage: "checklist") {
