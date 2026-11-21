@@ -21,7 +21,7 @@ The assistant logic and shared protocol live in [`core/`](../core) and use Pi Du
 | --- | --- |
 | [Bot](../core/src/conversation/bot.ts) | One Durable Object named `main`. Pi Durable SQLite owns the transcript, submissions, task graph, live socket state, delegated runs, and sandbox lifecycle. |
 | [Memory](memory.md) | Published memory files, background processing, and request-scoped retrieval. |
-| [Bot data](../core/src/conversation/bot-data.ts) | Panel, accepted Assets, Space refresh state, and user schedules live in the object bucket. The Bot keeps transaction-local copies and recovers them from the bucket when its local copies are missing. |
+| [Bot data](../core/src/conversation/bot-data.ts) | D1 stores Panel, accepted Asset references, Space refresh metadata, and schedules. The Bot keeps transaction-local copies and can restore them from D1. The bucket holds the derived startup snapshot. |
 | [Artifact Worker](../apps/cf/src/artifacts.ts) | File bodies in the object bucket. D1 transactions own version metadata, upload reservations, request IDs, and quota. Pinned file references retain their original object keys. |
 | [Cloudflare Cron](execution.md) | Wakes the Worker at registered times. The Worker reads the saved schedules and invokes the existing Bot for due work. |
 | [MCP configuration](../core/src/agent/mcp-store.ts) | Encrypted connection configuration in Workers KV. Bot storage holds OAuth authorization. |
@@ -32,7 +32,7 @@ flowchart LR
     Worker(Cloudflare Worker)
     Cron(Cloudflare Cron)
     Artifact(Artifact Worker)
-    ArtifactDB(D1 metadata)
+    Metadata(D1 metadata)
     Bucket(Object storage)
     subgraph Bot[Bot DO main]
         Main(Main conversation)
@@ -47,12 +47,14 @@ flowchart LR
     Native -->|WebSocket via Worker| Main
     Cron --> Worker
     Worker -->|Due jobs and external events| Main
-    Worker -->|Saved data| Bucket
+    Worker -->|Startup snapshot| Bucket
+    Worker -->|Space and schedule metadata| Metadata
     Worker --> Artifact
-    Main -->|Persist selected app data| Bucket
+    Main -->|Persist selected app data| Metadata
+    Main -->|Publish startup snapshot| Bucket
     Main -->|Artifact tools| Artifact
     Artifact --> Bucket
-    Artifact --> ArtifactDB
+    Artifact --> Metadata
     Child -->|Execute sandbox tools| Sandbox
     Main --> Memory
 ```

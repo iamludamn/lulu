@@ -149,9 +149,9 @@ async function route(request: Request, host: ApiHost, pathname: string): Promise
   if (rest === "/spaces/refresh" || rest === "/spaces/device") {
     if (rest === "/spaces/refresh" && request.method === "GET") {
       try {
-        const stored = await host.data?.read();
+        const id = new URL(request.url).searchParams.get("id") ?? "";
+        const stored = await host.data?.read({ space: id });
         if (stored !== undefined) {
-          const id = new URL(request.url).searchParams.get("id") ?? "";
           return spaceRefreshResponse(id, savedPanel(stored), savedSpace(stored, id), host.env);
         }
       } catch (error) { return spaceError(error); }

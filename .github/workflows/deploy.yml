@@ -34,7 +34,7 @@ jobs:
           if ! jq -e 'any(.[]; .name == "lulu-artifacts")' <<< "$d1_databases" > /dev/null; then
             npm exec -- wrangler d1 create lulu-artifacts --update-config=false
           fi
-          npm exec -- wrangler d1 migrations apply ARTIFACT_METADATA --remote
+          npm exec -- wrangler d1 migrations apply LULU_METADATA --remote
           if [[ -z "$LULU_OBSERVABILITY_TOKEN" ]]; then
             npm exec -- wrangler deploy
             exit

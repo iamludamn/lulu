@@ -3,8 +3,10 @@ import type { DurableHost, DurableSockets, Environment, KeyValue, Socket } from 
 import { createTelemetry } from "@lulu/core/telemetry/otlp.js";
 import type { ApiHost } from "@lulu/core/server/api.js";
 import { objectStore } from "@lulu/core/artifact/s3.js";
-import { startupData, type BotData, type BotDataStore, type StartupData } from "@lulu/core/conversation/bot-data.js";
+import { startupData, type BotData, type BotDataRead, type BotDataStore, type StartupData } from "@lulu/core/conversation/bot-data.js";
+import { STORED_DOC_KINDS } from "@lulu/core/durable-names.js";
 import type { TelemetryContext } from "@earendil-works/pi-telemetry";
+import { D1BotMetadata } from "./bot-metadata.js";
 
 export const stringsOf = (env: Env): Environment =>
   Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[0] !== "LULU_CRON_API_TOKEN" && typeof entry[1] === "string"));
@@ -13,19 +15,34 @@ const artifactsOf = (ctx: Pick<ExecutionContext, "exports">): DurableHost["objec
   getByName: (name) => ctx.exports.ArtifactWorker({ props: { name } }),
 });
 
-export function botDataOf(env: Environment, telemetry: TelemetryContext, name: string): BotDataStore | undefined {
-  const store = objectStore(env, telemetry);
-  if (store === undefined) return;
-  const path = `metadata/${name}/bot-data.json`;
-  const startup = `metadata/${name}/startup.json`;
+function botDataOf(db: D1Database, env: Environment, telemetry: TelemetryContext, name: string): BotDataStore {
+  const bucket = objectStore(env, telemetry);
+  const metadata = new D1BotMetadata(db, name, STORED_DOC_KINDS);
+  const legacyPath = `metadata/${name}/bot-data.json`;
+  const snapshotPath = `metadata/${name}/startup.json`;
+  async function read(filter?: BotDataRead): Promise<BotData | undefined> {
+    const current = await metadata.read(filter);
+    if (current !== undefined || bucket === undefined) return current;
+    const legacy = await bucket.readJson<BotData>(legacyPath);
+    if (legacy !== undefined) await metadata.write(legacy.value, undefined, true);
+    // A Bot may have initialized D1 while this request was reading the legacy object.
+    return metadata.read(filter);
+  }
   return {
-    key: env.S3_ENDPOINT + "/" + env.S3_BUCKET + "/" + path,
-    read: async () => (await store.readJson<BotData>(path))?.value,
-    readStartup: async () => (await store.readJson<StartupData>(startup))?.value,
-    async save(value) {
-      const [dataTag, startupTag] = await Promise.all([store.etag(path), store.etag(startup)]);
-      if (!await store.writeJson(path, value, dataTag)) throw new Error("Bot data changed while publishing");
-      if (!await store.writeJson(startup, startupData(value), startupTag)) throw new Error("Startup data changed while publishing");
+    key: "d1:" + name,
+    legacyKey: bucket === undefined ? undefined : env.S3_ENDPOINT + "/" + env.S3_BUCKET + "/" + legacyPath,
+    read,
+    async readStartup() {
+      const snapshot = await bucket?.readJson<StartupData>(snapshotPath);
+      if (snapshot !== undefined) return snapshot.value;
+      const data = await read();
+      return data === undefined ? undefined : startupData(data);
+    },
+    async save(value, changed) {
+      if (changed === undefined || changed.length > 0) await metadata.write(value, changed);
+      if (bucket === undefined) return;
+      const tag = await bucket.etag(snapshotPath);
+      if (!await bucket.writeJson(snapshotPath, startupData(value), tag)) throw new Error("Startup data changed while publishing");
     },
   };
 }
@@ -89,7 +106,7 @@ export function durableHost(ctx: DurableObjectState, env: Env, cronRegistration?
       delete: () => ctx.storage.deleteAlarm(),
     },
     cronRegistration,
-    data: botDataOf(environment, telemetry, name),
+    data: botDataOf(env.LULU_METADATA, environment, telemetry, name),
     sockets: socketsOf(ctx),
     objects: { BOTS: env.BOTS, MEMORY: env.MEMORY, ARTIFACTS: artifactsOf(ctx) },
     kv,
@@ -107,7 +124,7 @@ export function workerHost(env: Env, ctx: ExecutionContext): ApiHost {
     env: environment,
     kv: kvOf(env.LULU_MCP),
     telemetry,
-    data: botDataOf(environment, telemetry, "main"),
+    data: botDataOf(env.LULU_METADATA, environment, telemetry, "main"),
     objects: { BOTS: env.BOTS, MEMORY: env.MEMORY, ARTIFACTS: artifactsOf(ctx) },
   };
 }

@@ -37,7 +37,7 @@ export async function dispatchCron(controller: ScheduledController, env: Env, ct
   const rule = cron.trim().replace(/\s+/g, " ");
   const at = cronOccurrence(rule, scheduledTime);
   if (at === undefined || (rule === utcDailyCron(at) && now - at > GRACE_MS)) return;
-  const stored = await workerHost(env, ctx).data?.read();
+  const stored = await workerHost(env, ctx).data?.read({ cronAt: at });
   if (stored !== undefined) {
     const due = cronDueAt(rule, at);
     const hasJob = savedJobs(stored).some((job) => due(job, now) !== undefined);

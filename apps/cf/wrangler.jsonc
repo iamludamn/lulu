@@ -30,7 +30,7 @@
   ],
   "d1_databases": [
     {
-      "binding": "ARTIFACT_METADATA",
+      "binding": "LULU_METADATA",
       "database_name": "lulu-artifacts",
     },
   ],

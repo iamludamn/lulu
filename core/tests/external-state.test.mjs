@@ -12,6 +12,7 @@ import { PanelDoc } from "../dist/panel/doc.js";
 import { BotDataPersistence, startupData } from "../dist/conversation/bot-data.js";
 import { handleApi } from "../dist/server/api.js";
 import { D1ArtifactMetadata } from "../../apps/cf/src/artifact-metadata.ts";
+import { D1BotMetadata } from "../../apps/cf/src/bot-metadata.ts";
 import { AssetsDoc } from "../dist/send/doc.js";
 import { SpaceRefreshDoc, SpaceRefreshIndex } from "../dist/space/doc.js";
 import { spaceCronDue } from "../dist/space/refresh.js";
@@ -146,6 +147,26 @@ test("a failed external publication resumes from the Bot's pending commit", asyn
   assert.deepEqual((await external.readStartup()).panel.order, [space.id]);
 });
 
+test("a pending legacy publication is carried forward to D1 without restoring stale bucket data", async (t) => {
+  const storage = new MemoryStorage();
+  const native = nativeStore();
+  await native.put({ "bot-data:legacy": "pending" });
+  const external = externalStore();
+  external.legacyKey = "legacy";
+  await external.save({ documents: { [kinds.panel]: { order: [], widgets: {} } } });
+  const legacy = createSession(storage);
+  t.after(() => legacy.close(context));
+  await legacy.commit(async (tx) => {
+    const panel = await tx.doc(PanelDoc);
+    panel.order.push(space.id);
+    panel.widgets[space.id] = space;
+  }, context);
+  const persistence = new BotDataPersistence(storage, native, external);
+  await persistence.start(legacy);
+  assert.deepEqual((await external.readStartup()).panel.order, [space.id]);
+  assert.equal(native.state.get("bot-data:test"), "ready");
+});
+
 test("configured Spaces participate in direct Cron registration and release rules on pause", async (t) => {
   const session = createSession(new MemoryStorage());
   t.after(() => session.close(context));
@@ -167,10 +188,10 @@ test("configured Spaces participate in direct Cron registration and release rule
   assert.deepEqual(writes, [[utcDailyCron(tick)], []]);
 });
 
-function artifactDatabase(t) {
+function d1Database(t, migration) {
   const sqlite = new DatabaseSync(":memory:");
   t.after(() => sqlite.close());
-  sqlite.exec(readFileSync(new URL("../../apps/cf/migrations/0001_artifact_metadata.sql", import.meta.url), "utf8"));
+  sqlite.exec(readFileSync(new URL("../../apps/cf/migrations/" + migration, import.meta.url), "utf8"));
   return {
     prepare(query) {
       const statement = sqlite.prepare(query);
@@ -204,8 +225,46 @@ function artifactDatabase(t) {
   };
 }
 
+test("D1 imports Bot documents once, indexes due work, and preserves untouched data on update", async (t) => {
+  const db = d1Database(t, "0002_bot_metadata.sql");
+  const store = () => new D1BotMetadata(db, "main", kinds);
+  const current = { id: "current", name: "Wake", prompt: "Reminder", schedule: { kind: "once", at: tick }, state: "active", nextRunAt: tick, lastRun: null };
+  const future = { ...current, id: "future", nextRunAt: tick + 60_000 };
+  const paused = { ...current, id: "paused", state: "paused" };
+  const refreshKey = kinds.spaceRefresh + ":" + space.id;
+  const quietKey = kinds.spaceRefresh + ":quiet";
+  const documents = {
+    [kinds.panel]: { order: [space.id], widgets: { [space.id]: space } },
+    [kinds.assets]: { items: [{ ref: "artifact://report.md@4", title: "Report", origin: "saved", savedAt: 1 }] },
+    [kinds.spaceRefreshIndex]: { ids: [space.id, "quiet"] },
+    [refreshKey]: { entry: refresh },
+    [quietKey]: { entry: { ...refresh, immediatePull: true } },
+    [kinds.cronJobs]: { jobs: [paused, current, future], deleted: [{ id: "deleted" }] },
+  };
+  assert.equal(await store().read(), undefined);
+  await store().write({ documents }, undefined, true);
+  await store().write({ documents: {} }, undefined, true);
+  assert.deepEqual(await store().read(), { documents });
+  const single = await store().read({ space: space.id });
+  assert.deepEqual(single.documents, { [kinds.panel]: documents[kinds.panel], [refreshKey]: documents[refreshKey] });
+  const due = await store().read({ cronAt: tick });
+  assert.deepEqual(due.documents[kinds.cronJobs].jobs, [current]);
+  assert.deepEqual(due.documents[refreshKey], documents[refreshKey]);
+  assert.equal(due.documents[quietKey], undefined);
+  assert.equal(due.documents[kinds.assets], undefined);
+
+  const partial = { [kinds.cronJobs]: { jobs: [future], deleted: [] } };
+  await store().write({ documents: partial }, [kinds.cronJobs, refreshKey]);
+  const updated = (await store().read()).documents;
+  assert.deepEqual(updated[kinds.cronJobs], partial[kinds.cronJobs]);
+  assert.deepEqual(updated[kinds.panel], documents[kinds.panel]);
+  assert.equal(updated[refreshKey], undefined);
+  assert.deepEqual((await store().read({ cronAt: tick })).documents[kinds.cronJobs], undefined);
+  assert.equal(await new D1BotMetadata(db, "fresh", kinds).read(), undefined);
+});
+
 test("Artifact metadata migrates to SQL and concurrent Workers preserve versions and request IDs", async (t) => {
-  const db = artifactDatabase(t);
+  const db = d1Database(t, "0001_artifact_metadata.sql");
   const objects = new Map();
   const set = (key, value) => objects.set(key, structuredClone(value));
   const bucket = {
@@ -265,7 +324,7 @@ test("Artifact metadata migrates to SQL and concurrent Workers preserve versions
 });
 
 test("Artifact SQL keeps quota and edit conflict checks in transactions", async (t) => {
-  const db = artifactDatabase(t);
+  const db = d1Database(t, "0001_artifact_metadata.sql");
   const store = () => new D1ArtifactMetadata(db, "main", async () => ({}));
   const reserve = (size, fields = {}) => store().reserve({ name: "file", size, quota: 6, contentType: "text/plain", staged: false, ...fields });
   const first = await reserve(2);
@@ -280,7 +339,7 @@ test("Artifact SQL keeps quota and edit conflict checks in transactions", async 
 });
 
 test("Artifact SQL retries a failed import without publishing an incomplete index", async (t) => {
-  const db = artifactDatabase(t);
+  const db = d1Database(t, "0001_artifact_metadata.sql");
   const version = { version: 5, key: "other/legacy-path", size: 3, contentType: "text/plain", createdAt: 1 };
   const oldVersion = { "ver:test:0000000005": version };
   await assert.rejects(() => new D1ArtifactMetadata(db, "main", async () => oldVersion).version("test", 5), /FOREIGN KEY/);

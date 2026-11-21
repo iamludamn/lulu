@@ -11,10 +11,10 @@ export class ArtifactWorker extends WorkerEntrypoint<Env, { name: string }> {
     const env = stringsOf(this.env);
     const telemetry = createTelemetry(env, (work) => this.ctx.waitUntil(work));
     const bucket = objectStore(env, telemetry);
-    if (bucket === undefined || this.env.ARTIFACT_METADATA === undefined) {
+    if (bucket === undefined || this.env.LULU_METADATA === undefined) {
       return Promise.resolve(Response.json({ error: "Artifact storage is not configured" }, { status: 503 }));
     }
-    const metadata = new D1ArtifactMetadata(this.env.ARTIFACT_METADATA, name, async () => {
+    const metadata = new D1ArtifactMetadata(this.env.LULU_METADATA, name, async () => {
       const saved = await bucket.readJson<Record<string, unknown>>(`metadata/${name}/artifacts.json`);
       return saved?.value ?? this.env.ARTIFACTS.getByName(name).exportMetadata();
     });

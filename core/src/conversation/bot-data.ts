@@ -15,13 +15,17 @@ const managed = [kinds.panel, kinds.assets, kinds.cronJobs, kinds.spaceRefreshIn
 type Documents = Record<string, JsonObject>;
 export type BotData = { documents: Documents };
 export type StartupData = { panel: PanelState; assets: AssetItem[] };
+export type BotDataRead = { space: string } | { cronAt: number };
 
 export interface BotDataStore {
   readonly key: string;
-  read(): Promise<BotData | undefined>;
+  readonly legacyKey?: string;
+  read(filter?: BotDataRead): Promise<BotData | undefined>;
   readStartup(): Promise<StartupData | undefined>;
-  save(data: BotData): Promise<void>;
+  save(data: BotData, changed?: readonly string[]): Promise<void>;
 }
+
+const documentKey = (kind: string, key?: string): string => key === undefined ? kind : kind + ":" + key;
 
 export const savedPanel = ({ documents }: BotData): PanelState | undefined => documents[kinds.panel] as PanelState | undefined;
 export const savedJobs = ({ documents }: BotData) => (documents[kinds.cronJobs] as ReturnType<typeof CronJobsDoc.definition.initial> | undefined)?.jobs ?? [];
@@ -39,12 +43,12 @@ export function startupData(data: BotData): StartupData {
   return { panel: { ...projectScheduleOverview(panel, savedJobs(data)), spaceUpdates }, assets: assets?.items ?? [] };
 }
 
-/** Keep Pi Durable's transaction semantics for the live copies. Acknowledge a changed app document only
- * after the independent copy is written, and close the crash window with a small pending marker. */
+/** Keep Pi Durable's transaction semantics for the live copies. Publish the external state
+ * before acknowledging a commit, and resume interrupted publication from the pending marker. */
 export class BotDataPersistence {
   readonly storage: Storage;
   readonly #marker: string;
-  readonly #ids = new Set<DocumentId>();
+  readonly #keys = new Map<DocumentId, string>();
   #enabled = false;
 
   constructor(private readonly sqlite: Storage, private readonly native: DurableStorage, private readonly external: BotDataStore) {
@@ -60,17 +64,19 @@ export class BotDataPersistence {
 
   async start(harness: Pick<Harness, "commit">): Promise<void> {
     const marker = await this.native.get<string>(this.#marker);
-    if (marker === undefined) {
+    const legacyPending = marker === undefined && this.external.legacyKey !== undefined &&
+      await this.native.get<string>("bot-data:" + this.external.legacyKey) === "pending";
+    if (marker === "pending" || legacyPending) {
+      await this.#publish();
+    } else if (marker === undefined) {
       const saved = await this.external.read();
       if (saved === undefined) await this.external.save({ documents: await this.#readLocal(true) });
       else {
         await harness.commit((tx) => restore(tx, saved.documents), context);
         await this.#readLocal(false);
-        await this.external.save(saved);
+        await this.external.save(saved, []);
       }
       await this.native.put({ [this.#marker]: "ready" });
-    } else if (marker === "pending") {
-      await this.#publish();
     } else {
       await this.#readLocal(false);
     }
@@ -79,16 +85,17 @@ export class BotDataPersistence {
 
   async #readLocal(values: boolean): Promise<Documents> {
     const documents: Documents = {};
-    this.#ids.clear();
+    this.#keys.clear();
     for (const kind of managed) {
       let cursor;
       do {
         const page = await this.sqlite.scanDocuments({ scope, kind, at: "current" }, 100, cursor, context);
         for (const record of page.items) {
-          this.#ids.add(record.id);
+          const key = documentKey(kind, record.key);
+          this.#keys.set(record.id, key);
           if (values) {
             const stored = await this.sqlite.document(record.id, "current", context);
-            if (stored !== undefined) documents[record.key === undefined ? kind : kind + ":" + record.key] = stored.value;
+            if (stored !== undefined) documents[key] = stored.value;
           }
         }
         cursor = page.next;
@@ -97,32 +104,39 @@ export class BotDataPersistence {
     return documents;
   }
 
-  async #publish(): Promise<void> {
-    await this.external.save({ documents: await this.#readLocal(true) });
+  async #publish(changed?: readonly string[]): Promise<void> {
+    await this.external.save({ documents: await this.#readLocal(true) }, changed);
     await this.native.put({ [this.#marker]: "ready" });
   }
 
-  #managed(write: StorageWrite): boolean {
+  #changedKey(write: StorageWrite): string | undefined {
     switch (write.type) {
       case "document.create":
       case "document.copy":
-        return write.record.scope.kind === "session" && managed.some((kind) => kind === write.record.kind);
+        if (write.record.scope.kind === "session" && managed.some((kind) => kind === write.record.kind)) {
+          return documentKey(write.record.kind, write.record.key);
+        }
+        return;
       case "document.change":
       case "document.retire":
-        return this.#ids.has(write.id);
+        return this.#keys.get(write.id);
       default:
-        return false;
+        return;
     }
   }
 
   async #commit(...[batches, receive, ctx]: Parameters<Storage["commit"]>): ReturnType<Storage["commit"]> {
-    if (!this.#enabled || !batches.some((batch) => batch.some((write) => this.#managed(write)))) {
-      return this.sqlite.commit(batches, receive, ctx);
+    if (!this.#enabled) return this.sqlite.commit(batches, receive, ctx);
+    const keys = new Set<string>();
+    for (const batch of batches) for (const write of batch) {
+      const key = this.#changedKey(write);
+      if (key !== undefined) keys.add(key);
     }
+    if (keys.size === 0) return this.sqlite.commit(batches, receive, ctx);
     await this.native.put({ [this.#marker]: "pending" });
     const receipts: Parameters<typeof receive>[] = [];
     const result = await this.sqlite.commit(batches, (...receipt) => receipts.push(receipt), ctx);
-    await this.#publish();
+    await this.#publish([...keys]);
     for (const receipt of receipts) receive(...receipt);
     return result;
   }

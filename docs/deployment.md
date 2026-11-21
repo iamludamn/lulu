@@ -8,11 +8,11 @@ Use a secret manager for Worker credentials. Chat requires a model provider cred
 
 ## Object storage migration
 
-Use the existing private bucket and S3 Worker credentials. The endpoint must support conditional `PutObject` and destination-conditional `CopyObject`. Artifact file bodies remain in this bucket. The Worker stores versions, upload reservations, request IDs, and quota in the `ARTIFACT_METADATA` D1 binding.
+Use the existing private bucket and S3 Worker credentials. The endpoint must support conditional `PutObject` and destination-conditional `CopyObject`. The bucket holds Artifact file bodies and the derived `startup.json`. The Worker uses the `LULU_METADATA` binding to the existing `lulu-artifacts` D1 database for Artifact and Bot metadata.
 
 Apply the D1 schema before deploying the Worker. On first use, the Worker imports the existing bucket index if present, or exports the index from the old Artifact Durable Object. It commits the import and its completion marker together, preserving version numbers, object keys, and pinned references. Keep the legacy Artifact binding available until the import has completed. Run a single deployment against the old data source during this cutover.
 
-The first Bot start seeds the external app state and the smaller startup projection. Subsequent startup reads use the projection directly. The Bot writes current app state before acknowledging a commit to the selected documents. An interrupted publication is resumed using its pending marker. If native copies are absent, the Bot hydrates them from the external app state. Use the same private bucket when replacing the Bot's local storage.
+When D1 has no Bot metadata, the first read can import the legacy `bot-data.json`. If the legacy object is absent, the Bot seeds D1 from its working copies. Subsequent Space and Cron reads use D1. The Bot can hydrate its working copies from D1 and completes any interrupted publication using its pending marker. The Bot publishes the startup projection to the bucket before acknowledging a change. A missing startup object can be derived from D1 by the Worker.
 
 ## Build and deploy
 
@@ -24,12 +24,12 @@ cd apps/cf
 export CLOUDFLARE_ACCOUNT_ID='<your-account-id>'
 # Create once per Cloudflare account.
 npm exec -- wrangler d1 create lulu-artifacts --config wrangler.local.jsonc --update-config=false
-npm exec -- wrangler d1 migrations apply ARTIFACT_METADATA --config wrangler.local.jsonc --remote
+npm exec -- wrangler d1 migrations apply LULU_METADATA --config wrangler.local.jsonc --remote
 # Provision feature credentials with wrangler secret put NAME --config wrangler.local.jsonc.
 npm exec -- wrangler deploy --config wrangler.local.jsonc
 ```
 
-For local development, apply the D1 schema with `npm exec -- wrangler d1 migrations apply ARTIFACT_METADATA --config wrangler.local.jsonc --local`, then run `npm exec -- wrangler dev --config wrangler.local.jsonc` from `apps/cf`. To load bindings from a secret manager's process environment, set `CLOUDFLARE_INCLUDE_PROCESS_ENV=true`. The Worker listens on port 8787 by default. For the Web client, run `npm run dev -w @lulu/client` from the root.
+For local development, apply the D1 schema with `npm exec -- wrangler d1 migrations apply LULU_METADATA --config wrangler.local.jsonc --local`, then run `npm exec -- wrangler dev --config wrangler.local.jsonc` from `apps/cf`. To load bindings from a secret manager's process environment, set `CLOUDFLARE_INCLUDE_PROCESS_ENV=true`. The Worker listens on port 8787 by default. For the Web client, run `npm run dev -w @lulu/client` from the root.
 
 ## Cloudflare Cron
 
