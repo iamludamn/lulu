@@ -319,33 +319,25 @@ struct ChatView: View {
     }
 
     private func noteReference(_ note: Note) -> some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 6) {
-                Text("引用笔记")
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
-                Text(note.displayTitle)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
+        NoteThumbnail(note: note, inComposer: true)
+            .frame(width: 116, height: 68)
+            .noteThumbnailSurface()
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("引用笔记，\(note.displayTitle)")
+            .overlay(alignment: .topTrailing) {
+                Button { noteStore.attach(nil) } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(7)
+                        .frame(width: 44, height: 44, alignment: .topTrailing)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("移除笔记引用")
             }
-            .font(.footnote)
-            .accessibilityElement(children: .combine)
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Button { noteStore.attach(nil) } label: {
-                Image(systemName: "xmark")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 44, height: 44)
-                    .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("移除笔记引用")
-        }
-        .padding(.leading, 34)
-        .padding(.trailing, 72)
-        .frame(maxWidth: 720, alignment: .leading)
-        .frame(maxWidth: .infinity)
+            .padding(.leading, 16)
+            .padding(.bottom, 7)
     }
 
     private func historyControl(_ rows: [ChatRow], start: Int, firstMessage: String?) -> some View {

@@ -130,25 +130,14 @@ struct NoteGalleryView: View {
         let thumbnail = Group {
             switch entry {
             case .note(let note):
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(note.displayTitle).font(.system(size: 8, weight: .semibold)).lineLimit(1)
-                    Text(note.body).font(.system(size: 6)).lineLimit(3)
-                    if let first = note.checks.first {
-                        Label(first.text, systemImage: first.done ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 6)).lineLimit(1)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(7)
+                NoteThumbnail(note: note)
             case .file(let file):
                 NoteFilePreview(file: file, botId: botId, api: api, compact: true)
             }
         }
         .frame(height: 73)
         .frame(maxWidth: .infinity)
-        .background(.background)
-        .clipShape(.rect(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.primary.opacity(0.10)))
+        .noteThumbnailSurface()
         .overlay(alignment: .topTrailing) {
             if isPinned {
                 Image(systemName: "pin.fill")
@@ -160,7 +149,6 @@ struct NoteGalleryView: View {
                     .allowsHitTesting(false)
             }
         }
-        .shadow(color: .black.opacity(0.06), radius: 2, y: 2)
         .accessibilityHidden(true)
         return VStack(alignment: .center, spacing: 4) {
             if case .note(let note) = entry {
@@ -239,6 +227,39 @@ struct NoteGalleryView: View {
             return date.formatted(.dateTime.month().day().locale(locale))
         }
         return date.formatted(.dateTime.year().month().day().locale(locale))
+    }
+}
+
+struct NoteThumbnail: View {
+    let note: Note
+    var inComposer = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(note.displayTitle)
+                .font(.system(size: inComposer ? 10 : 8, weight: .semibold))
+                .lineLimit(1)
+                .padding(.trailing, inComposer ? 19 : 0)
+            Text(note.body)
+                .font(.system(size: inComposer ? 8 : 6))
+                .lineLimit(inComposer ? 2 : 3)
+            if let first = note.checks.first {
+                Label(first.text, systemImage: first.done ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: inComposer ? 8 : 6))
+                    .lineLimit(1)
+            }
+        }
+        .padding(7)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+extension View {
+    func noteThumbnailSurface() -> some View {
+        background(.background)
+            .clipShape(.rect(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.primary.opacity(0.10)))
+            .shadow(color: .black.opacity(0.06), radius: 2, y: 2)
     }
 }
 
