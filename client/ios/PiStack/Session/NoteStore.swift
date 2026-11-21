@@ -8,15 +8,71 @@ struct Note: Identifiable, Equatable {
         var done = false
     }
 
+    struct Block: Identifiable, Equatable {
+        enum Content: Equatable {
+            case text(String)
+            case check(Check)
+            case file(String)
+        }
+
+        let id = UUID()
+        var content: Content
+
+        var isText: Bool {
+            if case .text = content { true } else { false }
+        }
+    }
+
     let id = UUID()
-    var title = ""
-    var body = ""
-    var date = Date.now
-    var checks: [Check] = []
-    var fileIDs: [String] = []
+    var title: String
+    var date: Date
+    var blocks: [Block]
     var source: String?
 
+    init(title: String = "", body: String = "", date: Date = .now, checks: [Check] = [], fileIDs: [String] = [], source: String? = nil) {
+        self.title = title
+        self.date = date
+        self.source = source
+        blocks = [Block(content: .text(body))]
+        blocks += checks.map { Block(content: .check($0)) }
+        blocks += fileIDs.map { Block(content: .file($0)) }
+    }
+
+    var body: String {
+        blocks.compactMap { if case .text(let text) = $0.content, !text.isEmpty { text } else { nil } }
+            .joined(separator: "\n")
+    }
+
+    var checks: [Check] {
+        blocks.compactMap { if case .check(let check) = $0.content { check } else { nil } }
+    }
+
+    var fileIDs: [String] {
+        blocks.compactMap { if case .file(let id) = $0.content { id } else { nil } }
+    }
+
     var displayTitle: String { title.isEmpty ? "新笔记" : title }
+
+    mutating func insert(_ block: Block, after anchor: UUID?, splittingAt offset: Int? = nil) {
+        guard let anchor, let index = blocks.firstIndex(where: { $0.id == anchor }) else {
+            blocks.append(block)
+            return
+        }
+        if let offset, offset >= 0, case .text(let text) = blocks[index].content,
+           let split = text.index(text.startIndex, offsetBy: offset, limitedBy: text.endIndex), split < text.endIndex {
+            if split == text.startIndex {
+                blocks.insert(block, at: index)
+            } else {
+                blocks[index].content = .text(String(text[..<split]))
+                let remainder = Block(content: .text(String(text[split...])))
+                blocks.insert(contentsOf: [block, remainder], at: index + 1)
+            }
+        } else if case .text("") = blocks[index].content {
+            blocks[index] = block
+        } else {
+            blocks.insert(block, at: index + 1)
+        }
+    }
 }
 
 @MainActor @Observable
@@ -137,9 +193,12 @@ final class NoteStore {
             && !["怎么改", "如何改"].contains(where: text.contains)
         if let original = context, edit {
             var revision = original
-            revision.body = original.fileIDs.contains("mock:map") && rain
-                ? "周六沿平江路走走，晚上去双塔市集。\n周日上午参观苏州博物馆，下午改去室内展馆。"
-                : [original.body, text].filter { !$0.isEmpty }.joined(separator: "\n")
+            if original.fileIDs.contains("mock:map"), rain,
+               let index = revision.blocks.firstIndex(where: { if case .text = $0.content { true } else { false } }) {
+                revision.blocks[index].content = .text("周六沿平江路走走，晚上去双塔市集。\n周日上午参观苏州博物馆，下午改去室内展馆。")
+            } else {
+                revision.blocks.append(.init(content: .text(text)))
+            }
             appendOffer(Offer(note: revision, original: original), anchor: anchor)
         } else if let note = context {
             let response = note.fileIDs.contains("mock:map") && rain

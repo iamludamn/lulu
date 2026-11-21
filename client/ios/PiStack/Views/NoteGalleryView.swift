@@ -271,6 +271,10 @@ struct NoteDetailView: View {
     let onDiscuss: (UUID) -> Void
     let onSource: (String) -> Void
     let newNote: () -> Void
+    @FocusState private var titleFocused: Bool
+    @FocusState private var focusedBlock: UUID?
+    @State private var selections: [UUID: TextSelection] = [:]
+    @State private var fileInsertion: InsertionPoint?
     @State private var showsFiles = false
     @State private var previewFile: NoteFile?
     @Environment(\.openArtifact) private var openArtifact
@@ -281,38 +285,19 @@ struct NoteDetailView: View {
             VStack(alignment: .leading, spacing: 13) {
                 TextField("新笔记", text: $note.title, axis: .vertical)
                     .font(.largeTitle.bold())
+                    .focused($titleFocused)
                     .accessibilityLabel("笔记标题")
-                TextField("开始记录…", text: $note.body, axis: .vertical)
-                    .lineSpacing(4)
-                    .accessibilityLabel("笔记正文")
-                ForEach($note.checks) { item in
-                    HStack(spacing: 8) {
-                        Button {
-                            item.wrappedValue.done.toggle()
-                        } label: {
-                            Image(systemName: item.wrappedValue.done ? "checkmark.circle.fill" : "circle")
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.tint)
-                        .accessibilityLabel(item.wrappedValue.done ? "取消勾选" : "勾选")
-                        TextField("清单项", text: item.text)
-                    }
+                ForEach(value.blocks) { block in
+                    editBlock(block)
                 }
-                ForEach(files.filter { value.fileIDs.contains($0.id) }) { file in
-                    Button { open(file) } label: {
-                        VStack(spacing: 0) {
-                            Label(file.filename, systemImage: "doc")
-                                .font(.footnote.weight(.semibold))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(10)
-                            NoteFilePreview(file: file, botId: botId, api: api, compact: false).frame(height: 116)
-                        }
-                        .background(.thinMaterial)
-                        .clipShape(.rect(cornerRadius: 12))
+                if value.blocks.last?.isText != true {
+                    Button("继续写正文") {
+                        let block = Note.Block(content: .text(""))
+                        note.blocks.append(block)
+                        focusedBlock = block.id
                     }
                     .buttonStyle(.plain)
-                    .artifactSource("note-attachment-\(file.id)", radius: 12)
-                    .artifactDownloadFeedback("note-attachment-\(file.id)")
+                    .foregroundStyle(.secondary)
                 }
                 if let source = value.source {
                     Button("查看 Lulu 原对话", systemImage: "bubble") { onSource(source) }
@@ -332,10 +317,15 @@ struct NoteDetailView: View {
                 Button("带回对话", systemImage: "arrow.turn.down.left") { onDiscuss(value.id) }
             }
             ToolbarItemGroup(placement: .bottomBar) {
-                Button("添加清单项", systemImage: "checklist") {
-                    note.checks.append(.init(text: ""))
+                insertionControls
+            }
+            ToolbarItemGroup(placement: .keyboard) {
+                if !titleFocused { insertionControls }
+                Spacer()
+                Button("完成") {
+                    titleFocused = false
+                    focusedBlock = nil
                 }
-                Button("引用已有文件", systemImage: "paperclip") { showsFiles = true }
             }
             ToolbarSpacer(.flexible, placement: .bottomBar)
             ToolbarItem(placement: .bottomBar) {
@@ -346,6 +336,156 @@ struct NoteDetailView: View {
         .sheet(item: $previewFile) { NoteMockFileSheet(file: $0, botId: botId, api: api) }
     }
 
+
+    private struct InsertionPoint {
+        let block: UUID?
+        let offset: Int?
+    }
+
+    @ViewBuilder
+    private var insertionControls: some View {
+        Button("添加清单项", systemImage: "checklist") {
+            let block = Note.Block(content: .check(.init()))
+            let point = insertionPoint
+            note.insert(block, after: point.block, splittingAt: point.offset)
+            focusedBlock = block.id
+        }
+        Button("引用已有文件", systemImage: "paperclip") {
+            fileInsertion = insertionPoint
+            showsFiles = true
+        }
+    }
+
+    private var insertionPoint: InsertionPoint {
+        let block = focusedBlock ?? note.blocks.last?.id
+        guard let focusedBlock,
+              case .text(let text) = note.blocks.first(where: { $0.id == focusedBlock })?.content,
+              let selection = selections[focusedBlock], case .selection(let range) = selection.indices,
+              range.upperBound >= text.startIndex, range.upperBound <= text.endIndex else {
+            return InsertionPoint(block: block, offset: nil)
+        }
+        return InsertionPoint(block: block, offset: text.distance(from: text.startIndex, to: range.upperBound))
+    }
+
+    @ViewBuilder
+    private func editBlock(_ block: Note.Block) -> some View {
+        switch block.content {
+        case .text:
+            TextField("开始记录…", text: textBinding(for: block.id), selection: selectionBinding(for: block.id), axis: .vertical)
+                .lineSpacing(4)
+                .focused($focusedBlock, equals: block.id)
+                .accessibilityLabel("笔记正文")
+        case .check(let check):
+            HStack(spacing: 8) {
+                Button {
+                    var updated = check
+                    updated.done.toggle()
+                    updateBlock(block.id, content: .check(updated))
+                } label: {
+                    Image(systemName: check.done ? "checkmark.circle.fill" : "circle")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
+                .accessibilityLabel(check.done ? "取消勾选" : "勾选")
+                .contextMenu {
+                    Button("移除清单项", systemImage: "trash", role: .destructive) { removeBlock(block.id) }
+                }
+                TextField("清单项", text: textBinding(for: block.id))
+                    .focused($focusedBlock, equals: block.id)
+                    .onSubmit { continueChecklist(after: block.id) }
+                if focusedBlock == block.id {
+                    Button("移除清单项", systemImage: "minus.circle") { removeBlock(block.id) }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        case .file(let id):
+            if let file = files.first(where: { $0.id == id }) {
+                Button { open(file) } label: {
+                    VStack(spacing: 0) {
+                        Label(file.filename, systemImage: "doc")
+                            .font(.footnote.weight(.semibold))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                        NoteFilePreview(file: file, botId: botId, api: api, compact: false).frame(height: 116)
+                    }
+                    .background(.thinMaterial)
+                    .clipShape(.rect(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                .artifactSource("note-attachment-\(file.id)", radius: 12)
+                .artifactDownloadFeedback("note-attachment-\(file.id)")
+                .contextMenu {
+                    Button("移除附件", systemImage: "trash", role: .destructive) { removeBlock(block.id) }
+                }
+            } else {
+                Label("附件不可用", systemImage: "doc")
+                    .foregroundStyle(.secondary)
+                    .contextMenu {
+                        Button("移除附件", systemImage: "trash", role: .destructive) { removeBlock(block.id) }
+                    }
+            }
+        }
+    }
+
+    private func textBinding(for id: UUID) -> Binding<String> {
+        Binding {
+            switch note.blocks.first(where: { $0.id == id })?.content {
+            case .text(let text): text
+            case .check(let check): check.text
+            default: ""
+            }
+        } set: { text in
+            guard let index = note.blocks.firstIndex(where: { $0.id == id }) else { return }
+            switch note.blocks[index].content {
+            case .text:
+                note.blocks[index].content = .text(text)
+            case .check(var check):
+                check.text = text
+                note.blocks[index].content = .check(check)
+            case .file:
+                break
+            }
+        }
+    }
+
+    private func selectionBinding(for id: UUID) -> Binding<TextSelection?> {
+        Binding { selections[id] } set: { selections[id] = $0 }
+    }
+
+    private func updateBlock(_ id: UUID, content: Note.Block.Content) {
+        if let index = note.blocks.firstIndex(where: { $0.id == id }) {
+            note.blocks[index].content = content
+        }
+    }
+
+    private func removeBlock(_ id: UUID) {
+        if focusedBlock == id { focusedBlock = nil }
+        selections.removeValue(forKey: id)
+        note.blocks.removeAll { $0.id == id }
+    }
+
+    private func continueChecklist(after id: UUID) {
+        guard let index = note.blocks.firstIndex(where: { $0.id == id }),
+              case .check(let check) = note.blocks[index].content else { return }
+        if check.text.isEmpty {
+            let next = index + 1
+            if note.blocks.indices.contains(next), case .text = note.blocks[next].content {
+                let nextID = note.blocks[next].id
+                note.blocks.remove(at: index)
+                focusedBlock = nextID
+            } else {
+                let paragraph = Note.Block(content: .text(""))
+                note.blocks[index] = paragraph
+                focusedBlock = paragraph.id
+            }
+        } else {
+            let item = Note.Block(content: .check(.init()))
+            note.insert(item, after: id)
+            focusedBlock = item.id
+        }
+    }
 
     private func open(_ file: NoteFile) {
         if let ref = file.asset?.ref, let address = ArtifactAddress(ref) {
@@ -359,7 +499,9 @@ struct NoteDetailView: View {
         NavigationStack {
             List(files) { file in
                 Button {
-                    if !note.fileIDs.contains(file.id) { note.fileIDs.append(file.id) }
+                    if !note.fileIDs.contains(file.id) {
+                        note.insert(.init(content: .file(file.id)), after: fileInsertion?.block, splittingAt: fileInsertion?.offset)
+                    }
                     showsFiles = false
                 } label: { Label(file.filename, systemImage: "doc") }
                     .disabled(note.fileIDs.contains(file.id))
