@@ -11,13 +11,13 @@ import { RunFamily } from "../delegate/runs.js";
 import { createRun } from "../delegate/spawn.js";
 import type { ScheduleEntry } from "../protocol/contract.js";
 import { CronJobsDoc } from "./doc.js";
-import { expireRuns, fireDue, nextAlarm } from "./engine.js";
-import { WATCHDOG_MS } from "./schedule.js";
+import { dueAt, expireRuns, fireDue, nextAlarm, type ScheduleDue } from "./engine.js";
+import { WATCHDOG_MS, type ScheduledJob } from "./schedule.js";
 
 export type AlarmOutcome = { fired: string[]; expired: ConversationId[] };
 
-export async function fireSchedules(harness: Harness, root: Conversation, selected: ModelRef, now: number): Promise<AlarmOutcome> {
-  const fired = await fireDue(harness, now, async (tx, job, runId, scheduledFor) => {
+export async function dispatchSchedules(harness: Harness, root: Conversation, selected: ModelRef, now: number, due?: ScheduleDue): Promise<string[]> {
+  return fireDue(harness, now, async (tx, job, runId, scheduledFor) => {
     const source = { kind: "schedule_message", scheduleId: job.id, scheduledFor } as const;
     if (job.mode === "reminder") {
       return root.submit(tx, inputSubmission({
@@ -41,7 +41,11 @@ export async function fireSchedules(harness: Harness, root: Conversation, select
       model: selected.provider + "/" + selected.modelId,
       thinkingLevel: null,
     });
-  });
+  }, due);
+}
+
+export async function fireSchedules(harness: Harness, root: Conversation, selected: ModelRef, now: number, local?: (job: ScheduledJob) => boolean): Promise<AlarmOutcome> {
+  const fired = await dispatchSchedules(harness, root, selected, now, local === undefined ? undefined : (job, at) => local(job) ? dueAt(job, at) : undefined);
   const expired = await harness.commit((tx) => expireRuns(tx, now), BACKGROUND_CONTEXT);
   return { fired, expired };
 }
@@ -83,10 +87,10 @@ export async function scheduleEntries(harness: Harness): Promise<ScheduleEntry[]
   return entries;
 }
 
-export async function nextScheduleAlarm(harness: Harness, lastRunAt: number): Promise<number | undefined> {
+export async function nextScheduleAlarm(harness: Harness, lastRunAt: number, local?: (job: ScheduledJob) => boolean): Promise<number | undefined> {
   const deadlines: number[] = [];
   const jobs = (await harness.snapshot(CronJobsDoc, BACKGROUND_CONTEXT))?.jobs ?? [];
-  const scheduled = nextAlarm(jobs);
+  const scheduled = nextAlarm(jobs, local);
   if (scheduled !== undefined) deadlines.push(scheduled <= lastRunAt ? lastRunAt + 60_000 : scheduled);
   const cronRuns = new Set(jobs.flatMap((job) => job.lastRun !== null && "runId" in job.lastRun ? [job.lastRun.runId] : []));
   const delegateIds = (await harness.snapshot(DelegateIndex, BACKGROUND_CONTEXT))?.ids ?? [];

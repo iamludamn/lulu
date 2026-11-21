@@ -6,6 +6,14 @@ Use your own Cloudflare account and Wrangler login. Copy [wrangler.jsonc](../app
 
 Use a secret manager for Worker credentials. Chat requires a model provider credential. See [.env.index](../.env.index) and [env.d.ts](../apps/cf/src/env.d.ts) for supported settings. Set `CLOUDFLARE_ACCOUNT_ID` before all Wrangler commands.
 
+## Object storage migration
+
+Use the existing private bucket and S3 Worker credentials. The endpoint must support conditional `PutObject` and destination-conditional `CopyObject`. The bucket holds Artifact file bodies and the derived `startup.json`. The Worker uses the `LULU_METADATA` binding to the existing `lulu-artifacts` D1 database for Artifact and Bot metadata.
+
+Apply the D1 schema before deploying the Worker. On first use, the Worker imports the existing bucket index if present, or exports the index from the old Artifact Durable Object. It commits the import and its completion marker together, preserving version numbers, object keys, and pinned references. Keep the legacy Artifact binding available until the import has completed. Run a single deployment against the old data source during this cutover.
+
+When D1 has no Bot metadata, the first read can import the legacy `bot-data.json`. If the legacy object is absent, the Bot seeds D1 from its working copies. Subsequent Space and Cron reads use D1. The Bot can hydrate its working copies from D1 and completes any interrupted publication using its pending marker. The Bot publishes the startup projection to the bucket before acknowledging a change. A missing startup object can be derived from D1 by the Worker.
+
 ## Build and deploy
 
 ```sh
@@ -14,11 +22,20 @@ npm ci
 npm run build
 cd apps/cf
 export CLOUDFLARE_ACCOUNT_ID='<your-account-id>'
+# Create once per Cloudflare account.
+npm exec -- wrangler d1 create lulu-artifacts --config wrangler.local.jsonc --update-config=false
+npm exec -- wrangler d1 migrations apply LULU_METADATA --config wrangler.local.jsonc --remote
 # Provision feature credentials with wrangler secret put NAME --config wrangler.local.jsonc.
 npm exec -- wrangler deploy --config wrangler.local.jsonc
 ```
 
-For local development, run `npm exec -- wrangler dev --config wrangler.local.jsonc` from `apps/cf`. To load bindings from a secret manager's process environment, set `CLOUDFLARE_INCLUDE_PROCESS_ENV=true`. The Worker listens on port 8787 by default. For the Web client, run `npm run dev -w @lulu/client` from the root.
+For local development, apply the D1 schema with `npm exec -- wrangler d1 migrations apply LULU_METADATA --config wrangler.local.jsonc --local`, then run `npm exec -- wrangler dev --config wrangler.local.jsonc` from `apps/cf`. To load bindings from a secret manager's process environment, set `CLOUDFLARE_INCLUDE_PROCESS_ENV=true`. The Worker listens on port 8787 by default. For the Web client, run `npm run dev -w @lulu/client` from the root.
+
+## Cloudflare Cron
+
+Set the Worker bindings `LULU_CRON_ACCOUNT_ID` and `LULU_CRON_WORKER_NAME` to the account ID and deployed script name. Set `LULU_CRON_API_TOKEN` as a Worker secret using a dedicated API token with Workers Scripts Write access scoped to that account. Lulu owns the script's complete Cron Trigger list when these bindings are present. Leave `triggers.crons` unset in Wrangler and dedicate the script's triggers to Lulu.
+
+The Worker routes Cron events to the existing Bot. Daily jobs can share a UTC rule and use their chosen time zone to select the correct occurrence. One-time jobs register a UTC calendar rule, round up to the next minute when needed, and release the rule after dispatch, expiration, pause, or deletion once no active job uses it. Short timers and unconfirmed registrations use the existing Durable Object Alarm while [Cron Trigger changes propagate](https://developers.cloudflare.com/workers/configuration/cron-triggers/). The same fallback applies when Cron bindings are absent or registration fails.
 
 ## iOS dictation correction
 
@@ -31,4 +48,4 @@ To compare results, tap the microphone in the iOS chat composer, read the same s
 
 ## Automatic deploy
 
-[GitHub Actions](../.github/workflows/deploy.yml) checks, builds, and deploys pushes to `main` using the checked-in config. To opt in on a fork, first replace deployment settings, then set the `CLOUDFLARE_ACCOUNT_ID` repository variable and `CLOUDFLARE_API_TOKEN` secret.
+[GitHub Actions](../.github/workflows/deploy.yml) checks, builds, and deploys pushes to `main` using the checked-in config. It creates the named D1 database if needed and applies schema migrations before deploying. The deploy token needs D1 Write access. To opt in on a fork, first replace deployment settings, then set the `CLOUDFLARE_ACCOUNT_ID` repository variable and `CLOUDFLARE_API_TOKEN` secret.

@@ -2,9 +2,50 @@ import { createInlineCodemodeSandbox } from "@earendil-works/pi-codemode/cloudfl
 import type { DurableHost, DurableSockets, Environment, KeyValue, Socket } from "@lulu/core/host/types.js";
 import { createTelemetry } from "@lulu/core/telemetry/otlp.js";
 import type { ApiHost } from "@lulu/core/server/api.js";
+import { objectStore } from "@lulu/core/artifact/s3.js";
+import { startupData, type BotData, type BotDataRead, type BotDataStore, type StartupData } from "@lulu/core/conversation/bot-data.js";
+import { STORED_DOC_KINDS } from "@lulu/core/durable-names.js";
+import type { TelemetryContext } from "@earendil-works/pi-telemetry";
+import { D1BotMetadata } from "./bot-metadata.js";
 
-const stringsOf = (env: Env): Environment =>
-  Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+export const stringsOf = (env: Env): Environment =>
+  Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[0] !== "LULU_CRON_API_TOKEN" && typeof entry[1] === "string"));
+
+const artifactsOf = (ctx: Pick<ExecutionContext, "exports">): DurableHost["objects"]["ARTIFACTS"] => ({
+  getByName: (name) => ctx.exports.ArtifactWorker({ props: { name } }),
+});
+
+function botDataOf(db: D1Database, env: Environment, telemetry: TelemetryContext, name: string): BotDataStore {
+  const bucket = objectStore(env, telemetry);
+  const metadata = new D1BotMetadata(db, name, STORED_DOC_KINDS);
+  const legacyPath = `metadata/${name}/bot-data.json`;
+  const snapshotPath = `metadata/${name}/startup.json`;
+  async function read(filter?: BotDataRead): Promise<BotData | undefined> {
+    const current = await metadata.read(filter);
+    if (current !== undefined || bucket === undefined) return current;
+    const legacy = await bucket.readJson<BotData>(legacyPath);
+    if (legacy !== undefined) await metadata.write(legacy.value, undefined, true);
+    // A Bot may have initialized D1 while this request was reading the legacy object.
+    return metadata.read(filter);
+  }
+  return {
+    key: "d1:" + name,
+    legacyKey: bucket === undefined ? undefined : env.S3_ENDPOINT + "/" + env.S3_BUCKET + "/" + legacyPath,
+    read,
+    async readStartup() {
+      const snapshot = await bucket?.readJson<StartupData>(snapshotPath);
+      if (snapshot !== undefined) return snapshot.value;
+      const data = await read();
+      return data === undefined ? undefined : startupData(data);
+    },
+    async save(value, changed) {
+      if (changed === undefined || changed.length > 0) await metadata.write(value, changed);
+      if (bucket === undefined) return;
+      const tag = await bucket.etag(snapshotPath);
+      if (!await bucket.writeJson(snapshotPath, startupData(value), tag)) throw new Error("Startup data changed while publishing");
+    },
+  };
+}
 
 const kvOf = (kv: KVNamespace): KeyValue => ({
   get: (key) => kv.get(key),
@@ -36,7 +77,7 @@ const connect: DurableHost["connect"] = async (url, headers, handlers) => {
   return { status: response.status, socket: socket as Socket };
 };
 
-export function durableHost(ctx: DurableObjectState, env: Env): DurableHost {
+export function durableHost(ctx: DurableObjectState, env: Env, cronRegistration?: DurableHost["cronRegistration"]): DurableHost {
   const name = ctx.id.name;
   if (name === undefined) throw new Error("Object must be addressed by name");
   const environment = { ...stringsOf(env), LULU_RELEASE: env.CF_VERSION_METADATA?.id };
@@ -64,8 +105,10 @@ export function durableHost(ctx: DurableObjectState, env: Env): DurableHost {
       set: (time) => ctx.storage.setAlarm(time),
       delete: () => ctx.storage.deleteAlarm(),
     },
+    cronRegistration,
+    data: botDataOf(env.LULU_METADATA, environment, telemetry, name),
     sockets: socketsOf(ctx),
-    objects: { BOTS: env.BOTS, MEMORY: env.MEMORY, ARTIFACTS: env.ARTIFACTS },
+    objects: { BOTS: env.BOTS, MEMORY: env.MEMORY, ARTIFACTS: artifactsOf(ctx) },
     kv,
     sandbox: createInlineCodemodeSandbox(),
     connect,
@@ -75,11 +118,13 @@ export function durableHost(ctx: DurableObjectState, env: Env): DurableHost {
 
 export function workerHost(env: Env, ctx: ExecutionContext): ApiHost {
   const environment = stringsOf(env);
+  const telemetry = createTelemetry(environment, (task) => ctx.waitUntil(task));
   return {
     waitUntil: (task) => ctx.waitUntil(task),
     env: environment,
     kv: kvOf(env.LULU_MCP),
-    telemetry: createTelemetry(environment, (task) => ctx.waitUntil(task)),
-    objects: { BOTS: env.BOTS, MEMORY: env.MEMORY, ARTIFACTS: env.ARTIFACTS },
+    telemetry,
+    data: botDataOf(env.LULU_METADATA, environment, telemetry, "main"),
+    objects: { BOTS: env.BOTS, MEMORY: env.MEMORY, ARTIFACTS: artifactsOf(ctx) },
   };
 }
