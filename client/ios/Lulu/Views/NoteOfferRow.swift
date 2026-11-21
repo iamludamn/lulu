@@ -3,14 +3,18 @@ import SwiftUI
 struct NoteOfferRow: View {
     let offer: NoteStore.Offer
     let files: [NoteFile]
+    let sending: Bool
+    let error: String?
     let onLand: () -> Void
     let onAccept: () -> Void
     @State private var settled: Bool
     @State private var showsPreview = false
 
-    init(offer: NoteStore.Offer, files: [NoteFile], onLand: @escaping () -> Void, onAccept: @escaping () -> Void) {
+    init(offer: NoteStore.Offer, files: [NoteFile], sending: Bool = false, error: String? = nil, onLand: @escaping () -> Void, onAccept: @escaping () -> Void) {
         self.offer = offer
         self.files = files
+        self.sending = sending
+        self.error = error
         self.onLand = onLand
         self.onAccept = onAccept
         _settled = State(initialValue: offer.outcome != nil)
@@ -26,13 +30,11 @@ struct NoteOfferRow: View {
             } else {
                 SwipeToKeep(destination: .notes, onLand: {
                     settled = true
-                    onLand()
-                }, onKeep: onAccept, confirmed: offer.outcome != nil) { _, armed in
+                    if offer.outcome != .outdated { onLand() }
+                }, onKeep: onAccept, sending: sending, confirmed: offer.outcome != nil, failed: error != nil) { accept, armed in
                     offerContent(armed: armed)
                         .accessibilityAction(named: offer.original == nil ? "存入笔记" : "更新原笔记") {
-                            onAccept()
-                            settled = true
-                            onLand()
+                            accept()
                         }
                 }
             }
@@ -81,7 +83,13 @@ struct NoteOfferRow: View {
                     .font(.caption.weight(.semibold))
             } else {
                 Text(offer.note.body).font(.subheadline).lineSpacing(3).lineLimit(5)
+                ForEach(offer.note.checks.prefix(2)) { item in
+                    Label(item.text, systemImage: item.done ? "checkmark.circle.fill" : "circle")
+                        .font(.subheadline)
+                        .lineLimit(1)
+                }
             }
+            if let error { Text(error).font(.caption).foregroundStyle(.secondary) }
             Label(original == nil ? "右滑存入笔记" : "右滑更新原笔记", systemImage: "arrow.right")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(armed ? .primary : .secondary)

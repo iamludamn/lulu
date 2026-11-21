@@ -8,6 +8,11 @@ public struct ConversationEntry: Codable, Equatable, Identifiable, Sendable {
 
     private enum Keys: String, CodingKey { case id, kind, model, data }
 
+    public func noteData<T: Decodable>(_ type: T.Type) -> T? {
+        guard kind.hasPrefix("lulu.note."), let data, let encoded = try? JSONEncoder().encode(data) else { return nil }
+        return try? JSONDecoder().decode(type, from: encoded)
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: Keys.self)
         if let text = try? container.decode(String.self, forKey: .id) {
@@ -17,7 +22,7 @@ public struct ConversationEntry: Codable, Equatable, Identifiable, Sendable {
         }
         kind = try container.decode(String.self, forKey: .kind)
         model = try container.decodeIfPresent([JSONValue].self, forKey: .model)
-        data = kind == scheduleOfferKind ? try container.decodeIfPresent(JSONValue.self, forKey: .data) : nil
+        data = (kind == scheduleOfferKind || kind.hasPrefix("lulu.note.")) ? try container.decodeIfPresent(JSONValue.self, forKey: .data) : nil
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -108,7 +113,9 @@ public enum ServerMessage: Decodable, Sendable {
 
 public struct Command: Sendable {
     public enum Kind: Sendable {
-        case submit(String)
+        case submit(String, noteId: UUID? = nil, revision: Int? = nil)
+        case generateNote(origin: String)
+        case acceptNote(origin: String)
         case abort
         case selectModel(ModelRef)
         case keep(origin: String)
@@ -128,7 +135,15 @@ public struct Command: Sendable {
 
     var frame: [String: Any] {
         switch kind {
-        case .submit(let content): ["type": "prompt.submit", "requestId": requestId, "content": content, "whenBusy": "followUp"]
+        case .submit(let content, let noteId, let revision):
+            if let noteId, let revision {
+                ["type": "prompt.submit", "requestId": requestId, "content": content, "whenBusy": "followUp",
+                 "noteRef": ["id": noteId.uuidString, "revision": revision]]
+            } else {
+                ["type": "prompt.submit", "requestId": requestId, "content": content, "whenBusy": "followUp"]
+            }
+        case .generateNote(let origin): ["type": "note.generate", "requestId": requestId, "origin": origin]
+        case .acceptNote(let origin): ["type": "note.accept", "requestId": requestId, "origin": origin]
         case .abort: ["type": "prompt.abort", "requestId": requestId]
         case .selectModel(let model): ["type": "model.select", "requestId": requestId, "model": ["provider": model.provider, "id": model.id]]
         case .keep(let origin): ["type": "widget.keep", "requestId": requestId, "origin": origin]

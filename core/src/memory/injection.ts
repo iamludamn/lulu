@@ -1,3 +1,5 @@
+import { NoteContext } from "../notes/chat.js";
+import type { NoteRevision } from "../notes/store.js";
 import { BACKGROUND_CONTEXT, withTelemetry } from "@earendil-works/chord/context";
 import { type Conversation, type ConversationView, type Harness, type ModelRef, defineDocFamily } from "@earendil-works/pi-durable";
 import type { TelemetryContext, TelemetrySpan } from "@earendil-works/pi-telemetry";
@@ -61,7 +63,7 @@ export async function prepareInjection(host: DurableHost, harness: Harness, requ
   return result;
 }
 
-export async function admitPrompt(harness: Harness, root: Conversation, view: ConversationView, command: Extract<ClientMessage, { type: "prompt.submit" }>, injection: MemoryInjection, delivery?: { release: string; span: TelemetrySpan }): Promise<{ firstBinding: boolean; request?: ChatDelivery }> {
+export async function admitPrompt(harness: Harness, root: Conversation, view: ConversationView, command: Extract<ClientMessage, { type: "prompt.submit" }>, injection: MemoryInjection, delivery?: { release: string; span: TelemetrySpan }, note?: NoteRevision): Promise<{ firstBinding: boolean; request?: ChatDelivery }> {
   if (injection.requestId !== command.requestId) throw new Error("Memory delivery request mismatch");
   const accepted = await harness.commit(async (tx) => {
     const chat = await tx.doc(ChatDoc);
@@ -80,6 +82,7 @@ export async function admitPrompt(harness: Harness, root: Conversation, view: Co
     if (firstBinding) {
       Object.assign(selection, injection);
       bindings.requests[String(id)] = command.requestId;
+      if (note) await tx.doc(NoteContext, command.requestId, note);
     }
     if (!message) {
       const now = Date.now();

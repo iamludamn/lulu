@@ -1,3 +1,4 @@
+import { noteApi } from "../notes/api.js";
 import type { DurableHost } from "../host/types.js";
 import { SPACE_ID } from "../protocol/panel.js";
 import { mcpCatalog } from "./mcp-catalog.js";
@@ -6,7 +7,7 @@ import { spaceError, spaceRefreshResponse } from "../space/refresh.js";
 
 export const BOT_ID = "main";
 
-export type ApiHost = Pick<DurableHost, "env" | "objects" | "telemetry" | "kv" | "data"> & { waitUntil(task: Promise<unknown>): void };
+export type ApiHost = Pick<DurableHost, "env" | "objects" | "telemetry" | "kv" | "data" | "notes"> & { waitUntil(task: Promise<unknown>): void };
 
 const PREFIX = `/api/bots/${BOT_ID}`;
 
@@ -137,6 +138,10 @@ async function route(request: Request, host: ApiHost, pathname: string): Promise
   }
   if (!pathname.startsWith(`${PREFIX}/`)) return notFound();
   const rest = pathname.slice(PREFIX.length).replace(/\/+$/, "");
+  if (rest === "/notes" || rest === "/notes/pin") {
+    if (!await authorizeSocket(request, host.env.LULU_CHAT_TOKEN)) return unauthorized();
+    return noteApi(request, rest, host.notes);
+  }
   if (rest === "/ws") return botSocket(request, host);
   if (rest === "/observability/api/v1/query") {
     if (request.method !== "GET") return json({ error: "Method not allowed" }, 405, { Allow: "GET" });

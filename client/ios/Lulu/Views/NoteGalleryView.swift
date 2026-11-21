@@ -8,14 +8,24 @@ struct NoteFile: Identifiable {
     let date: Date
     let summary: String?
     var asset: AssetItem?
+    var address: ArtifactAddress? { ArtifactAddress(id) }
 
     init(asset: AssetItem) {
-        id = "asset:" + asset.id
+        id = asset.ref
         title = asset.title
         filename = asset.title
         date = Date(timeIntervalSince1970: asset.savedAt / 1000)
         summary = asset.summary
         self.asset = asset
+    }
+
+    init?(reference: String) {
+        guard let address = ArtifactAddress(reference) else { return nil }
+        id = reference
+        title = URL(fileURLWithPath: address.name).lastPathComponent
+        filename = title
+        date = .distantPast
+        summary = nil
     }
 
     private init(id: String, title: String, ext: String, date: Date, summary: String) {
@@ -46,6 +56,8 @@ struct NoteGalleryView: View {
     let noteZoom: Namespace.ID
     let botId: String
     let api: Api
+    var syncError: String? = nil
+    var onRetry: () -> Void = {}
     let onTogglePin: (String) -> Void
     let onOpenNote: (UUID) -> Void
     let newNote: () -> Void
@@ -78,6 +90,14 @@ struct NoteGalleryView: View {
                 HomePageHeading(title: "片刻思绪", subtitle: "笔记与文件")
                 if groups.isEmpty {
                     Text("没有找到相关内容").foregroundStyle(.secondary)
+                }
+                if let syncError {
+                    Button(action: onRetry) {
+                        Label(syncError + "，轻点重试", systemImage: "arrow.clockwise")
+                            .font(.footnote)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
                 }
                 ForEach(groups, id: \.key) { group in
                     VStack(alignment: .leading, spacing: 8) {
@@ -401,7 +421,7 @@ struct NoteDetailView: View {
                 }
             }
         case .file(let id):
-            if let file = files.first(where: { $0.id == id }) {
+            if let file = files.first(where: { $0.id == id }) ?? NoteFile(reference: id) {
                 Button { open(file) } label: {
                     VStack(spacing: 0) {
                         Label(file.filename, systemImage: "doc")
@@ -488,7 +508,7 @@ struct NoteDetailView: View {
     }
 
     private func open(_ file: NoteFile) {
-        if let ref = file.asset?.ref, let address = ArtifactAddress(ref) {
+        if let address = file.address {
             openArtifact(address, "note-attachment-\(file.id)")
         } else if file.asset == nil {
             previewFile = file
@@ -546,8 +566,8 @@ private struct NoteFilePreview: View {
 
     var body: some View {
         Group {
-            if let asset = file.asset {
-                AssetPage(address: ArtifactAddress(asset.ref), botId: botId, api: api, scale: compact ? 0.36 : 0.8)
+            if let address = file.address {
+                AssetPage(address: address, botId: botId, api: api, scale: compact ? 0.36 : 0.8)
             } else if file.id == "mock:map" {
                 ZStack(alignment: .topLeading) {
                     Color.teal.opacity(0.12)
@@ -591,8 +611,8 @@ private enum NoteGalleryEntry: Identifiable {
 
     var id: String {
         switch self {
-        case .note(let note): note.id.uuidString
-        case .file(let file): file.id
+        case .note(let note): note.id.uuidString.lowercased()
+        case .file(let file): file.address.map { "asset:" + $0.name } ?? file.id
         }
     }
 

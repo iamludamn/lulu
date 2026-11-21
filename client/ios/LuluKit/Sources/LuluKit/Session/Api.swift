@@ -89,6 +89,32 @@ public struct Api: Sendable {
         try decode(Startup.self, try await call("/api/bots/\(id)/startup", token: token, failure: "加载视图失败"))
     }
 
+    public func notes(_ bot: String, token: String) async throws -> NoteGallery {
+        var cursor: NoteGallery.Cursor?
+        var notes: [NoteRevision] = []
+        var pinned: [String]?
+        repeat {
+            let query = cursor.map { [
+                URLQueryItem(name: "updatedAt", value: String($0.updatedAt)),
+                URLQueryItem(name: "id", value: $0.id.uuidString)
+            ] } ?? []
+            let page = try decode(NoteGallery.self, try await call("/api/bots/\(bot)/notes", query: query, token: token, failure: "加载笔记失败"))
+            notes.append(contentsOf: page.notes)
+            pinned = pinned ?? page.pinned
+            cursor = page.next
+        } while cursor != nil
+        return NoteGallery(next: nil, notes: notes, pinned: pinned ?? [])
+    }
+
+    public func saveNote(_ bot: String, mutation: NoteMutation, token: String) async throws -> NoteRevision {
+        try decode(NoteRevision.self, try await call("/api/bots/\(bot)/notes", method: "PUT", body: mutation, token: token, failure: "同步笔记失败"))
+    }
+
+    public func pinNoteCard(_ bot: String, key: String, pinned: Bool, token: String) async throws {
+        struct Pin: Encodable { let key: String; let pinned: Bool }
+        _ = try await call("/api/bots/\(bot)/notes/pin", method: "PUT", body: Pin(key: key, pinned: pinned), token: token, failure: "同步置顶失败")
+    }
+
     public func memoryFile(_ id: String, path: String) async throws -> String {
         let data = try await call("/api/bots/\(id)/memory/file", query: [URLQueryItem(name: "path", value: path)], failure: "加载文件失败")
         return String(decoding: data, as: UTF8.self)

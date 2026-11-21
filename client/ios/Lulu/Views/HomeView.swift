@@ -44,7 +44,7 @@ struct HomeView: View {
     @FocusState private var composing: Bool
     @Environment(\.scenePhase) private var phase
 
-    init(bot: BotSummary, api: Api, store: BotStore, mockData: Bool = false,
+    init(bot: BotSummary, api: Api, store: BotStore, token: String, mockData: Bool = false,
          onVisibleCovers: @escaping (Set<String>) -> Void,
          onCoverSettled: @escaping (StartupSpaceCover) -> Void) {
         self.bot = bot
@@ -54,7 +54,7 @@ struct HomeView: View {
         self.onCoverSettled = onCoverSettled
         _draft = State(initialValue: ChatDraft(botId: bot.id))
         _page = State(initialValue: mockData ? .chat : .panel)
-        _noteStore = State(initialValue: NoteStore(mockData: mockData))
+        _noteStore = State(initialValue: NoteStore(mockData: mockData, api: api, bot: bot.id, token: token))
     }
 
     var body: some View {
@@ -66,6 +66,13 @@ struct HomeView: View {
             guard !noteStore.mockData else { return }
             store.start()
             await SpacePush.shared.connect(api: api, botId: bot.id)
+        }
+        .task { await noteStore.refresh() }
+        .onChange(of: store.snapshot.view?.entries, initial: true) { _, entries in
+            if let entries { noteStore.ingest(entries) }
+        }
+        .onChange(of: store.snapshot.link) { _, link in
+            if link == .online { Task { await noteStore.refresh() } }
         }
         .task(id: voiceOpen) {
             if voiceOpen { await voice.start(store) }
@@ -81,6 +88,7 @@ struct HomeView: View {
             guard !noteStore.mockData else { return }
             if next == .active {
                 store.start()
+                Task { await noteStore.refresh() }
             } else if next == .background {
                 draft.flush()
                 voice.stop()
@@ -203,7 +211,7 @@ struct HomeView: View {
                      reading: $reading, onReaderFrame: { readerFrame = $0 })
         case .notes:
             NoteGalleryView(notes: noteStore.notes, files: noteFiles, pinnedIDs: noteStore.pinnedIDs, noteZoom: noteZoom, botId: bot.id, api: api,
-                            onTogglePin: noteStore.togglePin, onOpenNote: { openedNote = NoteOpening(id: $0, fromCard: true) }, newNote: newNote, onDropFile: store.drop)
+                            syncError: noteStore.syncError, onRetry: { Task { await noteStore.refresh() } }, onTogglePin: noteStore.togglePin, onOpenNote: { openedNote = NoteOpening(id: $0, fromCard: true) }, newNote: newNote, onDropFile: store.drop)
         }
     }
 

@@ -1,3 +1,4 @@
+import { NotesExtension } from "../notes/chat.js";
 import { createDreamingTask } from "../memory/dreaming.js";
 import { defineExtension, section, type Extension, type Registry } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
@@ -34,7 +35,7 @@ const PREAMBLE = [
 ].join(" ");
 
 export const DEFAULT_HARNESS = {
-  extensions: ["coding", "environment", "delegate", "cron", "chat", "mcp", "codemode", "memory", "artifact", "panel", "send"],
+  extensions: ["notes", "coding", "environment", "delegate", "cron", "chat", "mcp", "codemode", "memory", "artifact", "panel", "send"],
   prompt: PREAMBLE,
 };
 
@@ -48,6 +49,7 @@ const artifactCheck = (host: DurableHost): ArtifactCheck | undefined =>
 const sandboxProvider = ({ env, name, telemetry }: DurableHost) => createSandboxProvider(env, name, telemetry);
 
 export const CATALOG: Record<string, (deps: HarnessDeps) => Extension> = {
+  notes: () => NotesExtension,
   coding: () => CodingTools,
   environment: ({ host }) => createEnvironmentExtension(sandboxProvider(host)),
   delegate: ({ host }) => createDelegateExtension(DelegateAgents, sandboxProvider(host)),

@@ -40,13 +40,13 @@ struct PanelView: View {
                             }
                         }
                     }
+                    .scrollTargetLayout()
                     .padding(.horizontal, 16)
                     .padding(.bottom, 32)
                     .frame(maxWidth: 720)
                     .frame(maxWidth: .infinity)
                     .animation(.snappy, value: visibleWidgets.map(\.id))
                 }
-                .scrollTargetLayout()
             }
             .padding(.top, 7)
         }

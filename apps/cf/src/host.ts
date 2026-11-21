@@ -1,3 +1,4 @@
+import { D1Notes } from "./notes.js";
 import { createInlineCodemodeSandbox } from "@earendil-works/pi-codemode/cloudflare";
 import type { DurableHost, DurableSockets, Environment, KeyValue, Socket } from "@lulu/core/host/types.js";
 import { createTelemetry } from "@lulu/core/telemetry/otlp.js";
@@ -107,6 +108,7 @@ export function durableHost(ctx: DurableObjectState, env: Env, cronRegistration?
     },
     cronRegistration,
     data: botDataOf(env.LULU_METADATA, environment, telemetry, name),
+    notes: new D1Notes(env.LULU_METADATA, name),
     sockets: socketsOf(ctx),
     objects: { BOTS: env.BOTS, MEMORY: env.MEMORY, ARTIFACTS: artifactsOf(ctx) },
     kv,
@@ -125,6 +127,7 @@ export function workerHost(env: Env, ctx: ExecutionContext): ApiHost {
     kv: kvOf(env.LULU_MCP),
     telemetry,
     data: botDataOf(env.LULU_METADATA, environment, telemetry, "main"),
+    notes: new D1Notes(env.LULU_METADATA, "main"),
     objects: { BOTS: env.BOTS, MEMORY: env.MEMORY, ARTIFACTS: artifactsOf(ctx) },
   };
 }

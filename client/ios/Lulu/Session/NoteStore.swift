@@ -1,4 +1,5 @@
 import Foundation
+import LuluKit
 import Observation
 
 struct Note: Identifiable, Equatable {
@@ -15,27 +16,70 @@ struct Note: Identifiable, Equatable {
             case file(String)
         }
 
-        let id = UUID()
+        let id: UUID
         var content: Content
+
+        init(id: UUID = UUID(), content: Content) {
+            self.id = id
+            self.content = content
+        }
+
+        init(_ block: NotePayload.Block) {
+            id = block.id
+            switch block.kind {
+            case .text: content = .text(block.text ?? "")
+            case .check: content = .check(.init(text: block.text ?? "", done: block.done ?? false))
+            case .file: content = .file(block.ref ?? "")
+            }
+        }
+
+        var payload: NotePayload.Block {
+            switch content {
+            case .text(let text): .init(id: id, kind: .text, text: text)
+            case .check(let check): .init(id: id, kind: .check, text: check.text, done: check.done)
+            case .file(let ref): .init(id: id, kind: .file, ref: ref)
+            }
+        }
 
         var isText: Bool {
             if case .text = content { true } else { false }
         }
     }
 
-    let id = UUID()
+    let id: UUID
+    var revision: Int
     var title: String
     var date: Date
     var blocks: [Block]
     var source: String?
 
-    init(title: String = "", body: String = "", date: Date = .now, checks: [Check] = [], fileIDs: [String] = [], source: String? = nil) {
+    init(id: UUID = UUID(), title: String = "", body: String = "", date: Date = .now, checks: [Check] = [], fileIDs: [String] = [], source: String? = nil) {
+        self.id = id
+        revision = 0
         self.title = title
         self.date = date
         self.source = source
         blocks = [Block(content: .text(body))]
         blocks += checks.map { Block(content: .check($0)) }
         blocks += fileIDs.map { Block(content: .file($0)) }
+    }
+
+    init(id: UUID, revision: Int = 0, date: Date, payload: NotePayload) {
+        self.id = id
+        self.revision = revision
+        self.date = date
+        title = payload.title
+        source = payload.source
+        blocks = payload.blocks.map(Block.init)
+    }
+
+    init(_ revision: NoteRevision) {
+        self.init(id: revision.id, revision: revision.revision,
+                  date: Date(timeIntervalSince1970: revision.updatedAt / 1000), payload: revision.payload)
+    }
+
+    var payload: NotePayload {
+        NotePayload(title: title, blocks: blocks.map(\.payload), source: source)
     }
 
     var body: String {
@@ -78,7 +122,7 @@ struct Note: Identifiable, Equatable {
 @MainActor @Observable
 final class NoteStore {
     struct Offer: Identifiable {
-        let id = "note-offer-\(UUID())"
+        var id = "note-offer-\(UUID())"
         let note: Note
         var original: Note?
         var outcome: Outcome?
@@ -114,9 +158,60 @@ final class NoteStore {
     private static let routeReplyID = "mock-suzhou-reply"
     private static let routeReply = "周六下午沿平江路走走，晚上去双塔市集。周日上午去苏州博物馆，记得提前预约。"
 
-    init(mockData: Bool = false) {
+    private struct SavedNote: Codable {
+        let id: UUID
+        let revision: Int
+        let date: Date
+        let payload: NotePayload
+    }
+
+    private struct LocalState: Codable {
+        let notes: [SavedNote]
+        let pinned: Set<String>
+        let dirty: Set<UUID>
+        let pending: [UUID: NoteMutation]
+        let pinChanges: [String: Bool]
+        let context: UUID?
+    }
+
+    private struct SyncEndpoint {
+        let api: Api
+        let bot: String
+        let token: String
+    }
+
+    private let endpoint: SyncEndpoint?
+    private let database: NoteDatabase?
+    private var dirty: Set<UUID> = []
+    private var pending: [UUID: NoteMutation] = [:]
+    private var pinChanges: [String: Bool] = [:]
+    private(set) var syncError: String?
+    @ObservationIgnored private var debounce: Task<Void, Never>?
+    @ObservationIgnored private var uploads: [UUID: Task<Void, Error>] = [:]
+    @ObservationIgnored private var refreshing = false
+    @ObservationIgnored private var refreshAgain = false
+
+    init(mockData: Bool = false, api: Api? = nil, bot: String = "", token: String = "") {
         self.mockData = mockData
-        guard mockData else { return }
+        endpoint = mockData ? nil : api.map { SyncEndpoint(api: $0, bot: bot, token: token) }
+        database = try? endpoint.map { try NoteDatabase(scope: $0.api.base.absoluteString + "|" + $0.bot) }
+        if !mockData {
+            do {
+                guard let database else {
+                    if endpoint != nil { syncError = "无法打开本地笔记" }
+                    return
+                }
+                if let saved = try database.load(LocalState.self) {
+                    notes = saved.notes.map { Note(id: $0.id, revision: $0.revision, date: $0.date, payload: $0.payload) }
+                    pinnedIDs = saved.pinned
+                    dirty = saved.dirty
+                    pending = saved.pending
+                    pinChanges = saved.pinChanges
+                    contextID = saved.context
+                }
+            } catch { syncError = "无法读取本地笔记" }
+            return
+        }
         notes = [
             Note(title: "出行灵感", body: "挑一段好走的河边路线，留些时间喝咖啡。", date: sampleDate(day: 0, hour: 9, minute: 36)),
             Note(title: "购物清单", body: "周末出门前买齐。", date: sampleDate(day: -1, hour: 18, minute: 55),
@@ -131,15 +226,23 @@ final class NoteStore {
 
     var context: Note? { notes.first { $0.id == contextID } }
 
-    func attach(_ id: UUID?) { contextID = id }
+    func attach(_ id: UUID?) {
+        contextID = id
+        saveLocally()
+    }
 
     func togglePin(_ id: String) {
-        if !pinnedIDs.insert(id).inserted { pinnedIDs.remove(id) }
+        let pinned = pinnedIDs.insert(id).inserted
+        if !pinned { pinnedIDs.remove(id) }
+        guard endpoint != nil else { return }
+        pinChanges[id] = pinned
+        changed()
     }
 
     func create() -> UUID {
         let note = Note()
         notes.append(note)
+        markChanged(note.id)
         return note.id
     }
 
@@ -148,6 +251,140 @@ final class NoteStore {
         var edited = note
         edited.date = .now
         notes[index] = edited
+        markChanged(note.id)
+    }
+
+    private func markChanged(_ id: UUID) {
+        guard endpoint != nil else { return }
+        dirty.insert(id)
+        changed()
+    }
+
+    private func changed() {
+        saveLocally()
+        debounce?.cancel()
+        debounce = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(550)) } catch { return }
+            self?.debounce = nil
+            await self?.refresh()
+        }
+    }
+
+    private func saveLocally() {
+        do { try persist() } catch { syncError = error.localizedDescription }
+    }
+
+    private func persist() throws {
+        guard endpoint != nil else { return }
+        guard let database else { throw ApiError.message("无法打开本地笔记") }
+        try database.save(LocalState(
+            notes: notes.map { SavedNote(id: $0.id, revision: $0.revision, date: $0.date, payload: $0.payload) },
+            pinned: pinnedIDs, dirty: dirty, pending: pending, pinChanges: pinChanges, context: contextID
+        ))
+    }
+
+    func refresh() async {
+        guard let endpoint else { return }
+        if refreshing {
+            refreshAgain = true
+            return
+        }
+        refreshing = true
+        defer {
+            refreshing = false
+            if refreshAgain {
+                refreshAgain = false
+                Task { await refresh() }
+            }
+        }
+        var failure: Error?
+        for id in dirty {
+            do { try await synchronize(id) } catch { failure = error }
+        }
+        for (key, value) in pinChanges {
+            do {
+                try await endpoint.api.pinNoteCard(endpoint.bot, key: key, pinned: value, token: endpoint.token)
+                if pinChanges[key] == value { pinChanges.removeValue(forKey: key) }
+            } catch { failure = error }
+        }
+        do {
+            let gallery = try await endpoint.api.notes(endpoint.bot, token: endpoint.token)
+            for revision in gallery.notes where !dirty.contains(revision.id) {
+                if let index = notes.firstIndex(where: { $0.id == revision.id }) {
+                    if revision.revision > notes[index].revision { notes[index] = Note(revision) }
+                } else {
+                    notes.append(Note(revision))
+                }
+            }
+            let remote = Set(gallery.pinned)
+            pinnedIDs = remote.union(pinChanges.filter { $0.value }.map(\.key)).subtracting(pinChanges.filter { !$0.value }.map(\.key))
+            try persist()
+            syncError = failure?.localizedDescription
+        } catch {
+            syncError = error.localizedDescription
+        }
+    }
+
+    func synchronize(_ id: UUID) async throws {
+        if let existing = uploads[id] {
+            try await existing.value
+            return
+        }
+        let task = Task { try await upload(id) }
+        uploads[id] = task
+        defer { uploads.removeValue(forKey: id) }
+        try await task.value
+    }
+
+    private func upload(_ id: UUID) async throws {
+        guard let endpoint else { return }
+        while dirty.contains(id), let note = notes.first(where: { $0.id == id }) {
+            let mutation = pending[id] ?? NoteMutation(id: id, requestId: UUID(), baseRevision: note.revision, content: note.payload)
+            pending[id] = mutation
+            try persist()
+            let result = try await endpoint.api.saveNote(endpoint.bot, mutation: mutation, token: endpoint.token)
+            guard let index = notes.firstIndex(where: { $0.id == id }) else { return }
+            if notes[index].payload == mutation.content {
+                notes[index] = Note(result)
+                dirty.remove(id)
+            } else {
+                notes[index].revision = result.revision
+            }
+            pending.removeValue(forKey: id)
+            try persist()
+        }
+    }
+
+    func hasLocalEdits(_ id: UUID) -> Bool { dirty.contains(id) }
+
+    func recordError(_ error: Error) { syncError = error.localizedDescription }
+
+    func ingest(_ entries: [ConversationEntry]) {
+        guard !mockData else { return }
+        struct Job: Decodable { let id: UUID }
+        var running: Set<UUID> = []
+        for entry in entries {
+            if entry.kind == "lulu.note.generating", let job = entry.noteData(Job.self) {
+                running.insert(job.id)
+            } else if entry.kind == "lulu.note.failed", let job = entry.noteData(Job.self) {
+                running.remove(job.id)
+            } else if entry.kind == "lulu.note.proposal", let proposal = entry.noteData(NoteProposal.self) {
+                running.remove(proposal.id)
+                let id = proposal.id.uuidString.lowercased()
+                if offers[id] != nil { continue }
+                let value = Note(id: proposal.base?.id ?? proposal.id, date: Date(timeIntervalSince1970: proposal.at / 1000), payload: proposal.content)
+                offers[id] = Offer(id: id, note: value, original: proposal.base.map(Note.init))
+            } else if ["lulu.note.accepted", "lulu.note.stale"].contains(entry.kind),
+                      let receipt = entry.noteData(NoteAcceptance.self) {
+                let id = receipt.id.uuidString.lowercased()
+                if let offer = offers[id], offer.outcome == nil {
+                    let stale = entry.kind == "lulu.note.stale"
+                    offers[id]?.outcome = stale ? .outdated : (receipt.editing ? .updated : .saved)
+                    Task { await refresh() }
+                }
+            }
+        }
+        generating = !running.isEmpty
     }
 
     func transcript(_ realRows: [ChatRow]) -> [ChatRow] {
@@ -186,7 +423,7 @@ final class NoteStore {
 
     /// The Note discussion and edit service is local until the edit protocol is defined.
     func handleSend(_ text: String, anchor: String?) -> Bool {
-        guard mockData || context != nil else { return false }
+        guard mockData else { return false }
         append(.user, text, anchor: anchor)
         let rain = ["雨", "室内"].contains(where: text.contains)
         let edit = ["改", "更新", "编辑", "加入", "加上"].contains(where: text.contains)

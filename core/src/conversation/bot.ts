@@ -1,3 +1,4 @@
+import { acceptNote, generateNote } from "../notes/chat.js";
 import { markDeliveryCancellation, nextDeliveryAlarm, observeDelivery, reconcileDelivery } from "./delivery.js";
 import { ChatDeliveryDoc } from "./delivery-doc.js";
 import { chatDeliveryQuery } from "./delivery-report.js";
@@ -543,6 +544,16 @@ export class BotSession {
         await checkItem(this.#harness, command.id, command.index, command.done);
         this.#acknowledge(socket, command.requestId);
         return;
+      case "note.generate":
+        if (!this.#host.notes) throw new Error("笔记服务不可用");
+        await this.#alarm.run(() => generateNote(this.#harness, this.#root, command.origin, chatModelRef(this.#host.env, this.#selected), command.requestId));
+        this.#acknowledge(socket, command.requestId);
+        return;
+      case "note.accept":
+        if (!this.#host.notes) throw new Error("笔记服务不可用");
+        await this.#alarm.run(() => acceptNote(this.#harness, this.#root, this.#host.notes!, command.origin));
+        this.#acknowledge(socket, command.requestId);
+        return;
       case "widget.make": {
         if (this.#resumeAfterMcp) await this.#mcpReady;
         const make = await this.#inPromptOrder(async () => {
@@ -560,10 +571,12 @@ export class BotSession {
   async #submitPrompt(socket: Socket, command: Extract<Command, { type: "prompt.submit" }>, timing: { release: string; received: TelemetrySpan; span: TelemetrySpan; queuedAt: number }): Promise<void> {
     const { release, received, span, queuedAt } = timing;
     span.setAttributes({ "lulu.prompt.queue_ms": Date.now() - queuedAt });
+    const attachedNote = command.noteRef === undefined ? undefined : await this.#host.notes?.read(command.noteRef);
+    if (command.noteRef !== undefined && attachedNote === undefined) throw new Error("找不到引用的笔记版本");
     const injection = await prepareInjection(this.#host, this.#harness, command.requestId, command.content, this.#view.value, chatModelRef(this.#host.env, this.#selected), span);
     span.setAttributes({ "lulu.prompt.memory_ready_ms": Date.now() - queuedAt });
     if (this.#resumeAfterMcp) await this.#mcpReady;
-    const { request, firstBinding } = await this.#alarm.run(() => admitPrompt(this.#harness, this.#root, this.#view.value, command, injection, { release, span: received }));
+    const { request, firstBinding } = await this.#alarm.run(() => admitPrompt(this.#harness, this.#root, this.#view.value, command, injection, { release, span: received }, attachedNote));
     span.setAttributes({ "lulu.prompt.admission_ms": Date.now() - queuedAt, "lulu.prompt.replay": !firstBinding, "lulu.memory.outcome": injection.outcome, "lulu.memory.selected": injection.selected.length });
     if (request) observeDelivery(this.#host.telemetry, this.#host.name, { request, stage: "accepted", at: request.acceptedAt });
     else received.setAttributes({ "lulu.delivery.replayed": true });

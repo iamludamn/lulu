@@ -19,6 +19,9 @@ struct ChatView: View {
     @State private var bottomState = ChatBottomState()
     @State private var composerBottom: CGFloat?
     @State private var sent = 0
+    @State private var syncingReference = false
+    @State private var referenceError: String?
+    @State private var preventedAccept: String?
     @State private var keeping: Set<String> = []
     @State private var floor: String?
     @State private var revealAnchor: RevealAnchor?
@@ -50,7 +53,13 @@ struct ChatView: View {
                     ForEach(rows[start...]) { row in
                         Group {
                             if let offer = noteStore.offers[row.id] {
-                                NoteOfferRow(offer: offer, files: noteFiles, onLand: { onKept(.notes) }, onAccept: { noteStore.accept(offer.id) })
+                                let requests = snapshot.requests.filter {
+                                    if case .acceptNote(let origin) = $0.command.kind { origin == offer.id } else { false }
+                                }
+                                NoteOfferRow(offer: offer, files: noteFiles,
+                                             sending: requests.contains { $0.state == .sending },
+                                             error: preventedAccept == offer.id ? "原笔记有未同步的修改，请同步后重新生成" : requests.last?.error,
+                                             onLand: { onKept(.notes) }, onAccept: { accept(offer) })
                             } else {
                                 MessageRow(row: row, store: store, botId: bot.id, api: api, expanded: row.id == reading?.id,
                                            onRead: { reading = $0 }, onOpen: openArtifact, onKept: onKept,
@@ -156,6 +165,11 @@ struct ChatView: View {
             .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: bottomState.showJump)
         }
         .overlay { gate(rows) }
+        .alert("无法带回笔记", isPresented: Binding(get: { referenceError != nil }, set: { if !$0 { referenceError = nil } })) {
+            Button("好", role: .cancel) { referenceError = nil }
+        } message: {
+            Text(referenceError ?? "")
+        }
         .overlay(alignment: .top) {
             if reconnecting && (snapshot.view != nil || !rows.isEmpty) {
                 HStack(spacing: 6) {
@@ -284,9 +298,7 @@ struct ChatView: View {
 
     private func transcribed(_ text: String, sendImmediately: Bool) {
         if sendImmediately {
-            followLatest()
-            sent += 1
-            submit(text)
+            submit(text, clearDraft: false)
         } else {
             draft += text
             composing.wrappedValue = true
@@ -295,27 +307,69 @@ struct ChatView: View {
 
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        submit(text, clearDraft: true)
+    }
+
+    private func submit(_ text: String, clearDraft: Bool) {
+        guard !text.isEmpty, !syncingReference else { return }
+        let anchor = store.transcriptEntries.last?.id
+        if noteStore.mockData {
+            _ = noteStore.handleSend(text, anchor: anchor)
+            composing.wrappedValue = false
+            didSend(clearDraft: clearDraft)
+        } else if let reference = noteStore.context {
+            let draftAtSend = draft
+            syncingReference = true
+            Task {
+                defer { syncingReference = false }
+                do {
+                    if noteStore.hasLocalEdits(reference.id) { try await noteStore.synchronize(reference.id) }
+                    guard store.snapshot.link == .online else { throw ApiError.message("当前未连接，请联网后重试") }
+                    guard let synced = noteStore.context, synced.id == reference.id, synced.payload == reference.payload,
+                          synced.revision > 0 else { throw ApiError.message("笔记引用已变化，请确认后重新发送") }
+                    store.submit(text, noteId: synced.id, revision: synced.revision)
+                    didSend(clearDraft: clearDraft && draft == draftAtSend)
+                } catch {
+                    if !clearDraft {
+                        draft += draft.isEmpty ? text : "\n" + text
+                    }
+                    referenceError = error.localizedDescription
+                }
+            }
+        } else {
+            store.submit(text)
+            didSend(clearDraft: clearDraft)
+        }
+    }
+
+    private func didSend(clearDraft: Bool) {
         followLatest()
         sent += 1
-        submit(text)
-        draft = ""
+        if clearDraft { draft = "" }
+    }
+
+    private func accept(_ offer: NoteStore.Offer) {
+        if noteStore.mockData {
+            noteStore.accept(offer.id)
+        } else if let id = UUID(uuidString: offer.id) {
+            if let original = offer.original, noteStore.hasLocalEdits(original.id) {
+                preventedAccept = offer.id
+            } else {
+                preventedAccept = nil
+                store.acceptNote(id)
+            }
+        }
     }
 
     private func proposeNote(from row: ChatRow) {
+        if !noteStore.mockData {
+            store.generateNote(from: row.id)
+            return
+        }
         let realRows = chatRows(snapshot, entries: store.transcriptEntries, keeping: keeping)
         let anchor = realRows.last { $0.isBubble && !$0.typing }?.id
         let earlier = noteStore.transcript(realRows).prefix { $0.id != row.id }
         noteStore.propose(from: row, context: Array(earlier), anchor: anchor)
-    }
-
-    private func submit(_ text: String) {
-        let anchor = store.transcriptEntries.last?.id
-        if noteStore.handleSend(text, anchor: anchor) {
-            composing.wrappedValue = false
-        } else {
-            store.submit(text)
-        }
     }
 
     private func noteReference(_ note: Note) -> some View {

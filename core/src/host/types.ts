@@ -1,3 +1,4 @@
+import type { NotesStore } from "../notes/store.js";
 import type { CodemodeToolOptions } from "@earendil-works/pi-durable/codemode";
 import type { TelemetryContext } from "@earendil-works/pi-telemetry";
 import type { CronRegistration } from "../cron/registration.js";
@@ -71,6 +72,7 @@ export interface DurableHost {
   readonly alarm: DurableAlarm;
   readonly cronRegistration?: CronRegistration;
   readonly data?: BotDataStore;
+  readonly notes?: NotesStore;
   readonly sockets: DurableSockets;
   readonly objects: {
     readonly BOTS: ObjectNamespace;
