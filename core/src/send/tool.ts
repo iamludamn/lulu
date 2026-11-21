@@ -4,7 +4,8 @@ import { defineTool, LiveDoc, type ToolExecutionResult, type ToolRegistration } 
 import { SCHEDULE_WIDGET_ID } from "../protocol/panel.js";
 import type { SendCard, SendDetails } from "../protocol/send.js";
 import { ARTIFACT_REF, SEND_TOOL, isScheduleOverviewRequest, ModelSendInput } from "../protocol/send.js";
-import { assetRefProblem } from "../artifact/space.js";
+import { assetRefProblem, spacePreviewProblem, spaceRefProblem } from "../artifact/space.js";
+import { monitorProblem } from "../space/monitor-contract.js";
 
 const TEXT_LIMIT = { chars: 600, lines: 12 };
 const DOCUMENT_SHAPE = /^(#{1,6} |\|.+\|\s*$)/m;
@@ -21,6 +22,7 @@ const DESCRIPTION = [
   "type widget sends one card to Chat. Offer a Checklist when the user wants items they can check off over time. Use kind panel with body { kind: list, items } and a done boolean on every item. Use size m for up to three short items and l for up to eight. Use kind asset for a requested file, including a finished HTML Asset.",
   "Use schedule with mode=reminder to set an Alarm. Confirm the time in text after creation succeeds.",
   "Use widget { kind: panel, panel: { body: { kind: schedules } } } to offer the Schedule Overview. The server supplies the job rows. A Schedule Overview already kept on Panel updates from the saved jobs.",
+  "For a Space powered by a web monitor, read artifact skill space-monitor. Offer it using body.kind space with monitor.url, monitor.goal and monitor.schema. The monitor starts when the user keeps the offer.",
   "The user swipes a card to accept its Widget or Asset. Describe the card as ready to accept until the user accepts it.",
   "A type widget call carries only the card and never content: send the short takeaway as its own type text call first, except when the user used the message-to-widget action. Send at most one card per call. Dispatch any outstanding additions or corrections to delegated work before sending the card. The card is the last call of the turn and carries end_turn true; never end the turn on a text that announces a card you have not sent. One short acknowledgement is enough while work runs in the background: do not send further waiting or filler messages.",
 ].join(" ");
@@ -61,7 +63,7 @@ function fail(text: string): ToolExecutionResult<SendDetails> {
   return { output: [{ type: "text", text }], details: { type: "error", end: false }, isError: true };
 }
 
-export const createSendTool = (exists: ArtifactCheck | undefined): ToolRegistration<typeof ModelSendInput, SendDetails> =>
+export const createSendTool = (exists: ArtifactCheck | undefined, monitorConfigured = false): ToolRegistration<typeof ModelSendInput, SendDetails> =>
   defineTool({
     name: SEND_TOOL,
     description: DESCRIPTION,
@@ -79,6 +81,16 @@ export const createSendTool = (exists: ArtifactCheck | undefined): ToolRegistrat
       } else if (input.widget?.kind === "asset") {
         const problem = await missingAsset(input.widget.ref, exists);
         if (problem !== undefined) return fail(problem);
+      } else if (input.widget?.kind === "panel" && input.widget.panel.body.kind === "space") {
+        if (!monitorConfigured) return fail("Context.dev monitoring is unavailable in this deployment.");
+        const { id, body } = input.widget.panel;
+        const problem = monitorProblem(body.monitor) ?? spaceRefProblem(id, body.src) ?? spacePreviewProblem(id, body.preview);
+        if (problem !== undefined) return fail(problem);
+        if (exists === undefined) return fail("Artifact storage is unavailable.");
+        for (const ref of [body.src, body.preview]) {
+          const match = ARTIFACT_REF.exec(ref);
+          if (match === null || !await exists(match[1], Number(match[2]))) return fail("Space artifact missing: " + ref);
+        }
       }
       const end = input.end_turn === true;
       const inputs = (await api.snapshot(LiveDoc, api.conversationId, context))?.run?.inputs ?? [];

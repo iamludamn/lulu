@@ -8,6 +8,8 @@ import { deliveredSentIn } from "./sent.js";
 import { acceptSpace, rememberSpace } from "./space-offers.js";
 import { acceptSchedule } from "./schedule-offers.js";
 import { SCHEDULE_WIDGET_ID, type PanelState } from "../protocol/panel.js";
+import type { Environment } from "../host/types.js";
+import { keepMonitoredSpace } from "../space/refresh.js";
 
 const MAX_PANEL_WIDGETS = 24;
 
@@ -23,7 +25,7 @@ export async function orderCards(harness: Harness, ids: readonly string[]): Prom
   }, BACKGROUND_CONTEXT);
 }
 
-export async function keepWidget(harness: Harness, entries: readonly EntryRecord[], origin: string, keep: boolean, requestId?: string): Promise<void> {
+export async function keepWidget(harness: Harness, entries: readonly EntryRecord[], origin: string, keep: boolean, requestId?: string, env: Environment = {}): Promise<void> {
   if (!keep) {
     await harness.commit(async (tx) => {
       const panel = await tx.doc(PanelDoc);
@@ -62,7 +64,11 @@ export async function keepWidget(harness: Harness, entries: readonly EntryRecord
     if (id === SCHEDULE_WIDGET_ID || card.panel.body.kind === "schedules") throw new Error("无效的定时任务卡片");
     const isSpace = ["space", "web"].includes(card.panel.body.kind);
     if (isSpace) {
+      const accepted = panel.spaceReceipts?.[origin] !== undefined && panel.widgets[id] !== undefined;
       acceptSpace(panel, card.panel, origin, offers, Date.now());
+      if (!accepted && card.panel.body.kind === "space" && card.panel.body.monitor !== undefined) {
+        await keepMonitoredSpace(tx, id, card.panel.body.monitor, env);
+      }
     } else if (["space", "web"].includes(panel.widgets[id]?.body.kind ?? "")) {
       throw new Error("不能将 Space 替换为其他组件，请使用新的 ID");
     }

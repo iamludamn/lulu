@@ -176,15 +176,17 @@ struct SpaceUpdateSettings: View {
                         Picker("监控类型", selection: $source) {
                             Text("主题").tag("search")
                             Text("指定网页").tag("page")
+                            if source == "extract" { Text("结构化网页数据").tag("extract") }
                         }
                         TextField(source == "search" ? "搜索主题" : provider == "context" ? "网页地址" : "网页地址，每行一个", text: $target, axis: .vertical)
                             .textInputAutocapitalization(.never)
                         TextField("什么变化值得记录？", text: $goal, axis: .vertical)
                         LabeledContent("检查频率", value: "每天")
-                        Text(provider == "context"
+                        if source != "extract" { Text(provider == "context"
                              ? (source == "search" ? "每次成功检查使用 2 credits" : "每次成功检查使用 1 credit")
                              : (source == "search" ? "每次成功检查 US$0.001" : "每次成功检查按网页计费，每个 US$0.001"))
                             .font(.footnote).foregroundStyle(.secondary)
+                        }
                     }
                 }
                 .disabled(attached)
@@ -227,7 +229,7 @@ struct SpaceUpdateSettings: View {
             kind = status.mode.kind
             notify = status.notify
             source = status.mode.source?.kind ?? "search"
-            target = status.mode.url ?? status.mode.source?.query ?? status.mode.source?.urls?.joined(separator: "\n") ?? ""
+            target = status.mode.url ?? status.mode.source?.url ?? status.mode.source?.query ?? status.mode.source?.urls?.joined(separator: "\n") ?? ""
             goal = status.mode.goal ?? ""
             zone = status.mode.tz.flatMap(TimeZone.init(identifier:)) ?? .current
         }
@@ -237,7 +239,7 @@ struct SpaceUpdateSettings: View {
         if pieces.count == 2 { time = calendar.date(bySettingHour: pieces[0], minute: pieces[1], second: 0, of: Date()) ?? Date() }
     }
 
-    private var configuration: SpaceUpdate.Mode {
+    private var configuration: SpaceUpdate.Mode? {
         switch kind {
         case "scheduled":
             var calendar = Calendar.current
@@ -245,6 +247,7 @@ struct SpaceUpdateSettings: View {
             let parts = calendar.dateComponents([.hour, .minute], from: time)
             return .init(kind: kind, url: target, time: String(format: "%02d:%02d", parts.hour ?? 9, parts.minute ?? 0), tz: zone.identifier)
         case "subscription":
+            if attached && source == "extract" { return nil }
             if attached, let mode = status?.mode { return mode }
             return .init(kind: kind, provider: provider, goal: goal, source: source == "search" ? .init(kind: source, query: target) : .init(kind: source, urls: targets))
         default: return .init(kind: "manual")
