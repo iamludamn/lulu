@@ -7,7 +7,7 @@ client/web/public/bridge/
 .env
 
 client/ios/**/xcuserdata/
-client/ios/PiStackKit/.build/
+client/ios/LuluKit/.build/
 client/ios/.build/
 client/ios/build/
 .secrets.json

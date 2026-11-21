@@ -1,7 +1,9 @@
 import { handleApi, spaceIngress } from "@lulu/core/server/api.js";
 import { workerHost } from "./host.js";
+import { dispatchCron } from "./cron.js";
 
 export { Artifact, Bot, Memory } from "./objects.js";
+export { ArtifactWorker } from "./artifacts.js";
 
 export default {
   fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -10,4 +12,5 @@ export default {
     if (!url.pathname.startsWith("/api/") && spaceIngress(url, host.env) === "private") return env.ASSETS.fetch(request);
     return handleApi(request, host);
   },
+  scheduled: dispatchCron,
 } satisfies ExportedHandler<Env>;

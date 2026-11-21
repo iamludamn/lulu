@@ -1,4 +1,4 @@
-import type { ArtifactObject } from "./object.js";
+import type { ArtifactService } from "./service.js";
 import { SKILLS } from "./skills.js";
 
 const PROTOCOL_VERSION = "2025-06-18";
@@ -13,7 +13,7 @@ interface Tool {
   readonly description: string;
   readonly properties: Record<string, unknown>;
   readonly required: string[];
-  run(store: ArtifactObject, args: Args): Promise<unknown>;
+  run(store: ArtifactService, args: Args): Promise<unknown>;
 }
 
 const text = { type: "string" };
@@ -128,14 +128,14 @@ function failure(id: unknown, code: number, message: string): Response {
   return Response.json({ jsonrpc: "2.0", id, error: { code, message } });
 }
 
-async function call(store: ArtifactObject, params: { name?: unknown; arguments?: unknown }) {
+async function call(store: ArtifactService, params: { name?: unknown; arguments?: unknown }) {
   const tool = TOOLS.find((candidate) => candidate.name === params.name);
   if (tool === undefined) throw new Error(`unknown tool ${String(params.name)}`);
   const structured = await tool.run(store, (params.arguments ?? {}) as Args);
   return { content: [{ type: "text", text: JSON.stringify(structured, null, 2) }], structuredContent: structured };
 }
 
-export async function handleMcp(request: Request, store: ArtifactObject): Promise<Response> {
+export async function handleMcp(request: Request, store: ArtifactService): Promise<Response> {
   if (request.method !== "POST") return new Response(null, { status: 405 });
   const message = (await request.json().catch(() => null)) as { id?: unknown; method?: unknown; params?: Record<string, unknown> } | null;
   if (message === null || typeof message.method !== "string") return failure(null, -32700, "Parse error");

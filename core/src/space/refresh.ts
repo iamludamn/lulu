@@ -1,12 +1,13 @@
 import { contextDelivery, contextLifecycle, contextMonitor, contextRuns, createContextMonitor, findContextMonitor, openSecret, sealSecret } from "./context-monitor.js";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { Harness, Tx } from "@earendil-works/pi-durable";
-import { nextDailyAfter } from "../cron/schedule.js";
+import { GRACE_MS, nextDailyAfter, utcDailyCron } from "../cron/schedule.js";
 import type { Environment } from "../host/types.js";
 import { PanelDoc } from "../panel/doc.js";
-import { SPACE_ID, type MonitorProvider } from "../protocol/panel.js";
+import { SPACE_ID, type MonitorProvider, type PanelState, type SpaceMonitor } from "../protocol/panel.js";
+import { monitorDataProblem, monitorProblem } from "./monitor-contract.js";
 import { SpaceRefreshDoc, SpaceRefreshIndex, spaceEntries, spaceEntry, spaceStatus, stopTracking, type Mode, type MonitorRun, type Refresh } from "./doc.js";
-import { bytes, DAY, deliveryOf, json, modeOf, monitorId, monitorRun, provider, pull, record, signed, signingSecret, SourceError } from "./source.js";
+import { bytes, DAY, deliveryOf, json, modeOf, monitorId, monitorRun, provider, pull, record, signed, signingSecret, SourceError, string } from "./source.js";
 
 const RETRY = 5 * 60_000;
 const MAX_INBOX = 24;
@@ -18,13 +19,15 @@ const kept = async (tx: Tx, id: string): Promise<boolean> => {
   const panel = await tx.doc(PanelDoc);
   return has(panel.widgets, id) && visible(panel.widgets[id]?.body.kind);
 };
-const deadline = (entry: Refresh): number => Math.min(entry.nextAt ?? Infinity, entry.retryAt ?? Infinity);
+const deadline = (entry: Refresh, local?: (entry: Refresh) => boolean): number =>
+  Math.min(local?.(entry) === false ? Infinity : entry.nextAt ?? Infinity, entry.retryAt ?? Infinity);
 const next = (mode: Mode, now: number): number | null => mode.kind === "scheduled" ? nextDailyAfter(mode.time, mode.tz, now) : null;
 
 function initial(mode: Mode, old: Refresh | undefined, notify: boolean, now: number): Refresh {
   return {
     generation: crypto.randomUUID(), mode, notify, enabled: mode.kind !== "manual", archived: false,
     nextAt: mode.kind === "scheduled" ? now : null, retryAt: mode.kind === "subscription" ? now : null,
+    ...(mode.kind === "scheduled" && { immediatePull: true }),
     monitor: null, providerState: mode.kind === "subscription" ? "create" : null, startedAt: now,
     checkedAt: null, updatedAt: old?.updatedAt ?? null, error: null,
     version: old?.version ?? 0, seen: old?.seen ?? 0, delivered: old?.delivered ?? 0,
@@ -92,6 +95,41 @@ function credentials(env: Environment, name: MonitorProvider): { key: string; ro
   return { key, root, callback };
 }
 
+export const contextMonitorConfigured = (env: Environment): boolean => providers(env).includes("context");
+
+function extractMode(monitor: SpaceMonitor): Mode {
+  return { kind: "subscription", provider: "context", goal: monitor.goal, source: { kind: "extract", url: monitor.url, schema: monitor.schema } };
+}
+
+function startExtract(monitor: SpaceMonitor, previous?: Refresh): Refresh {
+  const entry = initial(extractMode(monitor), previous, monitor.notify === true, Date.now());
+  if (entry.value !== undefined && monitorDataProblem(monitor.schema, JSON.parse(entry.value)) !== undefined) delete entry.value;
+  return entry;
+}
+
+export async function keepMonitoredSpace(tx: Tx, id: string, monitor: SpaceMonitor, env: Environment): Promise<void> {
+  const problem = monitorProblem(monitor);
+  if (problem !== undefined) throw new SourceError(400, problem);
+  credentials(env, "context");
+  const doc = await tx.doc(SpaceRefreshDoc, id, null);
+  const previous = doc.entry;
+  if (previous?.mode.kind === "subscription" && previous.providerState !== "deleted") {
+    if (stable(previous.mode) === stable(extractMode(monitor)) && previous.providerState !== "delete") {
+      previous.notify = monitor.notify === true;
+      return;
+    }
+    previous.replacement = monitor;
+    previous.providerState = "delete";
+    previous.enabled = false;
+    previous.retryAt = Date.now();
+    previous.inbox = [];
+  } else {
+    doc.entry = startExtract(monitor, previous);
+  }
+  const index = await tx.doc(SpaceRefreshIndex);
+  if (!index.ids.includes(id)) index.ids.push(id);
+}
+
 export async function receiveSpaceEvent(harness: Harness, request: Request, env: Environment): Promise<Response> {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("space") ?? "";
@@ -134,19 +172,19 @@ export async function handleSpaceRefresh(harness: Harness, request: Request, env
   const id = url.searchParams.get("id") ?? "";
   if (!SPACE_ID.test(id)) throw new SourceError(400, "Invalid Space ID");
   if (request.method === "GET") {
-    const panel = await harness.snapshot(PanelDoc, context);
-    if (!panel || !has(panel.widgets, id) || !visible(panel.widgets[id]?.body.kind)) throw new SourceError(404, "Space not kept");
-    const entry = await spaceEntry(harness, id);
-    const data = entry === undefined ? null : { version: entry.version, updatedAt: entry.updatedAt, findings: entry.findings, value: entry.value === undefined ? undefined : json(new TextEncoder().encode(entry.value)) };
-    return Response.json({ status: entry === undefined ? null : spaceStatus(entry), data, providers: providers(env) }, { headers: { "Cache-Control": "no-store" } });
+    return spaceRefreshResponse(id, await harness.snapshot(PanelDoc, context), await spaceEntry(harness, id), env);
   }
   const input = record(json(await bytes(request)));
   if (request.method === "POST" && input.action === "configure") {
-    const mode = modeOf(input.mode, env.LULU_SPACE_PULL_HOSTS);
     await harness.commit(async (tx) => {
       if (!(await kept(tx, id))) throw new SourceError(404, "Space not kept");
       const doc = await tx.doc(SpaceRefreshDoc, id, null);
       const previous = doc.entry;
+      if (previous?.mode.kind === "subscription" && previous.mode.source.kind === "extract" && input.mode === undefined) {
+        previous.notify = input.notify === true;
+        return;
+      }
+      const mode = modeOf(input.mode, env.LULU_SPACE_PULL_HOSTS);
       if (mode.kind === "subscription") {
         const name = mode.provider ?? (previous?.mode.kind === "subscription" && previous.providerState !== "deleted" ? providerOf(previous.mode) : env.PERPLEXITY_API_KEY ? "perplexity" : "context");
         credentials(env, name);
@@ -189,17 +227,20 @@ export async function handleSpaceRefresh(harness: Harness, request: Request, env
           if (entry.enabled) {
             entry.nextAt = now;
             entry.retryAt = null;
+            entry.immediatePull = true;
           }
           break;
         case "pause":
         case "resume":
         case "remove": {
+          if (input.action === "remove") delete entry.replacement;
           if (entry.mode.kind === "manual" || entry.providerState === "delete" || entry.providerState === "deleted") break;
           const enabled = input.action === "resume";
           if (input.action !== "remove" && entry.enabled === enabled) break;
           entry.enabled = enabled;
           entry.archived = false;
           entry.nextAt = enabled ? next(entry.mode, now) : null;
+          delete entry.immediatePull;
           entry.inbox = [];
           if (entry.mode.kind === "subscription") {
             entry.providerState = input.action === "remove" ? "delete" : enabled ? entry.monitor === null ? "create" : "resume" : "pause";
@@ -222,9 +263,25 @@ export async function handleSpaceRefresh(harness: Harness, request: Request, env
   return new Response(null, { status: 204 });
 }
 
-export async function nextSpaceAlarm(harness: Harness): Promise<number | undefined> {
+export function spaceRefreshResponse(id: string, panel: PanelState | undefined, entry: Refresh | undefined, env: Environment): Response {
+  if (!SPACE_ID.test(id)) throw new SourceError(400, "Invalid Space ID");
+  if (!panel || !has(panel.widgets, id) || !visible(panel.widgets[id]?.body.kind)) throw new SourceError(404, "Space not kept");
+  const data = entry === undefined ? null : { version: entry.version, updatedAt: entry.updatedAt, findings: entry.findings, value: entry.value === undefined ? undefined : json(new TextEncoder().encode(entry.value)) };
+  return Response.json({ status: entry === undefined ? null : spaceStatus(entry), data, providers: providers(env) }, { headers: { "Cache-Control": "no-store" } });
+}
+
+export function calendarPull(entry: Refresh, at: number): boolean {
+  return entry.enabled && !entry.immediatePull && entry.mode.kind === "scheduled" && nextDailyAfter(entry.mode.time, entry.mode.tz, at - 1) === at;
+}
+
+export function spaceCronDue(entry: Refresh, cron: string, at: number, now: number): boolean {
+  return at <= now && now - at <= GRACE_MS && cron === utcDailyCron(at) &&
+    entry.nextAt !== null && entry.nextAt <= at && calendarPull(entry, at);
+}
+
+export async function nextSpaceAlarm(harness: Harness, local?: (entry: Refresh) => boolean): Promise<number | undefined> {
   const entries = await spaceEntries(harness);
-  const at = Math.min(...entries.map(([, entry]) => deadline(entry)));
+  const at = Math.min(...entries.map(([, entry]) => deadline(entry, local)));
   return Number.isFinite(at) ? at : undefined;
 }
 
@@ -258,6 +315,7 @@ async function runPull(harness: Harness, id: string, entry: Refresh, env: Enviro
     current.checkedAt = now;
     current.error = null;
     current.nextAt = next(current.mode, now);
+    delete current.immediatePull;
     current.retryAt = null;
   });
 }
@@ -274,12 +332,14 @@ async function connectMonitor(entry: Refresh, id: string, env: Environment): Pro
     if (entry.providerState !== "create") return { id: existing };
     const source = entry.mode.source;
     const instructions = entry.mode.goal;
-    const target = source.kind === "search" ? { type: "search" as const, query: source.query, instructions } :
+    const target = source.kind === "extract" ? { type: "extract" as const, url: source.url, schema: source.schema, instructions, max_pages: 1 as const, max_depth: 0 as const } :
+      source.kind === "search" ? { type: "search" as const, query: source.query, instructions } :
       { type: "page" as const, url: source.urls[0], instructions };
     const result = existing ? await contextMonitor(key, existing) : await createContextMonitor(key, tag, `Lulu Space ${id}`, callback.href, target);
     if (!result.id || !result.secret) throw new SourceError(502, "Context.dev did not return the monitor ID and signing secret");
     return { id: result.id, sealed: await sealSecret(result.secret, root, entry.generation) };
   }
+  if (entry.mode.source.kind === "extract") throw new SourceError(400, "Structured monitors require Context.dev");
   const match = async (): Promise<string> => {
     let after = "";
     for (;;) {
@@ -371,10 +431,56 @@ async function perplexityRuns(key: string, monitor: string, after: string, since
   return { runs, cursor };
 }
 
-async function runMonitor(harness: Harness, id: string, entry: Refresh, env: Environment): Promise<void> {
+export type SpaceRepair = (tx: Tx, id: string, failure: { generation: string; capturedAt: number; problem: string; schema: SpaceMonitor["schema"]; sample: string }) => Promise<void>;
+
+async function refreshExtract(harness: Harness, id: string, entry: Refresh, schema: SpaceMonitor["schema"], key: string, repair?: SpaceRepair): Promise<void> {
+  if (!entry.monitor) throw new SourceError(503, "Monitor is not connected");
+  const info = await contextMonitor(key, entry.monitor);
+  const capturedAt = Date.parse(string(info.baseline.captured_at));
+  const sample = info.baseline.data;
+  const received = new Set(entry.inbox.map(({ id: event }) => event));
+  const now = Date.now();
+  await apply(harness, id, entry, async (current, tx) => {
+    const fresh = info.status !== "paused" && sample !== undefined && Number.isFinite(capturedAt) && capturedAt > (current.baselineAt ?? 0);
+    const problem = fresh ? monitorDataProblem(schema, sample) : undefined;
+    if (problem !== undefined && current.schemaFailure !== problem && repair !== undefined && await kept(tx, id)) {
+      await repair(tx, id, { generation: current.generation, capturedAt, problem, schema, sample: JSON.stringify(sample).slice(0, 6000) });
+      current.schemaFailure = problem;
+    }
+    current.inbox = current.inbox.filter(({ id: event }) => !received.has(event));
+    current.events = [...(current.events ?? []), ...received].slice(-LEDGER);
+    current.checkedAt = now;
+    if (info.status === "paused") {
+      current.enabled = false;
+      current.providerState = "paused";
+      current.retryAt = null;
+      current.error = "Monitor paused";
+      return;
+    }
+    current.retryAt = current.inbox.length > 0 ? now : sample === undefined ? now + RETRY : now + DAY;
+    if (info.error) current.error = info.error;
+    if (!fresh) return;
+    if (problem !== undefined) {
+      current.error = problem;
+    } else {
+      const value = stable(sample);
+      if (current.value === undefined) current.updatedAt = now;
+      else if (value !== current.value) changed(current, now);
+      current.value = value;
+      current.error = null;
+      delete current.schemaFailure;
+    }
+    current.baselineAt = capturedAt;
+  });
+}
+
+async function runMonitor(harness: Harness, id: string, entry: Refresh, env: Environment, repair?: SpaceRepair): Promise<void> {
   const name = providerOf(entry.mode);
   const { key, root } = credentials(env, name);
   const state = entry.providerState;
+  if (state === "active" && entry.mode.kind === "subscription" && entry.mode.source.kind === "extract") {
+    return refreshExtract(harness, id, entry, entry.mode.source.schema, key, repair);
+  }
   if (state === "active" && entry.inbox.length > 0) return drain(harness, id, entry);
   if (state === "active") return reconcile(harness, id, entry, key, name);
   if (state === "create") {
@@ -416,24 +522,30 @@ async function runMonitor(harness: Harness, id: string, entry: Refresh, env: Env
       if (sealed) current.sealedWebhookSecret = sealed;
     }
     if (state === "delete") {
+      if (current.replacement !== undefined) {
+        (await tx.doc(SpaceRefreshDoc, id, null)).entry = startExtract(current.replacement, current);
+        return;
+      }
       delete current.sealedWebhookSecret;
       await stopTracking(tx, id);
     }
   });
 }
 
-export async function refreshDueSpaces(harness: Harness, env: Environment, now: number): Promise<void> {
-  const entries = await spaceEntries(harness);
-  await Promise.all(entries.filter(([, entry]) => deadline(entry) <= now).slice(0, 4).map(async ([id, entry]) => {
+export async function refreshDueSpaces(harness: Harness, env: Environment, now: number, local?: (entry: Refresh) => boolean, cron?: { rule: string; at: number }, repair?: SpaceRepair): Promise<void> {
+  const entries = (await spaceEntries(harness)).filter(([, entry]) =>
+    cron === undefined ? deadline(entry, local) <= now : spaceCronDue(entry, cron.rule, cron.at, now));
+  const refresh = async ([id, entry]: [string, Refresh]): Promise<void> => {
     try {
       if (entry.mode.kind === "scheduled") await runPull(harness, id, entry, env);
-      if (entry.mode.kind === "subscription") await runMonitor(harness, id, entry, env);
+      if (entry.mode.kind === "subscription") await runMonitor(harness, id, entry, env, repair);
     } catch (error) {
       await apply(harness, id, entry, (current) => {
         const failedAt = Date.now();
         if (entry.mode.kind === "scheduled") {
           if (current.nextAt !== entry.nextAt || current.retryAt !== entry.retryAt) return;
           current.nextAt = next(current.mode, failedAt);
+          delete current.immediatePull;
           current.retryAt = entry.retryAt === null ? failedAt + RETRY : null;
         } else {
           current.retryAt = failedAt + RETRY;
@@ -441,7 +553,11 @@ export async function refreshDueSpaces(harness: Harness, env: Environment, now: 
         current.error = error instanceof SourceError ? error.message : "Refresh failed";
       });
     }
-  }));
+  };
+  for (let start = 0; start < entries.length; start += 4) {
+    await Promise.all(entries.slice(start, start + 4).map(refresh));
+    if (cron === undefined) break;
+  }
 }
 
 export function spaceError(error: unknown): Response {
