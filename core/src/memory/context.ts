@@ -1,7 +1,6 @@
 import { NOOP_TELEMETRY_CONTEXT, type TelemetryContext } from "@earendil-works/pi-telemetry";
 import { memorySpan } from "./telemetry.js";
-import type { ReadableFiles } from "./files.js";
-import { descriptionOf, isSystemPath, SYSTEM_FILE_CHARACTERS } from "./paths.js";
+import { descriptionOf, isSystemPath, SYSTEM_FILE_CHARACTERS, type ReadableFiles } from "./files.js";
 
 const clipSystem = (text: string): string => (text.length > SYSTEM_FILE_CHARACTERS ? `${text.slice(0, SYSTEM_FILE_CHARACTERS)}\n...[已截断]` : text);
 

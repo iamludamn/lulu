@@ -1,3 +1,5 @@
+import type { Environment } from "../host/types.js";
+import type { MonitorProvider } from "../protocol/panel.js";
 import { Parser } from "htmlparser2";
 import type { Delivery, Finding, Mode, MonitorRun, Refresh } from "./doc.js";
 import { validTime, validTimeZone } from "../cron/schedule.js";
@@ -202,3 +204,32 @@ export async function providerRequest(name: string, url: string, key: string, me
 }
 
 export const monitorId = (value: unknown): string => id(value, "mon_");
+
+export function monitorProviders(env: Environment): MonitorProvider[] {
+  return (["context", "perplexity"] as const).filter((name) => {
+    try { monitorCredentials(env, name); return true; }
+    catch { return false; }
+  });
+}
+
+export function monitorCredentials(env: Environment, name: MonitorProvider): { key: string; root: string; callback: URL } {
+  const key = name === "context" ? env.CONTEXT_DEV_API_KEY : env.PERPLEXITY_API_KEY;
+  const root = env.LULU_SPACE_WEBHOOK_SECRET;
+  const origin = env.LULU_SPACE_WEBHOOK_ORIGIN;
+  const callback = origin ? URL.parse(origin) : null;
+  const privateOrigin = env.LULU_SPACE_PRIVATE_ORIGIN ? URL.parse(env.LULU_SPACE_PRIVATE_ORIGIN) : null;
+  if (privateOrigin?.protocol !== "https:" || privateOrigin.origin === callback?.origin || !key || !root || root.length < 32 || callback?.protocol !== "https:" || callback.username || callback.password ||
+    callback.pathname !== "/" || callback.search || callback.hash) throw new SourceError(503, "The selected monitor provider is not configured");
+  return { key, root, callback };
+}
+
+export const contextMonitorConfigured = (env: Environment): boolean => monitorProviders(env).includes("context");
+
+export function stable(value: unknown): string {
+  if (Array.isArray(value)) return "[" + value.map(stable).join(",") + "]";
+  if (value !== null && typeof value === "object") {
+    const fields = record(value);
+    return "{" + Object.keys(fields).sort().map((key) => JSON.stringify(key) + ":" + stable(fields[key])).join(",") + "}";
+  }
+  return JSON.stringify(value) ?? "";
+}

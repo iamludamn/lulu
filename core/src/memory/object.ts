@@ -7,10 +7,8 @@ import type { DurableHost } from "../host/types.js";
 import { MemoryAgent } from "./agent.js";
 import { getContext } from "./context.js";
 import type { EpisodeSource, MemorySource } from "./doc.js";
-import type { MemoryFiles } from "./files.js";
-import { legacySource } from "./legacy.js";
+import { isMemoryFile, type MemoryFiles } from "./files.js";
 import { migrateLegacy } from "./migrate.js";
-import { isMemoryFile } from "./paths.js";
 import { memorySpan } from "./telemetry.js";
 
 const RETRY_MS = 60 * 60 * 1000;
@@ -41,7 +39,7 @@ export class MemoryObject {
     this.#storage = storage;
     this.#openRetrievalStorage = openRetrievalStorage;
     if ((await this.#files.commits(1)).length > 0) return;
-    await migrateLegacy(legacySource(this.#host.storage), this.#files);
+    await migrateLegacy(this.#host.storage, this.#files);
     await this.#files.commit("初始化记忆\n\nrequestId: migrate");
   }
 

@@ -3,8 +3,7 @@ import { NOOP_TELEMETRY_CONTEXT, type TelemetryContext } from "@earendil-works/p
 import { memorySpan } from "./telemetry.js";
 import { defineTool, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import { Type } from "typebox";
-import type { MemoryFiles, ReadableFiles } from "./files.js";
-import { descriptionOf, hasFrontmatter, isMemoryFile, isSystemPath, SYSTEM_FILE_CHARACTERS } from "./paths.js";
+import { descriptionOf, hasFrontmatter, isMemoryFile, isSystemPath, SYSTEM_FILE_CHARACTERS, type MemoryFiles, type ReadableFiles } from "./files.js";
 
 const OUTPUT_CHARACTERS = 4000;
 const GREP_MATCHES = 50;

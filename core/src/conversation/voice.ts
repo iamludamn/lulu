@@ -7,12 +7,12 @@ import { chatModelRef } from "../agent/models.js";
 import type { DurableHost, Socket } from "../host/types.js";
 import type { MessageProgress, ModelRef, SessionProgress } from "../protocol/contract.js";
 import type { ClientMessage, ServerMessage } from "../protocol/wire.js";
-import { spokenText, sentIn } from "../send/sent.js";
+import { spokenText, sentIn } from "./transcript.js";
 import type { Written } from "../voice/call.js";
 import type { Update, Writer } from "../voice/line.js";
 import { VoiceRelay, type TaskStatus } from "../voice/relay.js";
 import type { Endpoint } from "../voice/transport.js";
-import { ChatDoc } from "./progress.js";
+import { chatMessages } from "./requests.js";
 
 export const VOICE_ENDPOINT = "https://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue";
 export const VOICE_RESOURCE_ID = "volc.speech.dialog";
@@ -135,10 +135,10 @@ export class VoiceSession {
         for (const relay of this.#voices.values()) relay.overheard(subtask.id, subtask.description);
       }
     }
-    const chat = await this.#deps.harness().snapshot(ChatDoc, BACKGROUND_CONTEXT);
+    const messages = await chatMessages(this.#deps.harness(), BACKGROUND_CONTEXT);
     for (const entry of this.#deps.progress().messages) {
       if (entry.state !== "done" || entry.id === null) continue;
-      const message = chat?.messages.find((item) => item.id === entry.id);
+      const message = messages.find((item) => item.id === entry.id);
       if (message === undefined || message.requestId.startsWith("voice-")) continue;
       const text = this.#reply(entry);
       if (text === "") continue;
@@ -176,9 +176,9 @@ export class VoiceSession {
   }
 
   async #written(): Promise<Written[]> {
-    const chat = await this.#deps.harness().snapshot(ChatDoc, BACKGROUND_CONTEXT);
+    const messages = await chatMessages(this.#deps.harness(), BACKGROUND_CONTEXT);
     const written: Written[] = [];
-    for (const message of chat?.messages ?? []) {
+    for (const message of messages) {
       if (message.requestId.startsWith("voice-")) continue;
       written.push({ writer: "them", text: message.text });
       const progress = this.#deps.progress().messages.find((entry) => entry.id === message.id);
@@ -196,8 +196,8 @@ export class VoiceSession {
   }
 
   async #taskStatus(requestId: string): Promise<TaskStatus> {
-    const chat = await this.#deps.harness().snapshot(ChatDoc, BACKGROUND_CONTEXT);
-    const message = chat?.messages.find((entry) => entry.requestId === requestId);
+    const messages = await chatMessages(this.#deps.harness(), BACKGROUND_CONTEXT);
+    const message = messages.find((entry) => entry.requestId === requestId);
     if (message === undefined) return { status: "unknown" };
     if (message.id === null) return { status: "running" };
     const progress = this.#deps.progress().messages.find((entry) => entry.id === message.id);

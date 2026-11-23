@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { acceptSpace, rememberSpace } from '../dist/send/space-offers.js';
-import { deliveredSentIn } from '../dist/send/sent.js';
+import { acceptSpace, rememberSpace } from '../dist/panel.js';
+import { deliveredSentIn } from '../dist/conversation/transcript.js';
 
 const widget = (version, extra = {}) => ({ id: 'trip', size: 'm', title: '旅行计划', body: { kind: 'space', src: `artifact://spaces/trip/index.html@${version}`, preview: `artifact://spaces/trip/cover.html@${version}`, ...extra } });
 const offer = (id, version, extra) => ({ id, entry: version, input: { type: 'widget', widget: { kind: 'panel', panel: widget(version, extra) } } });
@@ -88,8 +88,8 @@ test('only successful, delivered tool calls become actionable offers', () => {
 });
 
 test('real keep transaction: capacity failure leaves no success receipt; retry and drop are safe', async () => {
-  const { keepWidget } = await import('../dist/send/keep.js');
-  const { PanelDoc } = await import('../dist/panel/doc.js');
+  const { keepWidget } = await import('../dist/panel.js');
+  const { PanelDoc } = await import('../dist/panel.js');
   let state = { order: Array.from({ length: 24 }, (_, i) => `n${i}`), widgets: {} };
   let assets = { items: [] };
   const harness = { commit: async fn => {
@@ -124,7 +124,7 @@ test('real keep transaction: capacity failure leaves no success receipt; retry a
 });
 
 test('panel.update refuses to bypass Space swipe approval', async () => {
-  const { createPanelTool } = await import('../dist/panel/tool.js');
+  const { createPanelTool } = await import('../dist/panel.js');
   const tool = createPanelTool();
   const api = { snapshot: async () => ({ order: ['trip'], widgets: { trip: widget(1) } }), commit: async () => { assert.fail('must not commit a Space update'); } };
   const result = await tool.execute({ action: 'update', widget: widget(2) }, api, {});

@@ -18,8 +18,7 @@ import {
 import { memorySpan } from "./telemetry.js";
 import { getContext } from "./context.js";
 import { DreamingBindings, DreamingSources, type Episode, type MemorySource } from "./doc.js";
-import type { MemoryFiles } from "./files.js";
-import { guardChanges } from "./guard.js";
+import { guardChanges, type MemoryFiles } from "./files.js";
 import { consolidateTask, MEMORY_RULES, rememberTask } from "./rules.js";
 import { createReadTools, createWriteTools } from "./tools.js";
 import { STORED_EXTENSION_NAMES } from "../durable-names.js";

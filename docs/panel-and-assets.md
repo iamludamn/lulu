@@ -5,8 +5,8 @@
 | API | Purpose |
 | --- | --- |
 | [`send_to_user`](../core/src/send/tool.ts) | Offer a Checklist or Asset in Chat. Use `widget: { kind: "panel", panel: { body: { kind: "schedules" } } }` to offer the system Schedule Overview. |
-| [`widget.keep` / `widget.drop`](../core/src/send/keep.ts) | Accept or remove a card's item by `origin`. |
-| [`panel` with `action: "update"`](../core/src/panel/tool.ts) | Update an accepted Checklist by ID. `widget.check` saves a user's checkmark. |
+| [`widget.keep` / `widget.drop`](../core/src/panel.ts) | Accept or remove a card's item by `origin`. |
+| [`panel` with `action: "update"`](../core/src/panel.ts) | Update an accepted Checklist by ID. `widget.check` saves a user's checkmark. |
 | [`/artifacts/file`, `/spaces/state`, `/spaces/refresh`](../core/src/server/api.ts) | Download a file, read or save Space state, or manage Space background data. |
 
 ## Core entities

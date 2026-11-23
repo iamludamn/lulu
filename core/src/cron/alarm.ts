@@ -1,20 +1,15 @@
-import { DreamingTriggerDoc } from "../memory/dreaming.js";
-import { DelegateIndex } from "../delegate/runs.js";
-import { REQUEST_TIMEOUT_MS } from "../delegate/limits.js";
-import { requestDeadlineAt } from "../conversation/deadlines.js";
-import { inputSubmission } from "../conversation/input.js";
-import { readSubmission } from "../conversation/submissions.js";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Conversation, ConversationId, Harness, ModelRef } from "@earendil-works/pi-durable";
+import type { Conversation, ConversationId, Harness, ModelRef, SubmissionId, Tx } from "@earendil-works/pi-durable";
+import { inputSubmission, requestDeadlineAt, REQUEST_TIMEOUT_MS } from "../conversation/requests.js";
+import { readSubmission } from "../conversation/transcript.js";
 import { DefaultDelegateAgent } from "../delegate/agents.js";
-import { RunFamily } from "../delegate/runs.js";
-import { createRun } from "../delegate/spawn.js";
+import { createRun } from "../delegate/lifecycle.js";
+import { DelegateCapacityError, DelegateIndex, RunFamily, runIdOf, updateRun } from "../delegate/runs.js";
+import { DreamingTriggerDoc } from "../memory/dreaming.js";
 import type { ScheduleEntry } from "../protocol/contract.js";
-import { CronJobsDoc } from "./doc.js";
-import { dueAt, expireRuns, fireDue, nextAlarm, type ScheduleDue } from "./engine.js";
-import { WATCHDOG_MS, type ScheduledJob } from "./schedule.js";
+import { CronJobsDoc, GRACE_MS, WATCHDOG_MS, nextRunAfter, onceCronTime, utcDailyCron, utcOnceCron, type ScheduledJob } from "./schedule.js";
 
-export type AlarmOutcome = { fired: string[]; expired: ConversationId[] };
+type AlarmOutcome = { fired: string[]; expired: ConversationId[] };
 
 export async function dispatchSchedules(harness: Harness, root: Conversation, selected: ModelRef, now: number, due?: ScheduleDue): Promise<string[]> {
   return fireDue(harness, now, async (tx, job, runId, scheduledFor) => {
@@ -105,4 +100,79 @@ export async function nextScheduleAlarm(harness: Harness, lastRunAt: number, loc
   const requestDeadline = await requestDeadlineAt(harness);
   if (requestDeadline !== undefined) deadlines.push(requestDeadline);
   return deadlines.length === 0 ? undefined : Math.min(...deadlines);
+}
+
+type FireStart = (tx: Tx, job: ScheduledJob, runId: string, scheduledFor: number) => Promise<SubmissionId | void>;
+
+type ScheduleDue = (job: ScheduledJob, now: number) => number | undefined;
+
+const dueAt: ScheduleDue = (job, now) =>
+  job.state === "active" && job.nextRunAt !== null && job.nextRunAt <= now ? job.nextRunAt : undefined;
+
+export function cronDueAt(cron: string, scheduledAt: number): ScheduleDue {
+  return (job, now) => {
+    if (scheduledAt > now || dueAt(job, scheduledAt) === undefined) return;
+    if (job.schedule.kind === "once") {
+      if (scheduledAt === onceCronTime(job.schedule.at) && cron === utcOnceCron(scheduledAt)) return job.schedule.at;
+    } else if (now - scheduledAt <= GRACE_MS && cron === utcDailyCron(scheduledAt) && nextRunAfter(job.schedule, scheduledAt - 1) === scheduledAt) {
+      return scheduledAt;
+    }
+  };
+}
+
+export async function fireDue(harness: Pick<Harness, "snapshot" | "commit">, now: number, start: FireStart, due = dueAt): Promise<string[]> {
+  const jobs = (await harness.snapshot(CronJobsDoc, BACKGROUND_CONTEXT))?.jobs ?? [];
+  const fired: string[] = [];
+  for (const candidate of jobs) {
+    if (due(candidate, now) === undefined) continue;
+    try {
+      // Pi Durable admits at most one submission per transaction, before any
+      // other table writes. Advance each job atomically with its own dispatch.
+      const dispatched = await harness.commit(async (tx) => {
+        const job = (await tx.doc(CronJobsDoc)).jobs.find((row) => row.id === candidate.id);
+        if (job === undefined) return;
+        const scheduledFor = due(job, now);
+        if (scheduledFor === undefined) return;
+        if (now - scheduledFor > GRACE_MS) {
+          job.nextRunAt = job.schedule.kind === "once" ? null : nextRunAfter(job.schedule, now);
+          if (job.schedule.kind === "once") job.state = "missed";
+          return;
+        }
+        const runId = await runIdOf("cron:" + job.id + ":" + scheduledFor);
+        const submissionId = await start(tx, job, runId, scheduledFor);
+        job.lastRun = submissionId === undefined ? { scheduledFor, runId } : { scheduledFor, submissionId };
+        job.nextRunAt = nextRunAfter(job.schedule, scheduledFor);
+        if (job.schedule.kind === "once") job.state = "done";
+        return runId;
+      }, BACKGROUND_CONTEXT);
+      if (dispatched !== undefined) fired.push(dispatched);
+    } catch (error) {
+      if (error instanceof DelegateCapacityError) continue;
+      throw error;
+    }
+  }
+  return fired;
+}
+
+async function expireRuns(tx: Tx, now: number): Promise<ConversationId[]> {
+  const draft = await tx.doc(CronJobsDoc);
+  const children: ConversationId[] = [];
+  for (const job of draft.jobs) {
+    if (job.lastRun === null || !("runId" in job.lastRun)) continue;
+    const run = await tx.doc(RunFamily, job.lastRun.runId, { id: job.lastRun.runId, task: "", description: "", origin: [], agent: "", cwd: "" });
+    if (run.status !== "running" || now - run.startedAt < WATCHDOG_MS) continue;
+    if (run.conversationId !== null) children.push(run.conversationId);
+    await updateRun(tx, job.lastRun.runId, { status: "failed", endedAt: now, error: "timeout" });
+  }
+  return children;
+}
+
+export function nextAlarm(jobs: readonly ScheduledJob[], local?: (job: ScheduledJob) => boolean): number | undefined {
+  const times = jobs.flatMap((job) => {
+    if (job.state !== "active" || job.nextRunAt === null) return [];
+    if (local === undefined || local(job)) return [job.nextRunAt];
+    // Reap a one-shot trigger if Cloudflare never delivers its event.
+    return job.schedule.kind === "once" ? [job.schedule.at + GRACE_MS + 1] : [];
+  });
+  return times.length === 0 ? undefined : Math.min(...times);
 }

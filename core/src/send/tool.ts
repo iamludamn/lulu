@@ -1,10 +1,11 @@
-import { ChatDeliveryDoc } from "../conversation/delivery-doc.js";
-import { scheduleOverviewCard } from "../cron/overview.js";
-import { defineTool, LiveDoc, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
+import { requestIdsForReply } from "../conversation/requests.js";
+import { scheduleOverviewCard } from "../panel.js";
+import { defineExtension, defineTool, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
 import { SCHEDULE_WIDGET_ID } from "../protocol/panel.js";
 import type { SendCard, SendDetails } from "../protocol/send.js";
 import { ARTIFACT_REF, SEND_TOOL, isScheduleOverviewRequest, ModelSendInput } from "../protocol/send.js";
 import { assetRefProblem, spacePreviewProblem, spaceRefProblem } from "../artifact/space.js";
+import { STORED_EXTENSION_NAMES } from "../durable-names.js";
 import { monitorProblem } from "../space/monitor-contract.js";
 
 const TEXT_LIMIT = { chars: 600, lines: 12 };
@@ -93,15 +94,17 @@ export const createSendTool = (exists: ArtifactCheck | undefined, monitorConfigu
         }
       }
       const end = input.end_turn === true;
-      const inputs = (await api.snapshot(LiveDoc, api.conversationId, context))?.run?.inputs ?? [];
-      const delivery = inputs.length > 0 ? await api.snapshot(ChatDeliveryDoc, context) : undefined;
-      const requestIds = delivery?.requests
-        .filter((request) => !request.final && inputs.some((id) => request.submissions.includes(id)))
-        .map((request) => request.requestId) ?? [];
+      const requestIds = await requestIdsForReply(api, api.conversationId, context);
       return {
         output: [{ type: "text", text: end ? "Delivered. Your turn is complete." : "Delivered." }],
         details: { type: input.type, end, ...(requestIds.length > 0 ? { requestIds } : {}), ...(widget && { widget }) },
         ...(end && { control: { terminate: true } }),
       };
     },
+  });
+
+export const createSendExtension = (exists: ArtifactCheck | undefined, monitorConfigured = false) =>
+  defineExtension({
+    name: STORED_EXTENSION_NAMES.send,
+    tools: [createSendTool(exists, monitorConfigured)],
   });

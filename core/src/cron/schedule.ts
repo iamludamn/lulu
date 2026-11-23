@@ -1,10 +1,13 @@
-import type { SubmissionId } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord/context";
+import { defineDoc, type DocumentReader, type SubmissionId } from "@earendil-works/pi-durable";
+import { STORED_DOC_KINDS } from "../durable-names.js";
 import type { Schedule } from "../protocol/contract.js";
+import { SCHEDULE_WIDGET_ID, type PanelState, type ScheduleRow } from "../protocol/panel.js";
 
 export const GRACE_MS = 5 * 60 * 1000;
 export const WATCHDOG_MS = 60 * 60 * 1000;
 
-export type JobState = "active" | "paused" | "done" | "missed";
+type JobState = "active" | "paused" | "done" | "missed";
 
 export type ScheduledJob = {
   id: string;
@@ -102,4 +105,41 @@ export function dailyUtcCrons(time: string, tz: string, now: number): string[] {
 export function nextRunAfter(schedule: Schedule, after: number): number | null {
   if (schedule.kind === "once") return schedule.at > after ? schedule.at : null;
   return nextDailyAfter(schedule.time, schedule.tz, after);
+}
+
+export const CRON_KIND = STORED_DOC_KINDS.cronJobs;
+
+export const CronJobsDoc = defineDoc<{ jobs: ScheduledJob[]; deleted?: ScheduleRow[] }>({
+  kind: CRON_KIND,
+  version: 1,
+  scope: "session",
+  checkpointWhen: () => false,
+  initial: () => ({ jobs: [] }),
+});
+
+export function scheduleRow(job: ScheduledJob, state: ScheduleRow["state"] = job.state): ScheduleRow {
+  return {
+    id: job.id,
+    name: job.name,
+    ...(job.mode === "reminder" && { mode: job.mode }),
+    schedule: job.schedule,
+    state,
+    nextRunAt: state === "active" ? job.nextRunAt : null,
+    ...(job.lastRun === null ? {} : { lastRunAt: job.lastRun.scheduledFor }),
+  };
+}
+
+export async function withScheduleOverview(harness: Pick<DocumentReader, "snapshot">, panel: PanelState, context: Context): Promise<PanelState> {
+  if (panel.widgets[SCHEDULE_WIDGET_ID]?.body.kind !== "schedules") return panel;
+  return projectScheduleOverview(panel, (await harness.snapshot(CronJobsDoc, context))?.jobs ?? []);
+}
+
+export function projectScheduleOverview(panel: PanelState, jobs: readonly ScheduledJob[]): PanelState {
+  const widget = panel.widgets[SCHEDULE_WIDGET_ID];
+  if (widget?.body.kind !== "schedules") return panel;
+  const rows = jobs.map((job) => scheduleRow(job)).reverse();
+  return {
+    ...panel,
+    widgets: { ...panel.widgets, [SCHEDULE_WIDGET_ID]: { ...widget, body: { ...widget.body, rows } } },
+  };
 }

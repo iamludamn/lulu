@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { MemoryStorage } from '@earendil-works/pi-durable/storage/memory';
 import { NOOP_TELEMETRY_CONTEXT as telemetry } from '@earendil-works/pi-telemetry';
 import { retrieveMemory, createRetrievalTools } from '../dist/memory/retrieval.js';
-import { selectMemories } from '../dist/memory/recall.js';
+import { selectMemories } from '../dist/memory/injection.js';
 import { createMemoryExtension } from '../dist/memory/extension.js';
 import { injectionContext } from '../dist/memory/injection.js';
 
@@ -96,9 +96,8 @@ test('missing or sensitive versions cannot be cited; explicit empty delivery is 
 test('admission binds memory atomically; an empty next request clears the section and retries stay idempotent', async () => {
   const { Harness, createRegistry } = await import('@earendil-works/pi-durable');
   const { BACKGROUND_CONTEXT: context } = await import('@earendil-works/chord/context');
-  const { admitPrompt } = await import('../dist/memory/injection.js');
+  const { admitPrompt, chatMessages } = await import('../dist/conversation/requests.js');
   const { InjectionBindings, InjectionFamily } = await import('../dist/memory/doc.js');
-  const { ChatDoc } = await import('../dist/conversation/progress.js');
   const sections = [];
   const registry = createRegistry();
   registry.install(createMemoryExtension({}));
@@ -119,11 +118,11 @@ test('admission binds memory atomically; an empty next request clears the sectio
     assert.match(sections.at(-1), /Only request A/);
     await admit('a', { requestId: 'a', selected: [], outcome: 'empty' });
     assert.deepEqual(await harness.snapshot(InjectionFamily, 'a', context), first);
-    assert.equal((await harness.snapshot(ChatDoc, context)).messages.length, 1);
+    assert.equal((await chatMessages(harness, context)).length, 1);
     assert.equal((await harness.snapshot(InjectionBindings, context)).requests[id], 'a');
     await admit('b', { requestId: 'b', selected: [], outcome: 'empty' });
     assert.equal(sections.at(-1) ?? undefined, undefined);
-    assert.equal((await harness.snapshot(ChatDoc, context)).messages.length, 2);
+    assert.equal((await chatMessages(harness, context)).length, 2);
   } finally { await harness.close(context); }
 });
 
@@ -141,7 +140,7 @@ test('persisted expired retrieval cannot start a model or deliver stale memory',
 });
 
 test('published catalog excludes empty templates, sensitive content and invalid paths', async () => {
-  const { memoryResources } = await import('../dist/memory/resources.js');
+  const { memoryResources } = await import('../dist/memory/files.js');
   const files = {
     'spaces/trip.md': '---\ndescription: Travel preferences\nsourceRefs: ["space:trip@v1"]\n---\nPrefers trains.',
     'system/empty.md': '---\ndescription: Empty template\n---\n',
@@ -157,7 +156,7 @@ test('published catalog excludes empty templates, sensitive content and invalid 
 
 test('Space sources pin the kept page and current saved state; version changes only when the manifest changes', async () => {
   const { collectMemorySources } = await import('../dist/memory/sources.js');
-  const { PanelDoc } = await import('../dist/panel/doc.js');
+  const { PanelDoc } = await import('../dist/panel.js');
   let stateVersion = 3;
   const queries = [];
   const host = { name: 'test', objects: { ARTIFACTS: { getByName: () => ({ fetch: async url => {

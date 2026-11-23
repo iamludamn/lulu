@@ -4,10 +4,8 @@ import type { Models } from "@earendil-works/pi-ai/models";
 import { NOOP_TELEMETRY_CONTEXT, type TelemetryContext } from "@earendil-works/pi-telemetry";
 import { createHarnessTelemetry } from "../telemetry/agent.js";
 import { Type } from "typebox";
-import type { MemoryFiles } from "./files.js";
-import type { MemoryInjection, MemoryResource, SelectedMemory } from "./doc.js";
-import type { Turn } from "./recall.js";
-import { isSensitive } from "./guard.js";
+import { isSensitive, type MemoryFiles } from "./files.js";
+import type { MemoryInjection, MemoryResource, SelectedMemory, Turn } from "./doc.js";
 import { STORED_EXTENSION_NAMES } from "../durable-names.js";
 
 export type RetrievalInput = { requestId: string; catalog: MemoryResource[]; turns: Turn[]; model: ModelRef };

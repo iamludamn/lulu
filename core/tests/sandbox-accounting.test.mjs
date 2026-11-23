@@ -10,8 +10,7 @@ import { SandboxAccountingDoc, accounting, confirmedReady, finishResource, openi
 import { observeSandboxActivity } from '../dist/sandbox/activity.js';
 import { SandboxDoc, SANDBOX_LEASE_MS } from '../dist/sandbox/doc.js';
 import { createEnvironmentExtension } from '../dist/sandbox/extension.js';
-import { sandboxWindowQuery } from '../dist/sandbox/report-api.js';
-import { sandboxReport } from '../dist/sandbox/report.js';
+import { sandboxReport, sandboxWindowQuery } from '../dist/sandbox/report.js';
 import { handleApi } from '../dist/server/api.js';
 
 const second = (x) => x * 1000;

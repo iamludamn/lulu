@@ -1,26 +1,83 @@
-import { bindDelivery } from "../conversation/delivery-doc.js";
-import { inputSubmission, type ScheduleMessageSource } from "../conversation/input.js";
-import { InjectionBindings } from "../memory/doc.js";
-import { awaitWithContext, withCancel } from "@earendil-works/chord/context";
-import { REQUEST_TIMEOUT_MS } from "./limits.js";
-import { AssistantEntry, defineTask } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord/context";
+import { awaitWithContext, withCancel, type Context } from "@earendil-works/chord/context";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
-import type { ConversationId, EntryId, TaskRuntime } from "@earendil-works/pi-durable";
-import { RunFamily, oneLine, readRunStatus, shortId, updateRun, type RunUsage } from "./runs.js";
+import { AssistantEntry, configure, defineTask, type ConversationId, type EntryId, type SubmissionId, type TaskRuntime, type Tx } from "@earendil-works/pi-durable";
+import { deadlineForDelegate, inputSubmission, linkFollowup, REQUEST_TIMEOUT_MS, type ScheduleMessageSource } from "../conversation/requests.js";
 import { RENAMED_TASKS } from "../durable-names.js";
+import { SandboxDoc } from "../sandbox/doc.js";
+import { DelegateIndex, RunFamily, oneLine, readRunStatus, reserveDelegate, shortId, updateRun, type RunUsage } from "./runs.js";
 
-export interface WaitInput extends Settling {
+interface AnchorInput {
+  runId: string;
+}
+
+export const DelegateAnchor = defineTask<AnchorInput, { phase: "hold" }, { runId: string }, object>({
+  name: RENAMED_TASKS.delegateAnchor.current,
+  version: 1,
+  initial: () => ({ phase: "hold" }),
+  phases: {
+    hold: async (task, runtime, context) => {
+      await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: { runId: task.input.runId } } }), context);
+    },
+  },
+  abort: async () => undefined,
+});
+
+interface RunStart {
+  runId: string;
+  task: string;
+  description: string;
+  agent: string;
+  token: string | null;
+  scheduleSource?: ScheduleMessageSource;
+  origin: SubmissionId[];
+  parentId: ConversationId;
+  cwd: string | null;
+  model: string | null;
+  thinkingLevel: string | null;
+}
+
+export async function createRun(tx: Tx, start: RunStart): Promise<{ runId: string; childId: ConversationId }> {
+  const index = await tx.doc(DelegateIndex);
+  if (!index.ids.includes(start.runId)) await reserveDelegate(tx, start.runId);
+  const draft = await tx.doc(RunFamily, start.runId, { id: start.runId, task: start.task, description: start.description, origin: start.origin, agent: start.agent, cwd: start.cwd ?? "" });
+  if (draft.conversationId !== null) return { runId: start.runId, childId: draft.conversationId };
+  draft.deadline = await deadlineForDelegate(tx, start.origin);
+  if (!index.ids.includes(start.runId)) index.ids.push(start.runId);
+  const anchor = await tx.createTask(DelegateAnchor, { runId: start.runId }, { ownership: { kind: "conversation" }, conversationId: start.parentId, background: true });
+  const child = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
+  // Delegates use the default extensions, including the coding tools excluded by the main conversation.
+  await configure(tx, child.id, { extensions: null });
+  const binding = await tx.doc(SandboxDoc, child.id);
+  binding.key = start.runId;
+  binding.owner = start.parentId;
+  draft.conversationId = child.id;
+  draft.model = start.model;
+  draft.thinkingLevel = start.thinkingLevel;
+  draft.token = start.token;
+  draft.waitTaskId = await tx.createTask(DelegateWait, {
+    runId: start.runId,
+    childId: child.id,
+    parentId: start.parentId,
+    task: start.task,
+    requestId: "delegate:" + start.runId + "#0",
+    noticeId: "delegate:notice:" + start.runId + "#0",
+    token: start.token,
+    ...(start.scheduleSource === undefined ? {} : { scheduleSource: start.scheduleSource }),
+  }, { ownership: { kind: "conversation" }, conversationId: start.parentId, background: true });
+  return { runId: start.runId, childId: child.id };
+}
+
+interface WaitInput extends Settling {
   childId: ConversationId;
   prompt?: string;
   requestId: string;
 }
 
-export interface WaitCheckpoint {
+interface WaitCheckpoint {
   phase: "wait";
 }
 
-export interface WaitResult {
+interface WaitResult {
   runId: string;
   status: "done" | "failed" | "closed";
 }
@@ -75,7 +132,7 @@ function noticeText(short: string, status: string, task: string, body: string, t
   return head + "### " + short + " (" + status + ")\nTask: " + oneLine(task) + "\n\n" + body;
 }
 
-export interface Settling {
+interface Settling {
   runId: string;
   parentId: ConversationId;
   task: string;
@@ -84,7 +141,7 @@ export interface Settling {
   scheduleSource?: ScheduleMessageSource;
 }
 
-export async function settle<I extends Settling, S extends { phase: string }>(input: I, runtime: TaskRuntime<I, S, WaitResult, object>, context: Context, status: "done" | "failed", text: string, usage: RunUsage | null): Promise<void> {
+async function settle<I extends Settling, S extends { phase: string }>(input: I, runtime: TaskRuntime<I, S, WaitResult, object>, context: Context, status: "done" | "failed", text: string, usage: RunUsage | null): Promise<void> {
   const short = shortId(input.runId);
   const parent = await runtime.conversation(input.parentId, context);
   const endedAt = runtime.now();
@@ -97,12 +154,7 @@ export async function settle<I extends Settling, S extends { phase: string }>(in
       requestId: input.noticeId,
     })) : undefined;
     const run = await tx.doc(RunFamily, input.runId, { id: input.runId, task: input.task, description: "", origin: [], agent: "", cwd: "" });
-    if (notice !== undefined) {
-      await bindDelivery(tx, run.origin, notice);
-      const bindings = await tx.doc(InjectionBindings);
-      const requestId = [...run.origin].reverse().map((id) => bindings.requests[String(id)]).find((id) => id !== undefined);
-      if (requestId !== undefined) bindings.requests[String(notice)] = requestId;
-    }
+    if (notice !== undefined) await linkFollowup(tx, run.origin, notice);
     await updateRun(tx, input.runId, status === "done" ? { status, endedAt, output: text, usage, noticeId: notice ?? null } : { status, endedAt, error: text, usage, noticeId: notice ?? null });
     return { status: "terminal", outcome: { status: "completed", result: { runId: input.runId, status } } };
   }, context);

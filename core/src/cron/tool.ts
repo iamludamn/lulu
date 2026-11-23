@@ -1,12 +1,10 @@
-import type { ToolRegistration } from "@earendil-works/pi-durable";
-import { defineTool, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord/context";
+import { defineExtension, defineTool, section, type ToolExecutionApi, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
 import { Type, type Static } from "typebox";
 import { runIdOf, shortId } from "../delegate/runs.js";
+import { STORED_EXTENSION_NAMES } from "../durable-names.js";
 import type { Schedule } from "../protocol/contract.js";
-import { CronJobsDoc } from "./doc.js";
-import { scheduleRow } from "./overview.js";
-import { nextRunAfter, validTime, validTimeZone, type ScheduledJob } from "./schedule.js";
+import { CronJobsDoc, nextRunAfter, scheduleRow, validTime, validTimeZone, type ScheduledJob } from "./schedule.js";
 
 const ScheduleParams = Type.Object({
   action: Type.Union([Type.Literal("create"), Type.Literal("list"), Type.Literal("pause"), Type.Literal("resume"), Type.Literal("delete")], {
@@ -138,4 +136,16 @@ export const ScheduleTool: ToolRegistration = defineTool({
         return fail("unknown action: " + String((args as ScheduleArgs).action));
     }
   },
+});
+
+const ScheduledJobsSection = section("scheduled_jobs", async (input, context) => {
+  const jobs = (await input.read.snapshot(CronJobsDoc, context))?.jobs ?? [];
+  const rows = jobs.filter((job) => job.state === "active" || job.state === "paused").map((job) => "- " + job.name + " (" + job.schedule.kind + ", " + job.state + ")");
+  return rows.length === 0 ? undefined : rows.join("\n");
+});
+
+export const CronExtension = defineExtension({
+  name: STORED_EXTENSION_NAMES.cron,
+  tools: [ScheduleTool],
+  sections: [ScheduledJobsSection],
 });

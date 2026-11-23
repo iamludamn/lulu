@@ -3,12 +3,12 @@ import { test } from 'node:test';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { validateToolArguments } from '@earendil-works/pi-ai/utils/validation';
 import { createSession, MemoryStorage } from '@earendil-works/pi-durable';
-import { checkItem } from '../dist/panel/check.js';
-import { PanelDoc } from '../dist/panel/doc.js';
-import { createPanelTool } from '../dist/panel/tool.js';
+import { checkItem } from '../dist/panel.js';
+import { PanelDoc } from '../dist/panel.js';
+import { createPanelTool } from '../dist/panel.js';
 import { SendInput } from '../dist/protocol/send.js';
-import { keepWidget } from '../dist/send/keep.js';
-import { deliveredSentIn } from '../dist/send/sent.js';
+import { keepWidget } from '../dist/panel.js';
+import { deliveredSentIn } from '../dist/conversation/transcript.js';
 import { createSendTool } from '../dist/send/tool.js';
 
 const ctx = BACKGROUND_CONTEXT;

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createSession, MemoryStorage } from "@earendil-works/pi-durable";
-import { CronJobsDoc } from "../dist/cron/doc.js";
-import { cronDueAt, fireDue, nextAlarm } from "../dist/cron/engine.js";
+import { CronJobsDoc } from "../dist/cron/schedule.js";
+import { cronDueAt, fireDue, nextAlarm } from "../dist/cron/alarm.js";
 import { CronTriggerRegistration } from "../dist/cron/registration.js";
 import { dailyUtcCrons, GRACE_MS, onceCronTime, utcDailyCron, utcOnceCron } from "../dist/cron/schedule.js";
 

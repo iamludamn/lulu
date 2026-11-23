@@ -1,6 +1,43 @@
-import { defineEntry, type EntryRecord } from "@earendil-works/pi-durable";
+import type { Message } from "@earendil-works/pi-ai";
+import { BACKGROUND_CONTEXT, type Context } from "@earendil-works/chord/context";
+import { defineEntry, type Conversation, type ConversationView, type EntryId, type EntryRecord, type Harness, type SubmissionId, type SubmissionRecord } from "@earendil-works/pi-durable";
+import type { Episode } from "../memory/doc.js";
 import { SCHEDULE_OFFER_KIND, SCHEDULE_ORIGIN_PREFIX } from "../protocol/panel.js";
 import { SEND_TOOL, isScheduleOverviewRequest, type ScheduleOverviewRequest, type SendCard, type SendDetails, type SendInput } from "../protocol/send.js";
+
+export const HISTORY_PAGE_SIZE = 200;
+
+export async function observeView(harness: Harness, conversation: Conversation, changed: () => void): Promise<{ readonly value: ConversationView }> {
+  let value: ConversationView;
+  const observation = await harness.observeConversation(conversation.id, {
+    advance: (call) => {
+      if (call.kind !== "value") return;
+      value = call.value;
+      changed();
+    },
+    end: () => {},
+  }, BACKGROUND_CONTEXT, { min: HISTORY_PAGE_SIZE, max: HISTORY_PAGE_SIZE * 2 });
+  value = observation.value;
+  return { get value() { return value; } };
+}
+
+export async function entryRange(conversation: Conversation, after: number, through: number | undefined, context: Context): Promise<EntryRecord[]> {
+  const entries: EntryRecord[] = [];
+  let cursor;
+  do {
+    const page = await conversation.entries({ minEntryId: (after + 1) as EntryId, ...(through === undefined ? {} : { maxEntryId: through as EntryId }), order: "ascending" }, HISTORY_PAGE_SIZE, cursor, context);
+    entries.push(...page.items);
+    cursor = page.next;
+  } while (cursor !== undefined);
+  return entries;
+}
+
+export type SubmissionReader = (id: SubmissionId, context: Context) => Promise<SubmissionRecord | undefined>;
+
+export async function readSubmission(harness: Harness, id: SubmissionId, context: Context): Promise<SubmissionRecord | undefined> {
+  const submission = await harness.submission(id, context);
+  return submission?.status(context);
+}
 
 export type Sent = { id: string; entry: number; input: SendInput };
 export const LegacyScheduleOfferEntry = defineEntry<{ widget: Extract<SendCard, { kind: "panel" }>; at: number }>(SCHEDULE_OFFER_KIND);
@@ -39,7 +76,7 @@ export function sentIn(entries: readonly { id?: unknown; kind?: unknown; model?:
   return sent;
 }
 
-export const sentOf = (entries: readonly { id?: unknown; kind?: unknown; model?: unknown }[], origin: string): SendCall | undefined =>
+const sentOf = (entries: readonly { id?: unknown; kind?: unknown; model?: unknown }[], origin: string): SendCall | undefined =>
   sentIn(entries).find((sent) => sent.id === origin);
 
 const quoted = (input: Pick<SendInput, "content" | "body">): string | undefined => [input.content?.trim(), input.body?.trim()].filter((part) => part).join("\n\n") || undefined;
@@ -89,5 +126,28 @@ export function deliveredSentIn(entries: readonly EntryRecord[]): Sent[] {
       }
       return [{ ...sent, input: { ...input, ...(requested && { widget: requested }) } }];
     });
+  });
+}
+
+const EPISODE_CHARACTERS = 2000;
+
+const textOf = (message: Message | undefined): string => {
+  if (message === undefined) return "";
+  if (typeof message.content === "string") return message.content;
+  return message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
+};
+
+const episodeOf = (entry: EntryRecord, refused: ReadonlySet<string>): Episode | undefined => {
+  const role = entry.kind === "pi.user" ? "user" : entry.kind === "pi.assistant" ? "assistant" : undefined;
+  if (role === undefined) return undefined;
+  const text = (role === "assistant" ? spokenText(sentIn([entry], refused)) : textOf(entry.model?.[0]).trim()).slice(0, EPISODE_CHARACTERS);
+  return text === "" ? undefined : { id: Number(entry.id), role, text };
+};
+
+export function episodesOf(entries: readonly EntryRecord[]): Episode[] {
+  const refused = refusedIn(entries);
+  return entries.flatMap((entry) => {
+    const episode = episodeOf(entry, refused);
+    return episode === undefined ? [] : [episode];
   });
 }

@@ -3,6 +3,9 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { Tx } from "@earendil-works/pi-durable";
 import type { SpaceMonitor, SpaceStatus } from "../protocol/panel.js";
 import { STORED_DOC_KINDS } from "../durable-names.js";
+import type { Environment } from "../host/types.js";
+import { monitorDataProblem, monitorProblem } from "./monitor-contract.js";
+import { monitorCredentials, SourceError, stable } from "./source.js";
 
 export type Mode = SpaceStatus["mode"];
 
@@ -113,4 +116,50 @@ export async function archiveRefresh(tx: Tx, id: string): Promise<void> {
     entry.retryAt = null;
     await stopTracking(tx, id);
   }
+}
+
+export function initializeRefresh(mode: Mode, old: Refresh | undefined, notify: boolean, now: number): Refresh {
+  return {
+    generation: crypto.randomUUID(), mode, notify, enabled: mode.kind !== "manual", archived: false,
+    nextAt: mode.kind === "scheduled" ? now : null, retryAt: mode.kind === "subscription" ? now : null,
+    ...(mode.kind === "scheduled" && { immediatePull: true }),
+    monitor: null, providerState: mode.kind === "subscription" ? "create" : null, startedAt: now,
+    checkedAt: null, updatedAt: old?.updatedAt ?? null, error: null,
+    version: old?.version ?? 0, seen: old?.seen ?? 0, delivered: old?.delivered ?? 0,
+    ...(old?.credits !== undefined && { credits: old.credits }),
+    findings: old?.findings ?? [], ...(old?.value !== undefined && { value: old.value }), inbox: [], runs: [], changes: old?.changes ?? [], cost: old?.cost ?? 0,
+  };
+}
+
+function extractMode(monitor: SpaceMonitor): Mode {
+  return { kind: "subscription", provider: "context", goal: monitor.goal, source: { kind: "extract", url: monitor.url, schema: monitor.schema } };
+}
+
+export function startExtract(monitor: SpaceMonitor, previous?: Refresh): Refresh {
+  const entry = initializeRefresh(extractMode(monitor), previous, monitor.notify === true, Date.now());
+  if (entry.value !== undefined && monitorDataProblem(monitor.schema, JSON.parse(entry.value)) !== undefined) delete entry.value;
+  return entry;
+}
+
+export async function keepMonitoredSpace(tx: Tx, id: string, monitor: SpaceMonitor, env: Environment): Promise<void> {
+  const problem = monitorProblem(monitor);
+  if (problem !== undefined) throw new SourceError(400, problem);
+  monitorCredentials(env, "context");
+  const doc = await tx.doc(SpaceRefreshDoc, id, null);
+  const previous = doc.entry;
+  if (previous?.mode.kind === "subscription" && previous.providerState !== "deleted") {
+    if (stable(previous.mode) === stable(extractMode(monitor)) && previous.providerState !== "delete") {
+      previous.notify = monitor.notify === true;
+      return;
+    }
+    previous.replacement = monitor;
+    previous.providerState = "delete";
+    previous.enabled = false;
+    previous.retryAt = Date.now();
+    previous.inbox = [];
+  } else {
+    doc.entry = startExtract(monitor, previous);
+  }
+  const index = await tx.doc(SpaceRefreshIndex);
+  if (!index.ids.includes(id)) index.ids.push(id);
 }

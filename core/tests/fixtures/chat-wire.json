@@ -1,0 +1,39 @@
+{
+  "state": {
+    "type": "state",
+    "view": { "entries": [], "docs": {}, "order": [], "reset": true, "deliveryReceipts": true },
+    "progress": { "messages": [], "hiddenEntries": [] },
+    "mcp": [],
+    "panel": {
+      "order": ["lulu:schedules"],
+      "widgets": {
+        "lulu:schedules": {
+          "id": "lulu:schedules",
+          "size": "m",
+          "title": "定时任务",
+          "icon": "clock",
+          "body": { "kind": "schedules", "revision": 2, "rows": [] },
+          "updatedAt": 1,
+          "origin": "schedule-offer"
+        }
+      },
+      "spaceUpdates": {},
+      "scheduleRevision": 2,
+      "scheduleReceipts": {
+        "schedule-offer": { "action": "add", "requestIds": ["keep-schedule"] }
+      }
+    },
+    "assets": []
+  },
+  "legacyState": {
+    "type": "state",
+    "view": { "entries": [], "docs": {} },
+    "progress": { "messages": [], "hiddenEntries": [] },
+    "mcp": []
+  },
+  "receipt": {
+    "type": "prompt.receipts",
+    "source": "snapshot",
+    "receipts": [{ "requestId": "request-1", "callId": "reply-1" }]
+  }
+}

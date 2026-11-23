@@ -1,12 +1,11 @@
 import { defineTool, LiveDoc, type DocumentReader, type ToolRegistration } from "@earendil-works/pi-durable";
 import { BACKGROUND_CONTEXT, type Context } from "@earendil-works/chord/context";
 import { Type } from "typebox";
-import { PanelDoc } from "../panel/doc.js";
-import { AssetsDoc } from "../send/doc.js";
+import { AssetsDoc, PanelDoc } from "../panel.js";
 import { ARTIFACT_REF } from "../protocol/send.js";
 import type { DurableHost } from "../host/types.js";
 import { DreamingBindings, DreamingSources, type MemorySource, type SourceRef } from "./doc.js";
-import { isSensitive } from "./guard.js";
+import { isSensitive } from "./files.js";
 
 export const sourceVersion = async (value: unknown): Promise<string> => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(value)))), (byte) => byte.toString(16).padStart(2, "0")).join("");
 

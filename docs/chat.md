@@ -7,7 +7,7 @@
 | [`hello` / `state`](../core/src/protocol/wire.ts) | Open Chat and receive its snapshot or subsequent updates. |
 | [`prompt.submit`](../core/src/conversation/bot.ts) | Submit a User Message. A successful result confirms acceptance. |
 | [`send_to_user`](../core/src/send/tool.ts) | Deliver an Assistant Message with text, optional Markdown, or a [card](panel-and-assets.md). |
-| [`prompt.receipts`](../core/src/conversation/delivery.ts) | Report replies received by the client. |
+| [`prompt.receipts`](../core/src/conversation/requests.ts) | Report replies received by the client. |
 
 ## Core entities
 

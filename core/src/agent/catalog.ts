@@ -5,9 +5,9 @@ import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
 import { DelegateAgents } from "../delegate/agents.js";
 import { createDelegateExtension } from "../delegate/extension.js";
 import { findDelegateRun } from "../delegate/runs.js";
-import { CronExtension } from "../cron/extension.js";
-import { createPanelExtension } from "../panel/extension.js";
-import { createSendExtension } from "../send/extension.js";
+import { CronExtension } from "../cron/tool.js";
+import { createPanelExtension } from "../panel.js";
+import { createSendExtension } from "../send/tool.js";
 import type { ArtifactCheck } from "../send/tool.js";
 import { createEnvironmentExtension } from "../sandbox/extension.js";
 import { createSandboxProvider } from "../sandbox/backends.js";
@@ -19,7 +19,7 @@ import { artifactConfigured } from "../artifact/s3.js";
 import type { McpHost } from "./mcp.js";
 import type { DurableHost } from "../host/types.js";
 import { STORED_EXTENSION_NAMES } from "../durable-names.js";
-import { contextMonitorConfigured } from "../space/refresh.js";
+import { contextMonitorConfigured } from "../space/source.js";
 
 export type HarnessDeps = { host: DurableHost; mcp: McpHost };
 

@@ -1,14 +1,12 @@
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { DocumentId, Harness, JsonObject, Storage, StorageWrite, Tx } from "@earendil-works/pi-durable";
-import { CronJobsDoc } from "../cron/doc.js";
-import { projectScheduleOverview } from "../cron/overview.js";
+import { CronJobsDoc, projectScheduleOverview } from "../cron/schedule.js";
 import { STORED_DOC_KINDS as kinds } from "../durable-names.js";
 import type { DurableStorage } from "../host/types.js";
 import { EMPTY_PANEL, type PanelState } from "../protocol/panel.js";
 import type { AssetItem } from "../protocol/send.js";
-import { AssetsDoc } from "../send/doc.js";
 import { SpaceRefreshDoc, SpaceRefreshIndex, spaceStatus, type Refresh } from "../space/doc.js";
-import { PanelDoc } from "../panel/doc.js";
+import { AssetsDoc, PanelDoc } from "../panel.js";
 
 const scope = { kind: "session" } as const;
 const managed = [kinds.panel, kinds.assets, kinds.cronJobs, kinds.spaceRefreshIndex, kinds.spaceRefresh];
