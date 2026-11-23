@@ -4,12 +4,12 @@
   "private": true,
   "workspaces": [
     "core",
-    "client",
+    "client/web",
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present && npm run build --prefix client/desktop",
-    "check": "grep -rnE '(from|import)[^[:alnum:]_]*(node|cloudflare):' core/src; test $? -eq 1 && npm run build -w @lulu/core && npm run check -w @lulu/cf -w @lulu/client",
+    "build": "npm run build -w @lulu/core -w @lulu/web",
+    "check": "grep -rnE '(from|import)[^[:alnum:]_]*(node|cloudflare):' core/src; test $? -eq 1 && npm run build -w @lulu/core && npm run check -w @lulu/cf -w @lulu/web",
     "test": "npm run test --workspaces --if-present",
     "lint": "oxlint --type-aware core/src apps/cf/src client/web/src"
   },

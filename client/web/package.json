@@ -1,12 +1,12 @@
 {
-  "name": "@lulu/client",
+  "name": "@lulu/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build web",
-    "check": "tsc --noEmit -p web/tsconfig.json",
-    "dev": "vite web"
+    "build": "vite build",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "dev": "vite"
   },
   "dependencies": {
     "@lulu/core": "*",

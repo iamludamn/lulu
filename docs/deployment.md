@@ -29,7 +29,7 @@ npm exec -- wrangler d1 migrations apply LULU_METADATA --config wrangler.local.j
 npm exec -- wrangler deploy --config wrangler.local.jsonc
 ```
 
-For local development, apply the D1 schema with `npm exec -- wrangler d1 migrations apply LULU_METADATA --config wrangler.local.jsonc --local`, then run `npm exec -- wrangler dev --config wrangler.local.jsonc` from `apps/cf`. To load bindings from a secret manager's process environment, set `CLOUDFLARE_INCLUDE_PROCESS_ENV=true`. The Worker listens on port 8787 by default. For the Web client, run `npm run dev -w @lulu/client` from the root.
+For local development, apply the D1 schema with `npm exec -- wrangler d1 migrations apply LULU_METADATA --config wrangler.local.jsonc --local`, then run `npm exec -- wrangler dev --config wrangler.local.jsonc` from `apps/cf`. To load bindings from a secret manager's process environment, set `CLOUDFLARE_INCLUDE_PROCESS_ENV=true`. The Worker listens on port 8787 by default. To develop the Web configuration UI, run `npm run dev -w @lulu/web` from the root after building `core`.
 
 ## Cloudflare Cron
 

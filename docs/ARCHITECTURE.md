@@ -1,10 +1,18 @@
 # Architecture
 
-lulu is a self-hosted personal AI assistant for persistent conversations, memory, delegated work, and scheduled tasks. The native clients expose [Panel](panel-and-assets.md), [Chat](chat.md), and [Assets](panel-and-assets.md).
+lulu is a self-hosted personal AI assistant for persistent conversations, memory, delegated work, and scheduled tasks. The iOS app exposes [Panel](panel-and-assets.md), [Chat](chat.md), and [Assets](panel-and-assets.md).
 
 ## Repository map
 
-The assistant logic and shared protocol live in [`core/`](../core) and use Pi Durable. [`apps/cf/`](../apps/cf) hosts the core on a Cloudflare Worker and SQLite-backed Durable Objects. [`client/`](../client) contains the iOS and desktop apps and the web MCP administration UI. Telemetry collection and Grafana dashboards live in [`ops/observability/`](../ops/observability).
+| Path | Responsibility |
+| --- | --- |
+| [`client/ios/`](../client/ios) | Primary app. LuluKit implements the client protocol and session logic. |
+| [`client/web/`](../client/web) | Web configuration workspace, currently serving the MCP administration UI. |
+| [`core/`](../core) | Assistant logic and protocol. The Web workspace consumes the protocol exports, and the Worker consumes explicit `workerd` entry points. |
+| [`apps/cf/`](../apps/cf) | Cloudflare Worker, Durable Object adapters, D1 and static asset bindings. |
+| [`ops/observability/`](../ops/observability) | Telemetry collection and Grafana dashboards. |
+
+Run `npm run lint` after `npm run check` to check the TypeScript sources for runtime import cycles. Type-only imports can form cycles. CI builds the Worker and Web assets on Linux and verifies the iOS app on macOS.
 
 ## Core APIs
 
@@ -20,6 +28,8 @@ The assistant logic and shared protocol live in [`core/`](../core) and use Pi Du
 | Entity | Owns |
 | --- | --- |
 | [Bot](../core/src/conversation/bot.ts) | One Durable Object named `main`. Pi Durable SQLite owns the transcript, submissions, task graph, live socket state, delegated runs, and sandbox lifecycle. |
+| [Chat requests](../core/src/conversation/requests.ts) | Admission, deadlines, delivery retries and receipts. The chat module owns the persisted request state. |
+| [Panel and Assets](../core/src/panel.ts) | Acceptance of offered cards, Checklist changes and Asset order. |
 | [Memory](memory.md) | Published memory files, background processing, and request-scoped retrieval. |
 | [Bot data](../core/src/conversation/bot-data.ts) | D1 stores Panel, accepted Asset references, Space refresh metadata, and schedules. The Bot keeps transaction-local copies and can restore them from D1. The bucket holds the derived startup snapshot. |
 | [Artifact Worker](../apps/cf/src/artifacts.ts) | File bodies in the object bucket. D1 transactions own version metadata, upload reservations, request IDs, and quota. Pinned file references retain their original object keys. |
@@ -28,7 +38,8 @@ The assistant logic and shared protocol live in [`core/`](../core) and use Pi Du
 
 ```mermaid
 flowchart LR
-    Native(iOS and desktop)
+    Native(iOS app)
+    Web(Web configuration)
     Worker(Cloudflare Worker)
     Cron(Cloudflare Cron)
     Artifact(Artifact Worker)
@@ -45,6 +56,7 @@ flowchart LR
 
     Native -->|Startup and Space reads| Worker
     Native -->|WebSocket via Worker| Main
+    Web -->|Configuration API| Worker
     Cron --> Worker
     Worker -->|Due jobs and external events| Main
     Worker -->|Startup snapshot| Bucket
