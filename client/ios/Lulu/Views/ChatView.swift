@@ -11,6 +11,7 @@ struct ChatView: View {
     let api: Api
     let containerBottomInset: CGFloat
     @Binding var draft: String
+    @Binding var sent: Int
     var composing: FocusState<Bool>.Binding
     let onKept: (Page) -> Void
     let onVoiceConversation: () -> Void
@@ -18,10 +19,7 @@ struct ChatView: View {
     let onReaderFrame: (ReaderFrame) -> Void
     @State private var bottomState = ChatBottomState()
     @State private var composerBottom: CGFloat?
-    @State private var sent = 0
     @State private var syncingReference = false
-    @State private var keyboardTop: CGFloat?
-    @State private var composerContainerBottom: CGFloat?
     @State private var referenceError: String?
     @State private var preventedAccept: String?
     @State private var keeping: Set<String> = []
@@ -122,6 +120,7 @@ struct ChatView: View {
                 if case .failed = current { revealAnchor = nil }
             }
             .onChange(of: sent) {
+                followLatest()
                 Task {
                     try? await Task.sleep(for: .milliseconds(60))
                     guard bottomState.pinned else { return }
@@ -211,10 +210,7 @@ struct ChatView: View {
                         composerBottom = frame.maxY
                         updateBottomState()
                     }
-                    .padding(.bottom, keyboardOverlap)
-                    .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: {
-                        composerContainerBottom = $0
-                    }
+                    .modifier(ComposerKeyboardAvoidance(focused: composing.wrappedValue))
             }
         }
         .overlay {
@@ -227,14 +223,6 @@ struct ChatView: View {
                 }
                 .ignoresSafeArea(.container, edges: .bottom)
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
-            guard let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-                  let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
-                    .first(where: { $0.activationState == .foregroundActive })?.keyWindow else { return }
-            let keyboardFrame = window.convert(frame, from: window.screen.coordinateSpace)
-            let coversBottom = keyboardFrame.maxY >= window.bounds.maxY - 1 && keyboardFrame.minY < window.bounds.maxY
-            keyboardTop = coversBottom ? keyboardFrame.minY : nil
         }
         .overlayPreferenceValue(LongBubbleBounds.self) { bounds in
             GeometryReader { proxy in
@@ -309,11 +297,6 @@ struct ChatView: View {
         scroll.setContentOffset(CGPoint(x: offset.x, y: target), animated: false)
     }
 
-    private var keyboardOverlap: CGFloat {
-        guard composing.wrappedValue, let keyboardTop, let composerContainerBottom else { return 0 }
-        return max(0, composerContainerBottom - keyboardTop)
-    }
-
     private func transcribed(_ text: String, sendImmediately: Bool) {
         if sendImmediately {
             submit(text, clearDraft: false)
@@ -341,10 +324,11 @@ struct ChatView: View {
             Task {
                 defer { syncingReference = false }
                 do {
-                    if noteStore.hasLocalEdits(reference.id) { try await noteStore.synchronize(reference.id) }
+                    let synced = try await noteStore.synchronizedReference(reference)
                     guard store.snapshot.link == .online else { throw ApiError.message("当前未连接，请联网后重试") }
-                    guard let synced = noteStore.context, synced.id == reference.id, synced.payload == reference.payload,
-                          synced.revision > 0 else { throw ApiError.message("笔记引用已变化，请确认后重新发送") }
+                    guard noteStore.context?.id == synced.id else {
+                        throw ApiError.message("笔记引用已变化，请确认后重新发送")
+                    }
                     store.submit(text, noteId: synced.id, revision: synced.revision)
                     didSend(clearDraft: clearDraft && draft == draftAtSend)
                 } catch {
@@ -361,7 +345,6 @@ struct ChatView: View {
     }
 
     private func didSend(clearDraft: Bool) {
-        followLatest()
         sent += 1
         if clearDraft { draft = "" }
     }

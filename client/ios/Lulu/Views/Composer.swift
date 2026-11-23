@@ -12,7 +12,7 @@ struct Composer: View {
     let placeholder: String
     var focused: FocusState<Bool>.Binding
     let onSend: () -> Void
-    let onVoiceConversation: () -> Void
+    let onVoiceConversation: (() -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var listening = false
@@ -102,7 +102,7 @@ struct Composer: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            if listening {
+            if listening, onVoiceConversation != nil {
                 conversationOption
                     .padding(.trailing, 16)
                     .offset(y: -(voiceRadius + 8))
@@ -205,7 +205,7 @@ struct Composer: View {
         case .text:
             transcription.finish { text in onTranscribed(text, false) }
         case .cancel: transcription.cancel(); showNotice("已取消")
-        case .conversation: transcription.cancel(); notice = nil; onVoiceConversation()
+        case .conversation: transcription.cancel(); notice = nil; onVoiceConversation?()
         }
         listening = false
         voiceTarget = .send
@@ -230,7 +230,7 @@ struct Composer: View {
 
     private func target(for translation: CGSize) -> VoiceTarget {
         let x = translation.width, y = translation.height
-        if hypot(x, y + voiceRadius) < 32 { return .conversation }
+        if onVoiceConversation != nil, hypot(x, y + voiceRadius) < 32 { return .conversation }
         if x < -77 && abs(y) < 30 { return .text }
         return hypot(x, y) <= 30 ? .send : .cancel
     }
@@ -243,6 +243,33 @@ struct Composer: View {
             .glassEffect(.regular, in: .circle)
             .scaleEffect(voiceTarget == .conversation ? 1.1 : 1)
             .accessibilityLabel("语音对话")
+    }
+}
+
+struct ComposerKeyboardAvoidance: ViewModifier {
+    let focused: Bool
+    @State private var keyboardTop: CGFloat?
+    @State private var containerBottom: CGFloat?
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.bottom, overlap)
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: {
+                containerBottom = $0
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+                guard let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+                      let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+                        .first(where: { $0.activationState == .foregroundActive })?.keyWindow else { return }
+                let keyboardFrame = window.convert(frame, from: window.screen.coordinateSpace)
+                let coversBottom = keyboardFrame.maxY >= window.bounds.maxY - 1 && keyboardFrame.minY < window.bounds.maxY
+                keyboardTop = coversBottom ? keyboardFrame.minY : nil
+            }
+    }
+
+    private var overlap: CGFloat {
+        guard focused, let keyboardTop, let containerBottom else { return 0 }
+        return max(0, containerBottom - keyboardTop)
     }
 }
 

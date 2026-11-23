@@ -66,6 +66,7 @@ final class AppModel {
             }
             guard status == errSecSuccess || (token.isEmpty && status == errSecItemNotFound) else { return false }
         }
+        connection?.store.stop()
         connection = nil
         server = address
         connectionRevision += 1

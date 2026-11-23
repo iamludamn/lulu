@@ -288,11 +288,17 @@ struct NoteDetailView: View {
     let files: [NoteFile]
     let botId: String
     let api: Api
+    let store: BotStore
     let onDiscuss: (UUID) -> Void
+    let onSend: (UUID, String) async throws -> Void
     let onSource: (String) -> Void
-    let newNote: () -> Void
     @FocusState private var titleFocused: Bool
     @FocusState private var focusedBlock: UUID?
+    @FocusState private var messageFocused: Bool
+    @State private var message = ""
+    @State private var transcription = VoiceTranscription()
+    @State private var sendTask: Task<Void, Never>?
+    @State private var sendError: String?
     @State private var selections: [UUID: TextSelection] = [:]
     @State private var fileInsertion: InsertionPoint?
     @State private var showsFiles = false
@@ -329,33 +335,67 @@ struct NoteDetailView: View {
             .padding(.top, 8)
         }
         .scrollDismissesKeyboard(.interactively)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !titleFocused && focusedBlock == nil {
+                Composer(draft: $message, store: store, transcription: transcription,
+                         onTranscribed: transcribed, busy: false, placeholder: "和 lulu 聊聊这篇笔记",
+                         focused: $messageFocused, onSend: { send(message) }, onVoiceConversation: nil)
+                    .frame(maxWidth: 720)
+                    .padding(.bottom, 4)
+                    .modifier(ComposerKeyboardAvoidance(focused: messageFocused))
+            }
+        }
         .background(Color.paper.ignoresSafeArea())
-        .toolbarVisibility(.visible, for: .navigationBar, .bottomBar)
+        .toolbarVisibility(.visible, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("带回对话", systemImage: "arrow.turn.down.left") { onDiscuss(value.id) }
             }
-            ToolbarItemGroup(placement: .bottomBar) {
-                insertionControls
-            }
             ToolbarItemGroup(placement: .keyboard) {
-                if !titleFocused { insertionControls }
-                Spacer()
-                Button("完成") {
-                    titleFocused = false
-                    focusedBlock = nil
+                if titleFocused || focusedBlock != nil {
+                    if !titleFocused { insertionControls }
+                    Spacer()
+                    Button("完成") {
+                        titleFocused = false
+                        focusedBlock = nil
+                    }
                 }
             }
-            ToolbarSpacer(.flexible, placement: .bottomBar)
-            ToolbarItem(placement: .bottomBar) {
-                Button("新建笔记", systemImage: "square.and.pencil", action: newNote)
-            }
         }
+        .alert("无法发送", isPresented: Binding(get: { sendError != nil }, set: { if !$0 { sendError = nil } })) {
+            Button("好", role: .cancel) { sendError = nil }
+        } message: {
+            Text(sendError ?? "")
+        }
+        .onDisappear { sendTask?.cancel() }
         .sheet(isPresented: $showsFiles) { filePicker }
         .sheet(item: $previewFile) { NoteMockFileSheet(file: $0, botId: botId, api: api) }
     }
 
+    private func transcribed(_ text: String, sendImmediately: Bool) {
+        message += text
+        if sendImmediately {
+            send(message)
+        } else {
+            messageFocused = true
+        }
+    }
+
+    private func send(_ draft: String) {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, sendTask == nil else { return }
+        let id = note.id
+        sendTask = Task {
+            defer { sendTask = nil }
+            do {
+                try await onSend(id, text)
+                messageFocused = false
+            } catch {
+                if !Task.isCancelled { sendError = error.localizedDescription }
+            }
+        }
+    }
 
     private struct InsertionPoint {
         let block: UUID?

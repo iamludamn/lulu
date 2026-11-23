@@ -357,6 +357,15 @@ final class NoteStore {
 
     func hasLocalEdits(_ id: UUID) -> Bool { dirty.contains(id) }
 
+    func synchronizedReference(_ reference: Note) async throws -> Note {
+        if hasLocalEdits(reference.id) { try await synchronize(reference.id) }
+        guard let synced = notes.first(where: { $0.id == reference.id }),
+              synced.payload == reference.payload, synced.revision > 0 else {
+            throw ApiError.message("笔记引用已变化，请确认后重新发送")
+        }
+        return synced
+    }
+
     func recordError(_ error: Error) { syncError = error.localizedDescription }
 
     func ingest(_ entries: [ConversationEntry]) {

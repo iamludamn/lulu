@@ -4,6 +4,7 @@ import LuluKit
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var phase
     @State private var covers = StartupCovers()
 
     private var loadingLayout: Bool {
@@ -57,7 +58,18 @@ struct RootView: View {
             guard revision == model.connectionRevision else { return }
             covers.finish(revision: revision)
         }
-        .task(id: model.connectionRevision) { await model.resolve() }
+        .task(id: model.connectionRevision) {
+            await model.resolve()
+            guard !Task.isCancelled, !model.mockData, let connection = model.connection else { return }
+            if phase != .background { connection.store.start() }
+            await SpacePush.shared.connect(api: connection.api, botId: connection.bot.id)
+        }
+        .onChange(of: phase) { _, next in
+            guard !model.mockData, let store = model.connection?.store else { return }
+            if next == .active { store.start() }
+            else if next == .background { store.stop() }
+        }
+        .onDisappear { model.connection?.store.stop() }
     }
 }
 
