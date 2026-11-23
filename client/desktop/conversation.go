@@ -149,6 +149,8 @@ func chatEntries(c *conversation, hidden []jsonID) []chatEntry {
 	delivered := deliveredCalls(c)
 	var result []chatEntry
 	var turn []entry
+	var userTurn bool
+	var legacyRepliesThrough int
 	closeTurn := func(fallback bool) {
 		var sent []chatEntry
 		for _, e := range turn {
@@ -165,7 +167,7 @@ func chatEntries(c *conversation, hidden []jsonID) []chatEntry {
 		if len(sent) > 0 {
 			result = append(result, sent...)
 		} else if fallback {
-			for i := len(turn) - 1; i >= 0; i-- {
+			for i := legacyRepliesThrough - 1; i >= 0; i-- {
 				if text := messageText(turn[i].Model); text != "" {
 					result = append(result, chatEntry{id: string(turn[i].ID), pos: position(turn[i].ID), text: text, at: messageTime(turn[i].Model)})
 					break
@@ -173,19 +175,32 @@ func chatEntries(c *conversation, hidden []jsonID) []chatEntry {
 			}
 		}
 		turn = nil
+		legacyRepliesThrough = 0
 	}
 	for _, e := range c.Entries {
-		if skipped[e.ID] {
-			continue
-		}
 		switch e.Kind {
 		case "pi.user":
+			if skipped[e.ID] {
+				continue
+			}
 			closeTurn(true)
+			userTurn = true
 			if text := messageText(e.Model); text != "" {
 				result = append(result, chatEntry{id: string(e.ID), pos: position(e.ID), user: true, text: text, at: messageTime(e.Model)})
 			}
 		case "pi.assistant", scheduleOfferKind:
+			if skipped[e.ID] {
+				continue
+			}
 			turn = append(turn, e)
+			if userTurn {
+				legacyRepliesThrough = len(turn)
+			}
+		default:
+			// Custom input entries have a user message for the model. Their replies require send_to_user.
+			if len(e.Model) > 0 && str(e.Model[0], "role") == "user" {
+				userTurn = false
+			}
 		}
 	}
 	closeTurn(false)

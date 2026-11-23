@@ -116,9 +116,13 @@ private func decodePanel(_ json: String) throws -> PanelState {
         """,
         result(4, "text"), result(5, "asset"), result(6, "widget"),
         result(7, "schedule", details: details), result(8, "failed", error: true, details: details),
+        #"{"id":9,"kind":"lulu.space-monitor","model":[{"role":"user","content":"Repair Space"}]}"#,
+        #"{"id":10,"kind":"lulu.input","model":[{"role":"user","content":"Scheduled reminder"}]}"#,
     ])
-    let entries = chatEntries(view, hidden: [])
+    let reloaded = try JSONDecoder().decode(ConversationView.self, from: JSONEncoder().encode(view))
+    let entries = chatEntries(reloaded, hidden: [])
     #expect(entries.map(\.id) == ["2", "text", "asset", "widget", "schedule"])
+    #expect(entries.filter { $0.role == .user }.map(\.text) == ["Show me"])
     #expect(entries[1].text == "Summary")
     #expect(entries[1].body == "# Details")
     guard case .asset? = entries[2].card, case .panel? = entries[3].card,
