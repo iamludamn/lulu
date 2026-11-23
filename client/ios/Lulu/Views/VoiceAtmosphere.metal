@@ -1,7 +1,6 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// A bounded, edge-tapered flow: no uncovered pixels, no moving rectangular layers.
 [[ stitchable ]] float2 voiceCloudFlow(float2 position, float2 size, float time, float level) {
     float2 uv = position / size;
     float t = time * 0.22;
@@ -30,9 +29,7 @@ using namespace metal;
         float halo = exp(-distance * distance / (12.0 + level * 24.0));
         alpha += (line * 0.115 + halo * 0.018) * brokenLight * (1.0 - float(i) * 0.13) * (0.8 + level * 2.7);
     }
-    // Measured voice energy expands the rings and strengthens their soft light.
     float glow = exp(-radius * radius / (size.x * size.x * 0.035));
     alpha += glow * level * 0.20;
-    // SwiftUI shader colors use premultiplied alpha.
     return half4(half3(0.91h, 0.99h, 1.0h) * half(alpha), half(alpha));
 }

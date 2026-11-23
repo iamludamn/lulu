@@ -17,10 +17,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: client/desktop/go.mod
-          cache-dependency-path: client/desktop/go.sum
       - run: npm ci
       - run: npm run check
       - run: npm run lint
@@ -31,4 +27,18 @@ jobs:
         env:
           E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
       - run: npm run build
-      - run: npm run build:cross --prefix client/desktop
+      - name: Bundle Worker and Web configuration assets
+        run: npm exec -w @lulu/cf -- wrangler deploy --dry-run --outdir "$RUNNER_TEMP/lulu-worker"
+
+  ios:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/lint-swift.sh
+      - run: swift test --package-path client/ios/LuluKit
+      - run: scripts/test-ios-experience.sh
+      - name: Build Lulu for iOS
+        run: >-
+          xcodebuild -project client/ios/Lulu.xcodeproj -scheme Lulu
+          -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/lulu-ios"
+          CODE_SIGNING_ALLOWED=NO build

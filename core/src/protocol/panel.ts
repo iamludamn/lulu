@@ -27,7 +27,7 @@ const Chart = Type.Object({
   series: Type.Array(Type.Object({ name: Type.String(), values: Type.Array(Type.Number()), tone: Type.Optional(Tone) }), { minItems: 1, maxItems: 3 }),
 });
 
-const ListItem = Type.Object({
+export const ListItem = Type.Object({
   title: Type.String(),
   subtitle: Type.Optional(Type.String()),
   value: Type.Optional(Type.String()),
@@ -38,13 +38,6 @@ const ListItem = Type.Object({
 const List = Type.Object({
   kind: Type.Literal("list"),
   items: Type.Array(ListItem, { maxItems: 12 }),
-});
-
-const Checklist = Type.Object({
-  kind: Type.Literal("list"),
-  items: Type.Array(Type.Object({ ...ListItem.properties, done: Type.Boolean() }), { minItems: 1, maxItems: 8 }),
-}, {
-  description: "A Checklist. Every item must have a done boolean so the user can check it off on Panel.",
 });
 
 const Timeline = Type.Object({
@@ -71,7 +64,7 @@ export const SpaceMonitor = Type.Object({
 }, { additionalProperties: false });
 export type SpaceMonitor = Static<typeof SpaceMonitor>;
 
-const Space = Type.Object({
+export const SpaceBody = Type.Object({
   kind: Type.Literal("space"),
   src: Type.String({ description: "artifact://spaces/<widget id>/index.html@version of the page; the widget id is the page's saved-state key" }),
   preview: Type.String({ description: "artifact://spaces/<widget id>/cover.html@version of the separate static cover" }),
@@ -121,7 +114,7 @@ export const SCHEDULE_WIDGET_ID = "lulu:schedules";
 export const SCHEDULE_OFFER_KIND = "lulu.schedules.offer";
 export const SCHEDULE_ORIGIN_PREFIX = "schedules:";
 
-const widgetProperties = {
+export const panelWidgetProperties = {
   id: Type.String({ description: "Stable kebab-case id of letters, digits, - and _, at most 64 characters; the user's panel keeps one widget per id" }),
   size: enumOf(["s", "m", "l"] as const, "s = 1x1, m = 2x1, l = 2x2"),
   title: Type.String(),
@@ -129,15 +122,9 @@ const widgetProperties = {
   tone: Type.Optional(Tone),
 };
 
-export const ChecklistWidgetInput = Type.Object({ ...widgetProperties, body: Checklist });
-export const MonitoredSpaceInput = Type.Object({
-  ...widgetProperties, body: Type.Object({ ...Space.properties, monitor: SpaceMonitor }),
-});
-
-// Stored Panel widgets and Chat offers keep their original wire formats.
 export const WidgetInput = Type.Object({
-  ...widgetProperties,
-  body: Type.Union([Stat, Gauge, Chart, List, Timeline, Note, Media, Space, Weather, Actions, Schedules]),
+  ...panelWidgetProperties,
+  body: Type.Union([Stat, Gauge, Chart, List, Timeline, Note, Media, SpaceBody, Weather, Actions, Schedules]),
 });
 export type WidgetInput = Static<typeof WidgetInput>;
 export type SchedulesBody = Static<typeof Schedules>;

@@ -3,9 +3,8 @@ import { RunFamily } from "../delegate/runs.js";
 import type { Context } from "@earendil-works/chord/context";
 import { defineExtension, section, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
 import { SandboxDoc } from "./doc.js";
-import { createSandboxLifecycle, SandboxLifecycleTimer, type SandboxLifecycleTask } from "./lifecycle.js";
+import { createSandboxLifecycle, openSandbox, releaseSandbox, SandboxLifecycleTimer, type SandboxLifecycleTask } from "./lifecycle.js";
 import type { SandboxProvider } from "./provider.js";
-import { openSandbox, releaseSandbox } from "./workspace.js";
 import { RENAMED_TASKS, STORED_EXTENSION_NAMES, withPreviousTaskName } from "../durable-names.js";
 
 export const CODING_TOOLS = ["read", "write", "edit", "bash"];

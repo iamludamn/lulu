@@ -5,18 +5,16 @@ import { test } from "node:test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createSession, MemoryStorage } from "@earendil-works/pi-durable";
 import { ArtifactService } from "../dist/artifact/service.js";
-import { CronJobsDoc } from "../dist/cron/doc.js";
+import { CronJobsDoc, utcDailyCron } from "../dist/cron/schedule.js";
 import { CronTriggerRegistration } from "../dist/cron/registration.js";
 import { STORED_DOC_KINDS as kinds } from "../dist/durable-names.js";
-import { PanelDoc } from "../dist/panel/doc.js";
+import { AssetsDoc, keepWidget, PanelDoc } from "../dist/panel.js";
 import { BotDataPersistence, startupData } from "../dist/conversation/bot-data.js";
 import { handleApi } from "../dist/server/api.js";
 import { D1ArtifactMetadata } from "../../apps/cf/src/artifact-metadata.ts";
 import { D1BotMetadata } from "../../apps/cf/src/bot-metadata.ts";
-import { AssetsDoc } from "../dist/send/doc.js";
 import { SpaceRefreshDoc, SpaceRefreshIndex } from "../dist/space/doc.js";
-import { keepMonitoredSpace, refreshDueSpaces, spaceCronDue } from "../dist/space/refresh.js";
-import { utcDailyCron } from "../dist/cron/schedule.js";
+import { refreshDueSpaces, spaceCronDue } from "../dist/space/refresh.js";
 
 const telemetry = { startSpan: (_options, run) => run({ setAttributes() {}, setStatus() {} }) };
 const space = { id: "demo-space", size: "l", title: "My Space", body: { kind: "space", src: "artifact://spaces/demo-space/index.html@3", preview: "artifact://spaces/demo-space/cover.html@2" } };
@@ -53,10 +51,17 @@ test("structured monitor preserves valid data and dispatches one repair per inco
     assert.equal(url, "https://api.context.dev/v1/monitors/mon_probe");
     return Response.json({ id: "mon_probe", status: "active", baseline: { captured_at: new Date(capturedAt).toISOString(), data: sample } });
   });
-  await session.commit(async (tx) => {
-    (await tx.doc(PanelDoc)).widgets[space.id] = space;
-    await keepMonitoredSpace(tx, space.id, { url: "https://example.com/videos", goal: "Find new videos", schema }, env);
-  }, context);
+  const offered = { ...space, body: { ...space.body, monitor: { url: "https://example.com/videos", goal: "Find new videos", schema } } };
+  const entries = [
+    { id: 1, kind: "pi.assistant", model: [{ content: [{
+      type: "toolCall", name: "send_to_user", id: "offer", arguments: { type: "widget", widget: { kind: "panel", panel: offered } },
+    }] }] },
+    { id: 2, kind: "pi.tool-result", model: [{ role: "toolResult", toolCallId: "offer" }] },
+  ];
+  await keepWidget(session, entries, "offer", true, "keep", env);
+  const kept = await session.snapshot(SpaceRefreshDoc, space.id, context);
+  await keepWidget(session, entries, "offer", true, "keep", env);
+  assert.deepEqual(await session.snapshot(SpaceRefreshDoc, space.id, context), kept);
   const update = () => refreshDueSpaces(session, env, Date.now() + 1000, undefined, undefined, repair);
   const read = async () => (await session.snapshot(SpaceRefreshDoc, space.id, context)).entry;
   const check = async (value) => {

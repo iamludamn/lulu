@@ -10,8 +10,6 @@ extension EnvironmentValues {
     @Entry var artifactZoom: Namespace.ID? = nil
 }
 
-/// A page opened as a space: `id` keys its saved state, `title` is the widget title. A preview is a card
-/// still in chat: it reads the saved state but keeps what the page saves in memory only.
 struct SpaceOpening: Hashable {
     let id: String
     let title: String

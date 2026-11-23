@@ -8,11 +8,53 @@
       "types": "./dist/protocol/*",
       "default": "./dist/protocol/*"
     },
-    "./*": {
-      "workerd": {
-        "types": "./dist/*",
-        "default": "./dist/*"
-      }
+    "./artifact/metadata.js": {
+      "workerd": "./dist/artifact/metadata.js"
+    },
+    "./artifact/s3.js": {
+      "workerd": "./dist/artifact/s3.js"
+    },
+    "./artifact/service.js": {
+      "workerd": "./dist/artifact/service.js"
+    },
+    "./conversation/bot-data.js": {
+      "workerd": "./dist/conversation/bot-data.js"
+    },
+    "./conversation/bot.js": {
+      "workerd": "./dist/conversation/bot.js"
+    },
+    "./cron/alarm.js": {
+      "workerd": "./dist/cron/alarm.js"
+    },
+    "./cron/registration.js": {
+      "workerd": "./dist/cron/registration.js"
+    },
+    "./cron/schedule.js": {
+      "workerd": "./dist/cron/schedule.js"
+    },
+    "./durable-names.js": {
+      "workerd": "./dist/durable-names.js"
+    },
+    "./host/types.js": {
+      "workerd": "./dist/host/types.js"
+    },
+    "./memory/files.js": {
+      "workerd": "./dist/memory/files.js"
+    },
+    "./memory/object.js": {
+      "workerd": "./dist/memory/object.js"
+    },
+    "./server/api.js": {
+      "workerd": "./dist/server/api.js"
+    },
+    "./space/doc.js": {
+      "workerd": "./dist/space/doc.js"
+    },
+    "./space/refresh.js": {
+      "workerd": "./dist/space/refresh.js"
+    },
+    "./telemetry/otlp.js": {
+      "workerd": "./dist/telemetry/otlp.js"
     }
   },
   "scripts": {

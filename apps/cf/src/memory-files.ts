@@ -1,7 +1,6 @@
 import { Workspace } from "@cloudflare/computer";
 import { createGitClient } from "@cloudflare/computer/git";
-import type { MemoryCommit, MemoryFiles, PublishedMemory } from "@lulu/core/memory/files.js";
-import { memoryResources } from "@lulu/core/memory/resources.js";
+import { memoryResources, type MemoryCommit, type MemoryFiles, type PublishedMemory } from "@lulu/core/memory/files.js";
 
 const DIR = "/memory";
 const GIT = `${DIR}/.git`;

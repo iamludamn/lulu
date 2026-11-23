@@ -1,12 +1,13 @@
-import type { ToolRegistration } from "@earendil-works/pi-durable";
-import { defineTool, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord/context";
+import { defineExtension, defineTool, section, type ToolExecutionApi, type ToolExecutionResult, type ToolRegistration } from "@earendil-works/pi-durable";
 import { Type, type Static } from "typebox";
 import { runIdOf, shortId } from "../delegate/runs.js";
+import { STORED_EXTENSION_NAMES } from "../durable-names.js";
+import { scheduleOfferRevision } from "../panel.js";
+import { SCHEDULE_WIDGET_ID } from "../protocol/panel.js";
+import { defineSendCard, type CardContribution } from "../send/tool.js";
 import type { Schedule } from "../protocol/contract.js";
-import { CronJobsDoc } from "./doc.js";
-import { scheduleRow } from "./overview.js";
-import { nextRunAfter, validTime, validTimeZone, type ScheduledJob } from "./schedule.js";
+import { CronJobsDoc, nextRunAfter, scheduleRow, validTime, validTimeZone, type ScheduledJob } from "./schedule.js";
 
 const ScheduleParams = Type.Object({
   action: Type.Union([Type.Literal("create"), Type.Literal("list"), Type.Literal("pause"), Type.Literal("resume"), Type.Literal("delete")], {
@@ -137,5 +138,51 @@ export const ScheduleTool: ToolRegistration = defineTool({
       default:
         return fail("unknown action: " + String((args as ScheduleArgs).action));
     }
+  },
+});
+
+const ScheduledJobsSection = section("scheduled_jobs", async (input, context) => {
+  const jobs = (await input.read.snapshot(CronJobsDoc, context))?.jobs ?? [];
+  const rows = jobs.filter((job) => job.state === "active" || job.state === "paused").map((job) => "- " + job.name + " (" + job.schedule.kind + ", " + job.state + ")");
+  return rows.length === 0 ? undefined : rows.join("\n");
+});
+
+export const CronExtension = defineExtension({
+  name: STORED_EXTENSION_NAMES.cron,
+  tools: [ScheduleTool],
+  sections: [ScheduledJobsSection],
+});
+
+export const scheduleSend: CardContribution = defineSendCard({
+  schema: Type.Object({
+    kind: Type.Literal("panel"),
+    panel: Type.Object({
+      body: Type.Object({ kind: Type.Literal("schedules") }, { additionalProperties: false }),
+    }, { additionalProperties: false, description: "A Schedule Overview filled from the saved jobs by the server" }),
+  }),
+  preamble: ["For reminders, set an Alarm with schedule mode=reminder."],
+  instructions: [
+    "Use schedule with mode=reminder to set an Alarm. Confirm the time in text after creation succeeds.",
+    "Use widget { kind: panel, panel: { body: { kind: schedules } } } to offer the Schedule Overview. The server supplies the job rows. A Schedule Overview already kept on Panel updates from the saved jobs.",
+  ],
+  async prepare(_input, read, context) {
+    const revision = await scheduleOfferRevision(read, context);
+    if (revision === undefined) {
+      return { error: "The Schedule Overview is already on Panel. Send a text confirmation about the schedule." };
+    }
+    const cron = await read.snapshot(CronJobsDoc, context);
+    const rows = [...(cron?.deleted ?? []), ...(cron?.jobs ?? []).map((job) => scheduleRow(job))].reverse();
+    return {
+      card: {
+        kind: "panel",
+        panel: {
+          id: SCHEDULE_WIDGET_ID,
+          size: "m",
+          title: "定时任务",
+          icon: "clock",
+          body: { kind: "schedules", revision, rows },
+        },
+      },
+    };
   },
 });

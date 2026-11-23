@@ -25,7 +25,6 @@ function botDataOf(db: D1Database, env: Environment, telemetry: TelemetryContext
     if (current !== undefined || bucket === undefined) return current;
     const legacy = await bucket.readJson<BotData>(legacyPath);
     if (legacy !== undefined) await metadata.write(legacy.value, undefined, true);
-    // A Bot may have initialized D1 while this request was reading the legacy object.
     return metadata.read(filter);
   }
   return {

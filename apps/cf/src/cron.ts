@@ -1,5 +1,5 @@
 import type { CronRegistration } from "@lulu/core/cron/registration.js";
-import { cronDueAt } from "@lulu/core/cron/engine.js";
+import { cronDueAt } from "@lulu/core/cron/alarm.js";
 import { cronOccurrence, GRACE_MS, utcDailyCron } from "@lulu/core/cron/schedule.js";
 import { savedJobs, savedPanel, savedSpace } from "@lulu/core/conversation/bot-data.js";
 import { BOT_ID } from "@lulu/core/server/api.js";

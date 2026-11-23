@@ -1,5 +1,5 @@
 import { Type, type Static } from "typebox";
-import { ChecklistWidgetInput, MonitoredSpaceInput, WidgetInput } from "./panel.js";
+import { WidgetInput } from "./panel.js";
 
 export const SEND_TOOL = "send_to_user";
 
@@ -12,20 +12,14 @@ const WidgetCard = Type.Object({
   panel: WidgetInput,
 });
 
-const AssetCard = Type.Object({
+export const AssetCard = Type.Object({
   kind: Type.Literal("asset"),
   ref: Type.String({ description: "artifact://name@version of an artifact you already saved" }),
   title: Type.String(),
   summary: Type.Optional(Type.String({ description: "One line on what the file holds" })),
 });
 
-const ScheduleOverviewRequest = Type.Object({
-  kind: WidgetCard.properties.kind,
-  panel: Type.Object({
-    body: Type.Object({ kind: Type.Literal("schedules") }, { additionalProperties: false }),
-  }, { additionalProperties: false, description: "A Schedule Overview filled from the saved jobs by the server" }),
-});
-export type ScheduleOverviewRequest = Static<typeof ScheduleOverviewRequest>;
+export type ScheduleOverviewRequest = { kind: "panel"; panel: { body: { kind: "schedules" } } };
 
 export const SendInput = Type.Object({
   type: Type.Union([Type.Literal("text"), Type.Literal("widget")]),
@@ -35,13 +29,7 @@ export const SendInput = Type.Object({
   end_turn: Type.Optional(Type.Boolean({ description: "true on your final send when the reply is complete; omit for acknowledgements and progress updates" })),
 });
 
-export const ModelSendInput = Type.Object({
-  ...SendInput.properties,
-  widget: Type.Optional(Type.Union([Type.Object({ ...WidgetCard.properties, panel: ChecklistWidgetInput }), Type.Object({ ...WidgetCard.properties, panel: MonitoredSpaceInput }), ScheduleOverviewRequest, AssetCard], { description: "Card for type widget: a Widget for Panel or an Asset for Assets" })),
-});
-
 export type SendInput = Static<typeof SendInput>;
-export type ModelSendInput = Static<typeof ModelSendInput>;
 export function isScheduleOverviewRequest(card: SendCard | ScheduleOverviewRequest | undefined): card is ScheduleOverviewRequest {
   return card?.kind === "panel" && card.panel?.body?.kind === "schedules";
 }

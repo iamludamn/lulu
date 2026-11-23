@@ -1,58 +1,48 @@
-import { markDeliveryCancellation, nextDeliveryAlarm, observeDelivery, reconcileDelivery } from "./delivery.js";
-import { ChatDeliveryDoc } from "./delivery-doc.js";
-import { chatDeliveryQuery } from "./delivery-report.js";
-import { SEND_TOOL } from "../protocol/send.js";
+import { SEND_TOOL, type AssetItem } from "../protocol/send.js";
 import { nextPushAlarm, sendSpacePushes, spaceDevice } from "../space/push.js";
 import { calendarPull, handleSpaceRefresh, nextSpaceAlarm, receiveSpaceEvent, refreshDueSpaces, spaceError } from "../space/refresh.js";
 import { SpaceRefreshDoc, SpaceRefreshIndex, spaceEntries, spaceStatus, type Refresh } from "../space/doc.js";
 import { DreamingTriggerDoc, reconcileDreaming } from "../memory/dreaming.js";
-import { admitPrompt, prepareInjection } from "../memory/injection.js";
-import { expireRequests, RequestDeadlinesDoc } from "./deadlines.js";
+import { prepareInjection } from "../memory/injection.js";
 import { RunFamily } from "../delegate/runs.js";
-import { entryRange, HISTORY_PAGE_SIZE, observeView } from "./view.js";
+import { entryRange, episodesOf, HISTORY_PAGE_SIZE, observeView } from "./transcript.js";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { type Conversation, type ConversationView, type EntryId, CompactionEntry, Harness, type Registry, type Storage } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { TelemetryContext, TelemetrySpan } from "@earendil-works/pi-telemetry";
-import type { McpHost, McpServerConfig } from "../agent/mcp.js";
-import { handleMcpRegistry } from "../agent/mcp-registry.js";
-import { mcpStore } from "../agent/mcp-store.js";
-import { ChatDoc, trackProgress, trackSnapshot } from "./progress.js";
+import type { McpHost, McpServerConfig } from "../mcp/extension.js";
+import { handleMcpRegistry } from "../mcp/registry.js";
+import { mcpStore } from "../mcp/store.js";
+import { trackProgress, trackSnapshot } from "./progress.js";
 import type { EpisodeSource } from "../memory/doc.js";
-import { episodesOf } from "../memory/episodes.js";
 import type { McpStatus, ModelRef, SessionProgress } from "../protocol/contract.js";
-import { abortRuns, dispatchSchedules, fireSchedules, nextScheduleAlarm, scheduleEntries } from "../cron/alarm.js";
-import { cronDueAt } from "../cron/engine.js";
+import { abortRuns, cronDueAt, dispatchSchedules, fireSchedules, nextScheduleAlarm, scheduleEntries } from "../cron/alarm.js";
 import { CronTriggerRegistration } from "../cron/registration.js";
 import { utcDailyCron, type ScheduledJob } from "../cron/schedule.js";
 import { BotAlarm, RECOVERY_ALARM_DELAY_MS } from "./alarm.js";
-import { CRON_KIND } from "../cron/doc.js";
-import { withScheduleOverview } from "../cron/overview.js";
+import { CRON_KIND, withScheduleOverview } from "../cron/schedule.js";
 import { SANDBOX_KIND } from "../sandbox/doc.js";
 import { recoverSandboxLifecycle, staleSandboxTimer } from "../sandbox/lifecycle.js";
 import { createSandboxProvider } from "../sandbox/backends.js";
 import { observeSandboxActivity } from "../sandbox/activity.js";
-import { sandboxWindowQuery } from "../sandbox/report-api.js";
-import { checkItem } from "../panel/check.js";
-import { PanelDoc } from "../panel/doc.js";
+import { sandboxWindowQuery } from "../sandbox/report.js";
+import { AssetsDoc, checkItem, keepWidget, orderCards, PanelDoc } from "../panel.js";
 import { BotDataPersistence } from "./bot-data.js";
 import { EMPTY_PANEL, type PanelState } from "../protocol/panel.js";
-import type { AssetItem } from "../protocol/send.js";
-import { AssetsDoc, DeliveryDoc, MakeDoc } from "../send/doc.js";
-import { chaseDeliveries } from "../send/delivery.js";
-import { keepWidget, orderCards } from "../send/keep.js";
-import { MAKE_TIMEOUT_MS, makeOutcome, startMake } from "../send/make.js";
+import { MAKE_TIMEOUT_MS, MakeDoc, makeOutcome, startMake } from "../send/make.js";
 import { AsrSessions } from "../voice/asr.js";
 import { VoiceSession } from "./voice.js";
 import { MAX_CLIENT_FRAME_CHARACTERS, type ClientMessage, type ServerMessage } from "../protocol/wire.js";
-import { parseFrame } from "./frame.js";
-import { withoutSchedules } from "./compat.js";
+import { parseFrame, withoutSchedules } from "./frame.js";
+import {
+  admitPrompt, CHAT_ALARM_DOCUMENT_KINDS, chaseDeliveries, chatDeliveryQuery, expireRequests, initializeDeliveryRetries, inputSubmission,
+  markDeliveryCancellation, nextDeliveryAlarm, observeDelivery, reconcileDelivery, recoverChatDelivery,
+} from "./requests.js";
 import { createChatHarnessOptions, reconnectChatMcp } from "../agent/chat.js";
 import { chatModelConfig, chatModelRef, createChatModels, durableModel } from "../agent/models.js";
 import { createMemoryUpdate, recoverMemoryUpdates } from "../memory/schedule.js";
 import { createHarnessTelemetry, observeDelegateTiming } from "../telemetry/agent.js";
-import { inputSubmission } from "./input.js";
 import { SOCKET_OPEN, type DurableHost, type Socket } from "../host/types.js";
 import { authorizeSocket } from "../server/api.js";
 
@@ -62,9 +52,8 @@ const STATE_INTERVAL_MS = 50;
 const PROGRESS_WAIT_MS = 500;
 const ALARM_DOCUMENT_KINDS = new Set([
   CRON_KIND,
-  ChatDeliveryDoc.definition.kind,
+  ...CHAT_ALARM_DOCUMENT_KINDS,
   DreamingTriggerDoc.definition.kind,
-  RequestDeadlinesDoc.definition.kind,
   RunFamily.definition.kind,
   SpaceRefreshDoc.definition.kind,
   SpaceRefreshIndex.definition.kind,
@@ -109,7 +98,7 @@ export class BotSession {
   #prompts: Promise<void> = Promise.resolve();
   #dreaming: Promise<void> = Promise.resolve();
   readonly #handshakes = new WeakMap<Socket, Promise<boolean>>();
-    #panel: PanelState = EMPTY_PANEL;
+  #panel: PanelState = EMPTY_PANEL;
   #assets: AssetItem[] = [];
   #chasing: Promise<void> = Promise.resolve();
   #settling: Promise<void> = Promise.resolve();
@@ -214,7 +203,7 @@ export class BotSession {
           change.value.model?.some((message) => message.role === "toolResult" && message.toolName === SEND_TOOL && !message.isError))
       )) void this.#updateDelivery().catch((error: unknown) => reportError("Chat delivery reconciliation failed", error));
     }, end: () => {} });
-    if (await harness.snapshot(ChatDeliveryDoc, BACKGROUND_CONTEXT)) await this.#updateDelivery();
+    await recoverChatDelivery(harness, root, this.#host.telemetry, this.#host.name);
     this.#accountingReady = await observeSandboxActivity(harness, root.id, telemetry.context, BACKGROUND_CONTEXT);
     this.#resumeAfterMcp = !host.catalogReady;
     if (!this.#resumeAfterMcp) harness.resume();
@@ -281,11 +270,7 @@ export class BotSession {
       this.#snapshotFailed("layout"),
       (publication) => publication.changes.some((change) => change.type === "document" && (change.record.kind === PanelDoc.definition.kind || change.record.kind === AssetsDoc.definition.kind || change.record.kind === SpaceRefreshDoc.definition.kind || change.record.kind === CRON_KIND)),
     );
-    await harness.commit(async (tx) => {
-      const delivery = await tx.doc(DeliveryDoc);
-      if (delivery.since !== null) return;
-      delivery.since = Math.max(0, ...(await tx.doc(ChatDoc)).messages.map((message) => message.id ?? 0));
-    }, BACKGROUND_CONTEXT);
+    await initializeDeliveryRetries(harness);
   }
 
   async #layout(context: typeof BACKGROUND_CONTEXT): Promise<{ panel: PanelState; assets: AssetItem[] }> {

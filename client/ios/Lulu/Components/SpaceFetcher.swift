@@ -2,9 +2,6 @@ import CryptoKit
 import Foundation
 import LuluKit
 
-/// Answers the network requests a space page makes. Every GET is cached per space; the refresh setting decides
-/// whether a request reaches the network or is answered from the cache. `refresh` nil is a card face, which never
-/// refreshes and only fills a cache that is empty.
 actor SpaceFetcher {
     private struct Entry: Codable {
         let status: Int

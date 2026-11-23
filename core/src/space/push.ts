@@ -1,7 +1,7 @@
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { Harness } from "@earendil-works/pi-durable";
 import type { Environment } from "../host/types.js";
-import { PanelDoc } from "../panel/doc.js";
+import { PanelDoc } from "../panel.js";
 import { SpaceRefreshDoc, SpaceRefreshIndex, spaceEntries, type Refresh } from "./doc.js";
 import { bytes, json, record, SourceError } from "./source.js";
 

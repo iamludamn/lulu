@@ -3,8 +3,7 @@ import type { Harness } from "@earendil-works/pi-durable";
 import type { DurableStorage } from "../host/types.js";
 import type { Schedule } from "../protocol/contract.js";
 import { spaceEntries } from "../space/doc.js";
-import { CronJobsDoc } from "./doc.js";
-import { GRACE_MS, dailyUtcCrons, onceCronTime, utcOnceCron, type ScheduledJob } from "./schedule.js";
+import { CronJobsDoc, GRACE_MS, dailyUtcCrons, onceCronTime, utcOnceCron, type ScheduledJob } from "./schedule.js";
 
 const PROPAGATION_MS = 15 * 60_000;
 const RETRY_MS = 5 * 60_000;
@@ -78,7 +77,6 @@ export class CronTriggerRegistration {
       const previous = this.#applied;
       this.#retryAt = Infinity;
       try {
-        // Invalidate the saved result before replacing the whole remote rule set.
         await this.storage.delete(this.#key);
         await this.target.replace(desired);
         const readyAt = Date.now() + PROPAGATION_MS;

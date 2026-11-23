@@ -1,9 +1,19 @@
-import type { MemoryFiles } from "./files.js";
-import { hasFrontmatter, isSystemPath, SEED } from "./paths.js";
+import type { DurableStorage } from "../host/types.js";
+import { hasFrontmatter, isSystemPath, SEED, type MemoryFiles } from "./files.js";
 
-interface LegacySource {
-  files(): Promise<string[]>;
-  read(path: string): Promise<string | undefined>;
+const FILE = "file:";
+const BYTES = "bytes:";
+const GIT_DIR = ".git/";
+
+function legacySource(storage: DurableStorage) {
+  return {
+    files: async (): Promise<string[]> =>
+      [...(await storage.list({ prefix: FILE })).keys()].map((key) => key.slice(FILE.length)).filter((path) => !path.startsWith(GIT_DIR)),
+    read: async (path: string): Promise<string | undefined> => {
+      const bytes = await storage.get<Uint8Array>(BYTES + path);
+      return bytes === undefined ? undefined : new TextDecoder().decode(bytes);
+    },
+  };
 }
 
 const DESCRIPTION_CHARACTERS = 80;
@@ -29,7 +39,8 @@ const withFrontmatter = (path: string, text: string): string => {
   return `---\ndescription: ${describe(path, text)}\n---\n${text}`;
 };
 
-export async function migrateLegacy(legacy: LegacySource, target: MemoryFiles): Promise<{ migrated: string[] }> {
+export async function migrateLegacy(storage: DurableStorage, target: MemoryFiles): Promise<{ migrated: string[] }> {
+  const legacy = legacySource(storage);
   const existing = new Set(await target.files());
   for (const [path, content] of Object.entries(SEED)) {
     if (!existing.has(path)) await target.write(path, content);

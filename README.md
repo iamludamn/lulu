@@ -1,8 +1,8 @@
 # lulu
 
-A self-hosted personal AI assistant with durable conversations, memory, scheduled tasks, tool execution, and web, desktop, and iOS clients.
+A self-hosted personal AI assistant with an iOS app, durable conversations, memory, scheduled tasks, and tool execution. Use the web interface to configure MCP services.
 
-lulu builds on the Pi packages from Earendil. A Cloudflare Worker hosts the API and web app; SQLite-backed Durable Objects keep conversations, memory, and artifact metadata. E2B supplies optional execution environments, and S3-compatible storage holds artifact content.
+lulu builds on the Pi packages from Earendil. A Cloudflare Worker serves the API and web configuration interface. Durable Objects keep conversations and memory, D1 stores artifact and application metadata, and an S3-compatible bucket holds artifact content. E2B supplies optional execution environments.
 
 This is an early-stage, single-user project. The API uses the fixed bot ID `main` and does not provide general user authentication or tenant isolation. Keep deployments behind an access boundary that protects HTTP and WebSocket traffic. `MCP_ADMIN_TOKEN` protects the MCP registry only. See [Security](SECURITY.md) before deploying.
 
@@ -19,7 +19,7 @@ Features that depend on external services require your own credentials and may i
 
 ## Start here
 
-Prerequisites: Node.js 22.19 or newer, npm, and Go matching `client/desktop/go.mod` (currently 1.27.3). The root build includes the desktop client. iOS development additionally needs macOS, Xcode with the iOS 26 SDK, and Swift 6.2.
+The service build requires Node.js 22.19 or newer and npm. iOS development uses macOS and Xcode with the iOS 26 SDK and Swift 6.2 or newer.
 
 ```sh
 git clone https://github.com/iamludamn/lulu.git
@@ -28,11 +28,16 @@ npm ci
 npm run build
 ```
 
-This compiles the core, web app, and desktop binary; it does not deploy or build iOS. To run the service, follow [Local development and deployment](docs/deployment.md). A model credential is needed for chat; optional integrations are listed there. No credentials are needed to compile.
+This builds the core and Web configuration assets. Follow [Local development and deployment](docs/deployment.md) to run the Worker. Chat requires a model credential, and the deployment guide lists optional integrations.
+
+Open [Lulu.xcodeproj](client/ios/Lulu.xcodeproj) in Xcode to build the iOS app with the Lulu scheme. Run `swift test --package-path client/ios/LuluKit` and `scripts/test-ios-experience.sh` from the repository root to check the client.
+
+Run `npm run lint` after `npm run check`. This rejects source comments in JS, TS, Metal, shell, Python, HTML, SVG, CSS, JSONC, and YAML. Run `scripts/lint-swift.sh` on macOS to check Swift source comments. Keep the SwiftPM tools-version directive and script shebangs at the start of their files.
 
 ## Documentation
 
-- [Architecture, repository map, and feature guides](docs/ARCHITECTURE.md)
+- [Repository overview](docs/ARCHITECTURE.md)
+- [Domain glossary](docs/GLOSSARY.md)
 - [Deployment and configuration](docs/deployment.md)
 - [Telemetry and operations](docs/observability.md)
 - [Security policy](SECURITY.md)

@@ -3,11 +3,11 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { Harness, Tx } from "@earendil-works/pi-durable";
 import { GRACE_MS, nextDailyAfter, utcDailyCron } from "../cron/schedule.js";
 import type { Environment } from "../host/types.js";
-import { PanelDoc } from "../panel/doc.js";
+import { PanelDoc } from "../panel.js";
 import { SPACE_ID, type MonitorProvider, type PanelState, type SpaceMonitor } from "../protocol/panel.js";
-import { monitorDataProblem, monitorProblem } from "./monitor-contract.js";
-import { SpaceRefreshDoc, SpaceRefreshIndex, spaceEntries, spaceEntry, spaceStatus, stopTracking, type Mode, type MonitorRun, type Refresh } from "./doc.js";
-import { bytes, DAY, deliveryOf, json, modeOf, monitorId, monitorRun, provider, pull, record, signed, signingSecret, SourceError, string } from "./source.js";
+import { monitorDataProblem } from "./monitor-contract.js";
+import { SpaceRefreshDoc, SpaceRefreshIndex, spaceEntries, spaceEntry, spaceStatus, startExtract, stopTracking, initializeRefresh, type Mode, type MonitorRun, type Refresh } from "./doc.js";
+import { bytes, DAY, monitorCredentials, monitorProviders, stable, deliveryOf, json, modeOf, monitorId, monitorRun, provider, pull, record, signed, signingSecret, SourceError, string } from "./source.js";
 
 const RETRY = 5 * 60_000;
 const MAX_INBOX = 24;
@@ -22,19 +22,6 @@ const kept = async (tx: Tx, id: string): Promise<boolean> => {
 const deadline = (entry: Refresh, local?: (entry: Refresh) => boolean): number =>
   Math.min(local?.(entry) === false ? Infinity : entry.nextAt ?? Infinity, entry.retryAt ?? Infinity);
 const next = (mode: Mode, now: number): number | null => mode.kind === "scheduled" ? nextDailyAfter(mode.time, mode.tz, now) : null;
-
-function initial(mode: Mode, old: Refresh | undefined, notify: boolean, now: number): Refresh {
-  return {
-    generation: crypto.randomUUID(), mode, notify, enabled: mode.kind !== "manual", archived: false,
-    nextAt: mode.kind === "scheduled" ? now : null, retryAt: mode.kind === "subscription" ? now : null,
-    ...(mode.kind === "scheduled" && { immediatePull: true }),
-    monitor: null, providerState: mode.kind === "subscription" ? "create" : null, startedAt: now,
-    checkedAt: null, updatedAt: old?.updatedAt ?? null, error: null,
-    version: old?.version ?? 0, seen: old?.seen ?? 0, delivered: old?.delivered ?? 0,
-    ...(old?.credits !== undefined && { credits: old.credits }),
-    findings: old?.findings ?? [], ...(old?.value !== undefined && { value: old.value }), inbox: [], runs: [], changes: old?.changes ?? [], cost: old?.cost ?? 0,
-  };
-}
 
 function addRun(entry: Refresh, run: MonitorRun): boolean {
   if (entry.runs.includes(run.id)) return false;
@@ -77,59 +64,6 @@ async function apply(
 
 const providerOf = (mode: Mode): MonitorProvider => mode.kind === "subscription" ? mode.provider ?? "perplexity" : "perplexity";
 
-function providers(env: Environment): MonitorProvider[] {
-  return (["context", "perplexity"] as const).filter((name) => {
-    try { credentials(env, name); return true; }
-    catch { return false; }
-  });
-}
-
-function credentials(env: Environment, name: MonitorProvider): { key: string; root: string; callback: URL } {
-  const key = name === "context" ? env.CONTEXT_DEV_API_KEY : env.PERPLEXITY_API_KEY;
-  const root = env.LULU_SPACE_WEBHOOK_SECRET;
-  const origin = env.LULU_SPACE_WEBHOOK_ORIGIN;
-  const callback = origin ? URL.parse(origin) : null;
-  const privateOrigin = env.LULU_SPACE_PRIVATE_ORIGIN ? URL.parse(env.LULU_SPACE_PRIVATE_ORIGIN) : null;
-  if (privateOrigin?.protocol !== "https:" || privateOrigin.origin === callback?.origin || !key || !root || root.length < 32 || callback?.protocol !== "https:" || callback.username || callback.password ||
-    callback.pathname !== "/" || callback.search || callback.hash) throw new SourceError(503, "The selected monitor provider is not configured");
-  return { key, root, callback };
-}
-
-export const contextMonitorConfigured = (env: Environment): boolean => providers(env).includes("context");
-
-function extractMode(monitor: SpaceMonitor): Mode {
-  return { kind: "subscription", provider: "context", goal: monitor.goal, source: { kind: "extract", url: monitor.url, schema: monitor.schema } };
-}
-
-function startExtract(monitor: SpaceMonitor, previous?: Refresh): Refresh {
-  const entry = initial(extractMode(monitor), previous, monitor.notify === true, Date.now());
-  if (entry.value !== undefined && monitorDataProblem(monitor.schema, JSON.parse(entry.value)) !== undefined) delete entry.value;
-  return entry;
-}
-
-export async function keepMonitoredSpace(tx: Tx, id: string, monitor: SpaceMonitor, env: Environment): Promise<void> {
-  const problem = monitorProblem(monitor);
-  if (problem !== undefined) throw new SourceError(400, problem);
-  credentials(env, "context");
-  const doc = await tx.doc(SpaceRefreshDoc, id, null);
-  const previous = doc.entry;
-  if (previous?.mode.kind === "subscription" && previous.providerState !== "deleted") {
-    if (stable(previous.mode) === stable(extractMode(monitor)) && previous.providerState !== "delete") {
-      previous.notify = monitor.notify === true;
-      return;
-    }
-    previous.replacement = monitor;
-    previous.providerState = "delete";
-    previous.enabled = false;
-    previous.retryAt = Date.now();
-    previous.inbox = [];
-  } else {
-    doc.entry = startExtract(monitor, previous);
-  }
-  const index = await tx.doc(SpaceRefreshIndex);
-  if (!index.ids.includes(id)) index.ids.push(id);
-}
-
 export async function receiveSpaceEvent(harness: Harness, request: Request, env: Environment): Promise<Response> {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("space") ?? "";
@@ -139,7 +73,7 @@ export async function receiveSpaceEvent(harness: Harness, request: Request, env:
   if (entry?.mode.kind !== "subscription" || entry.generation !== generation) throw new SourceError(404, "Unknown subscription");
   const name = searchParams.get("provider") === "context" ? "context" : "perplexity";
   if (providerOf(entry.mode) !== name) throw new SourceError(404, "Unknown subscription");
-  const { root } = credentials(env, name);
+  const { root } = monitorCredentials(env, name);
   const data = await bytes(request);
   const delivery = name === "context" ? await contextEvent(request, data, entry, root) : await perplexityEvent(request, data, root, generation);
   if (delivery === null) return new Response(null, { status: 204 });
@@ -187,7 +121,7 @@ export async function handleSpaceRefresh(harness: Harness, request: Request, env
       const mode = modeOf(input.mode, env.LULU_SPACE_PULL_HOSTS);
       if (mode.kind === "subscription") {
         const name = mode.provider ?? (previous?.mode.kind === "subscription" && previous.providerState !== "deleted" ? providerOf(previous.mode) : env.PERPLEXITY_API_KEY ? "perplexity" : "context");
-        credentials(env, name);
+        monitorCredentials(env, name);
         if (name === "context" && mode.source.kind === "page" && mode.source.urls.length !== 1) {
           throw new SourceError(400, "Context.dev monitors one page per subscription");
         }
@@ -204,7 +138,7 @@ export async function handleSpaceRefresh(harness: Harness, request: Request, env
         previous.notify = input.notify === true;
         return;
       }
-      doc.entry = initial(mode, previous, input.notify === true, Date.now());
+      doc.entry = initializeRefresh(mode, previous, input.notify === true, Date.now());
       const index = await tx.doc(SpaceRefreshIndex);
       if (mode.kind === "manual") index.ids = index.ids.filter((value) => value !== id);
       else if (!index.ids.includes(id)) index.ids.push(id);
@@ -267,7 +201,7 @@ export function spaceRefreshResponse(id: string, panel: PanelState | undefined, 
   if (!SPACE_ID.test(id)) throw new SourceError(400, "Invalid Space ID");
   if (!panel || !has(panel.widgets, id) || !visible(panel.widgets[id]?.body.kind)) throw new SourceError(404, "Space not kept");
   const data = entry === undefined ? null : { version: entry.version, updatedAt: entry.updatedAt, findings: entry.findings, value: entry.value === undefined ? undefined : json(new TextEncoder().encode(entry.value)) };
-  return Response.json({ status: entry === undefined ? null : spaceStatus(entry), data, providers: providers(env) }, { headers: { "Cache-Control": "no-store" } });
+  return Response.json({ status: entry === undefined ? null : spaceStatus(entry), data, providers: monitorProviders(env) }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export function calendarPull(entry: Refresh, at: number): boolean {
@@ -283,15 +217,6 @@ export async function nextSpaceAlarm(harness: Harness, local?: (entry: Refresh) 
   const entries = await spaceEntries(harness);
   const at = Math.min(...entries.map(([, entry]) => deadline(entry, local)));
   return Number.isFinite(at) ? at : undefined;
-}
-
-function stable(value: unknown): string {
-  if (Array.isArray(value)) return "[" + value.map(stable).join(",") + "]";
-  if (value !== null && typeof value === "object") {
-    const fields = record(value);
-    return "{" + Object.keys(fields).sort().map((key) => JSON.stringify(key) + ":" + stable(fields[key])).join(",") + "}";
-  }
-  return JSON.stringify(value) ?? "";
 }
 
 async function runPull(harness: Harness, id: string, entry: Refresh, env: Environment): Promise<void> {
@@ -323,7 +248,7 @@ async function runPull(harness: Harness, id: string, entry: Refresh, env: Enviro
 async function connectMonitor(entry: Refresh, id: string, env: Environment): Promise<{ id: string; sealed?: string }> {
   if (entry.mode.kind !== "subscription") throw new Error("No monitor source");
   const name = providerOf(entry.mode);
-  const { key, root, callback } = credentials(env, name);
+  const { key, root, callback } = monitorCredentials(env, name);
   callback.pathname = "/api/webhooks/" + name;
   callback.search = new URLSearchParams({ space: id, generation: entry.generation }).toString();
   if (name === "context") {
@@ -476,7 +401,7 @@ async function refreshExtract(harness: Harness, id: string, entry: Refresh, sche
 
 async function runMonitor(harness: Harness, id: string, entry: Refresh, env: Environment, repair?: SpaceRepair): Promise<void> {
   const name = providerOf(entry.mode);
-  const { key, root } = credentials(env, name);
+  const { key, root } = monitorCredentials(env, name);
   const state = entry.providerState;
   if (state === "active" && entry.mode.kind === "subscription" && entry.mode.source.kind === "extract") {
     return refreshExtract(harness, id, entry, entry.mode.source.schema, key, repair);

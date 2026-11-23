@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Shows the recent microphone levels in the same footprint as the tab switcher.
 struct RecordingWaveform: View {
     let levels: [CGFloat]
 

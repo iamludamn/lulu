@@ -1,5 +1,5 @@
 import { otlpMetrics } from "./otlp-metrics.js";
-import { isSensitive } from "../memory/guard.js";
+import { isSensitive } from "../memory/files.js";
 import { NOOP_TELEMETRY_CONTEXT, type AttributeValue, type SpanAttributes, type SpanLink, type SpanOptions, type SpanStatus, type TelemetryContext, type TelemetrySpan, type TelemetryCarrier, type TelemetryPropagation } from "@earendil-works/pi-telemetry";
 import type { Environment } from "../host/types.js";
 
