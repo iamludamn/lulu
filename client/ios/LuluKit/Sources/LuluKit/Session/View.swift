@@ -11,6 +11,7 @@ public struct ChatEntry: Identifiable, Sendable {
     public let card: SentCard?
     public let time: Date?
     public let final: Bool
+    public var noteProposal: NoteProposal? = nil
 }
 
 public struct Live: Sendable {
@@ -108,6 +109,12 @@ public func chatEntries(_ view: ConversationView?, hidden: [String]) -> [ChatEnt
             return [ChatEntry(id: entry.id, position: position, role: .user, text: text, body: nil, card: nil, time: messageTime(entry.model), final: false)]
         case "pi.assistant":
             return sentEntries(entry.model, position: position, time: messageTime(entry.model), delivered: delivered)
+        case "lulu.note.proposal":
+            guard let proposal = entry.noteData(NoteProposal.self) else { return [] }
+            return [ChatEntry(id: proposal.id.uuidString.lowercased(), position: position, role: .assistant, text: "", body: nil,
+                              card: nil, time: Date(timeIntervalSince1970: proposal.at / 1000), final: false, noteProposal: proposal)]
+        case "lulu.note.failed":
+            return [ChatEntry(id: entry.id, position: position, role: .assistant, text: "笔记生成失败，请从原消息重试。", body: nil, card: nil, time: nil, final: false)]
         case scheduleOfferKind:
             guard case .panel(let widget)? = sentCard(entry.data?["widget"]), case .schedules = widget.body else { return [] }
             let time: Date?

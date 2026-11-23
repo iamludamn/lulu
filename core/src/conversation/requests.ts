@@ -7,6 +7,7 @@ import {
 import type { TelemetryCarrier, TelemetryContext, TelemetrySpan } from "@earendil-works/pi-telemetry";
 import { STORED_DOC_KINDS } from "../durable-names.js";
 import { bindInjection, inheritInjection, type MemoryInjection } from "../memory/doc.js";
+import { bindNote, inheritNote } from "../notes/context.js";
 import type { BusyMode } from "../protocol/contract.js";
 import { SEND_TOOL } from "../protocol/send.js";
 import type { ClientMessage, ReceiptSource } from "../protocol/wire.js";
@@ -113,6 +114,7 @@ export async function admitPrompt(
     }));
     const firstBinding = await bindInjection(tx, id, injection);
     if (!message) {
+      if (command.noteRef) await bindNote(tx, id, command.noteRef);
       const now = Date.now();
       message = { requestId: command.requestId, id: Number(id), text: command.content, after: Number(view.entries.at(-1)?.id ?? 0), at: now, deadline: now + REQUEST_TIMEOUT_MS };
       chat.messages.push(message);
@@ -249,6 +251,7 @@ export async function chaseDeliveries(harness: Harness, root: Conversation, entr
     await harness.commit(async (tx) => {
       const id = await root.submit(tx, inputSubmission({ kind: "internal", action: "delivery_retry", messageId, content: NUDGE_PROMPT, requestId }));
       await linkFollowup(tx, [messageId], id);
+      await inheritNote(tx, messageId, id);
       const nudge = (await tx.doc(DeliveryRetriesDoc)).nudges.find((item) => item.requestId === requestId);
       if (nudge !== undefined) nudge.id = Number(id);
     }, BACKGROUND_CONTEXT);

@@ -13,6 +13,7 @@ import { BotDataPersistence, startupData } from "../dist/conversation/bot-data.j
 import { handleApi } from "../dist/server/api.js";
 import { D1ArtifactMetadata } from "../../apps/cf/src/artifact-metadata.ts";
 import { D1BotMetadata } from "../../apps/cf/src/bot-metadata.ts";
+import { D1Notes } from "../../apps/cf/src/notes.ts";
 import { SpaceRefreshDoc, SpaceRefreshIndex } from "../dist/space/doc.js";
 import { refreshDueSpaces, spaceCronDue } from "../dist/space/refresh.js";
 
@@ -407,4 +408,36 @@ test("Artifact SQL retries a failed import without publishing an incomplete inde
   assert.equal((await reopened.version("test", 5)).key, version.key);
   const other = new D1ArtifactMetadata(db, "other", async () => ({}));
   assert.equal(await other.version("test", 5), undefined);
+});
+
+test("D1 keeps immutable note revisions, deduplicates writes, and pages current notes", async (t) => {
+  const store = new D1Notes(d1Database(t, "0003_notes.sql"), "main");
+  const id = crypto.randomUUID();
+  const original = {
+    id, baseRevision: 0, requestId: crypto.randomUUID(),
+    content: { title: "Trip", blocks: [{ id: crypto.randomUUID(), kind: "file", ref: "artifact://map.pdf@2" }] },
+  };
+  const first = await store.write(original);
+  assert.equal(first.revision, 1);
+  const update = { ...original, baseRevision: 1, requestId: crypto.randomUUID(), content: { ...original.content, title: "Revised trip" } };
+  const [second, stale] = await Promise.all([store.write(update), store.write({ ...update, requestId: crypto.randomUUID() })]);
+  assert.equal(second.revision, 2);
+  assert.equal(stale, undefined);
+  assert.deepEqual(await store.write(original), first);
+  assert.deepEqual(await store.read({ id: id.toUpperCase(), revision: 1 }), first);
+
+  for (let index = 0; index < 50; index++) {
+    await store.write({ id: crypto.randomUUID(), baseRevision: 0, requestId: crypto.randomUUID(), content: { title: "Other", blocks: [] } });
+  }
+  await store.pin(id, true);
+  const page = await store.list();
+  assert.equal(page.notes.length, 50);
+  assert.deepEqual(page.pinned, [id]);
+  assert.ok(page.next);
+  const last = await store.list(page.next);
+  assert.equal(last.notes.length, 1);
+  assert.equal(last.next, undefined);
+  const all = [...page.notes, ...last.notes];
+  assert.equal(new Set(all.map((note) => note.id)).size, 51);
+  assert.deepEqual(all.find((note) => note.id === id), second);
 });

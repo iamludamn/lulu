@@ -1,3 +1,4 @@
+import type { NoteRef } from "../notes/store.js";
 import type { ConversationView } from "@earendil-works/pi-durable";
 import type { BusyMode, McpStatus, ModelConfig, ModelRef, SessionProgress } from "./contract.js";
 import type { PanelState } from "./panel.js";
@@ -11,10 +12,11 @@ export type DeliveryReceipt = { requestId: string; callId: string };
 export type ClientMessage =
   | { type: "hello"; incremental?: boolean; schedules?: boolean }
   | { type: "history.load"; requestId: string; before: number }
-  | { type: "prompt.submit"; requestId: string; content: string; whenBusy: BusyMode }
+  | { type: "prompt.submit"; requestId: string; content: string; whenBusy: BusyMode; noteRef?: NoteRef }
   | { type: "prompt.abort"; requestId: string }
   | { type: "prompt.receipts"; source: ReceiptSource; receipts: DeliveryReceipt[] }
   | { type: "model.select"; requestId: string; model: ModelRef }
+  | { type: "note.generate" | "note.accept"; requestId: string; origin: string }
   | { type: "widget.keep"; requestId: string; origin: string }
   | { type: "widget.drop"; requestId: string; origin: string }
   | { type: "widget.make"; requestId: string; origin: string }

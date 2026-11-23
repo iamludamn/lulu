@@ -10,6 +10,7 @@ struct MessageRow: View, Equatable {
     let onRead: (ChatRow) -> Void
     let onOpen: (ArtifactAddress, String) -> Void
     let onKept: (Page) -> Void
+    let onSaveNote: () -> Void
     let holdKeepRow: (Bool) -> Void
     @Environment(\.openSpace) private var openSpace
     @State private var showsSchedules = false
@@ -111,6 +112,7 @@ struct MessageRow: View, Equatable {
         .contextMenu {
             Button("拷贝", systemImage: "doc.on.doc") { UIPasteboard.general.string = row.body.map { row.text + "\n\n" + $0 } ?? row.text }
             if row.widgetSource {
+                Button("存入笔记", systemImage: "note.text.badge.plus", action: onSaveNote)
                 Button("做成视图组件", systemImage: "square.grid.2x2") { store.makeWidget(origin: row.id) }
             }
             if case .failed(let requestId?) = row.footer {
@@ -181,7 +183,7 @@ struct MessageRow: View, Equatable {
         case .asset(let ref, let title, let summary):
             let address = ArtifactAddress(ref)
             let source = "chat-\(row.id)"
-            kept(destination: .assets, label: "收进资产", symbol: "tray.and.arrow.down") {
+            kept(destination: .notes, label: "存入笔记", symbol: "tray.and.arrow.down") {
                 Button { address.map { onOpen($0, source) } } label: { assetFace(address, title: title, summary: summary) }
                     .buttonStyle(.plain)
                     .artifactDownloadFeedback(source)

@@ -142,7 +142,12 @@ public final class BotStore {
         transmit(["type": "history.load", "requestId": requestId, "before": before])
     }
 
-    public func submit(_ content: String) { dispatch(Command(.submit(content))) }
+    public func submit(_ content: String, noteId: UUID? = nil, revision: Int? = nil) {
+        dispatch(Command(.submit(content, noteId: noteId, revision: revision)))
+    }
+
+    public func generateNote(from origin: String) { dispatch(Command(.generateNote(origin: origin))) }
+    public func acceptNote(_ id: UUID) { dispatch(Command(.acceptNote(origin: id.uuidString.lowercased()))) }
     public func startASR(_ id: String) {
         asrRequestId = id
         transmit(["type": "asr.start", "requestId": id])
@@ -494,7 +499,10 @@ public final class BotStore {
     private func send(_ command: Command) {
         let id = command.requestId
         guard snapshot.link == .online, task != nil else {
-            if case .keep = command.kind { failRequest(id, "当前未连接，请重试") }
+            switch command.kind {
+            case .keep, .acceptNote, .generateNote: failRequest(id, "当前未连接，请重试")
+            default: break
+            }
             return
         }
         switch command.kind {
@@ -505,7 +513,7 @@ public final class BotStore {
                 self?.submitTimers[id] = nil
                 self?.failRequest(id, nil)
             }
-        case .keep:
+        case .keep, .acceptNote, .generateNote:
             guard keepTimers[id] == nil else { return }
             keepTimers[id] = Task { [weak self, retryTimeout] in
                 do { try await Task.sleep(for: retryTimeout) } catch { return }

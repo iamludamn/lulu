@@ -7,6 +7,7 @@ struct RootView: View {
     @State private var covers = StartupCovers()
 
     private var loadingLayout: Bool {
+        if model.mockData { return false }
         if let connection = model.connection {
             let snapshot = connection.store.snapshot
             return !snapshot.hasLayout && snapshot.link == .connecting && snapshot.halt == nil
@@ -27,7 +28,7 @@ struct RootView: View {
         ZStack {
             if let connection = model.connection {
                 NavigationStack {
-                    HomeView(bot: connection.bot, api: connection.api, store: connection.store, onVisibleCovers: { visible in
+                    HomeView(bot: connection.bot, api: connection.api, store: connection.store, token: model.chatToken(for: connection.api.base), mockData: model.mockData, onVisibleCovers: { visible in
                         covers.update(revision: revision) { $0.visible = visible }
                     }, onCoverSettled: { cover in
                         covers.update(revision: revision) { $0.settled.insert(cover) }

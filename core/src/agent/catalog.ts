@@ -9,6 +9,7 @@ import { findDelegateRun } from "../delegate/runs.js";
 import { STORED_EXTENSION_NAMES } from "../durable-names.js";
 import type { DurableHost } from "../host/types.js";
 import type { McpHost } from "../mcp/extension.js";
+import { createNotesExtension } from "../notes/chat.js";
 import { memoryExtensionFor } from "../memory/extension.js";
 import { checklistSend, createPanelExtension } from "../panel.js";
 import { createSandboxProvider } from "../sandbox/backends.js";
@@ -21,7 +22,7 @@ type CatalogDeps = HarnessDeps & { delivery: readonly SendContribution[] };
 
 const ASSISTANT_ROLE = "You are a concise assistant. User messages may begin with a display name in brackets; treat it as speaker attribution.";
 
-export const DEFAULT_EXTENSIONS = ["coding", "environment", "delegate", "cron", "chat", "mcp", "codemode", "memory", "artifact", "panel", "send"] as const;
+export const DEFAULT_EXTENSIONS = ["coding", "environment", "delegate", "cron", "chat", "mcp", "codemode", "memory", "artifact", "panel", "notes", "send"] as const;
 type ExtensionName = typeof DEFAULT_EXTENSIONS[number];
 
 const sandboxProvider = ({ env, name, telemetry }: DurableHost) => createSandboxProvider(env, name, telemetry);
@@ -32,6 +33,7 @@ const CATALOG: Record<ExtensionName, (deps: CatalogDeps) => Extension> = {
   delegate: ({ host }) => createDelegateExtension(DelegateAgents, sandboxProvider(host)),
   cron: () => CronExtension,
   panel: () => createPanelExtension(),
+  notes: ({ host }) => createNotesExtension(host.notes),
   send: ({ delivery }) => createSendExtension(delivery),
   chat: ({ delivery }) => {
     const preamble = [ASSISTANT_ROLE, SEND_PREAMBLE, ...delivery.flatMap(({ preamble }) => preamble ?? [])].join(" ");

@@ -17,15 +17,23 @@ final class AppModel {
         let store: BotStore
     }
 
+    let mockData: Bool
+
     private(set) var connectionRevision = 0
     private(set) var connection: Connection?
 
-    init() {
+    init(mockData: Bool = false) {
+        self.mockData = mockData
         let defaults = UserDefaults.standard
         if let domain = Bundle.main.bundleIdentifier {
             AppPreferences.migrateLegacyKeys(in: defaults, domain: domain)
         }
         server = defaults.string(forKey: AppPreferences.server) ?? ""
+        if mockData {
+            let bot = BotSummary(id: "note-mock", name: Self.defaultName)
+            let api = Api(base: URL(string: "https://mock.invalid")!)
+            connection = Connection(api: api, bot: bot, store: BotStore(botId: bot.id, server: api.base))
+        }
     }
 
     var api: Api? { Api.normalize(server).map(Api.init) }

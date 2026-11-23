@@ -33,7 +33,7 @@ struct ChatRow: Identifiable, Equatable {
 }
 
 private let stampGap: TimeInterval = 15 * 60
-private let noticeLabel: [String: String] = ["abort": "停止请求", "model": "切换模型", "keep": "收藏", "drop": "移除", "makeWidget": "做成组件", "order": "调整排布", "check": "勾选"]
+private let noticeLabel: [String: String] = ["abort": "停止请求", "model": "切换模型", "keep": "收藏", "drop": "移除", "makeWidget": "做成组件", "generateNote": "生成笔记", "order": "调整排布", "check": "勾选"]
 
 private func keptOrigins(_ snapshot: BotStore.Snapshot) -> Set<String> {
     var kept = Set(snapshot.panel.widgets.values.compactMap(\.origin) + snapshot.assets.map(\.origin))
@@ -133,7 +133,7 @@ func chatRows(_ snapshot: BotStore.Snapshot, entries: [ChatEntry], keeping: Set<
     }
     for request in snapshot.requests {
         switch request.command.kind {
-        case .submit(let text):
+        case .submit(let text, _, _):
             if request.state != .failed && submitted.contains(request.id) { continue }
             stamp(request.at, before: request.id)
             var row = ChatRow(id: request.id, role: .user, text: text)
@@ -150,6 +150,8 @@ func chatRows(_ snapshot: BotStore.Snapshot, entries: [ChatEntry], keeping: Set<
             if !cardOrigins.contains(origin) && !kept.contains(origin) { appendNotice(request, "keep") }
         case .drop: appendNotice(request, "drop")
         case .makeWidget: appendNotice(request, "makeWidget")
+        case .generateNote: appendNotice(request, "generateNote")
+        case .acceptNote: break
         case .order: appendNotice(request, "order")
         case .check: appendNotice(request, "check")
         }
