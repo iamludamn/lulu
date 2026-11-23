@@ -84,7 +84,6 @@ export function utcOnceCron(at: number): string {
 
 export function cronOccurrence(cron: string, eventTime: number): number | undefined {
   const minute = 60_000;
-  // Cloudflare's event timestamp can include seconds and milliseconds after the rule's UTC minute.
   for (let at = Math.floor(eventTime / minute) * minute; eventTime - at <= GRACE_MS; at -= minute) {
     if (cron === utcDailyCron(at) || cron === utcOnceCron(at)) return at;
   }
@@ -95,7 +94,6 @@ export function dailyUtcCrons(time: string, tz: string, now: number): string[] {
   const clock = clockIn(tz);
   const today = zonedOf(now, clock);
   const crons = new Set<string>();
-  // Cover a full seasonal cycle using the same local time conversion as the alarm.
   for (let offset = 0; offset < 370; offset++) {
     crons.add(utcDailyCron(instantOf(today.year, today.month, today.day + offset, hour, minute, clock)));
   }

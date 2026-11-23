@@ -1,0 +1,4 @@
+languageGlobs:
+  cpp: ["**/*.metal"]
+  html: ["**/*.svg"]
+  json: ["**/*.jsonc"]

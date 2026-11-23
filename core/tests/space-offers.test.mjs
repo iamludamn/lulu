@@ -27,8 +27,6 @@ test('legacy migration does not admit another Space namespace', () => {
   assert.throws(() => acceptSpace(panel, next.input.widget.panel, 'covered', [next], 10), /其他组件/);
 });
 
-// Original keep implementation overwrote the canonical widget and origin with
-// any card. This is the exact A -> B -> stale A regression, not a UI-only check.
 test('newer acceptance preserves state namespace, position and omitted refresh; stale offer never rolls back', () => {
   const panel = empty();
   const a = offer('a', 1, { refresh: 'daily' });
@@ -40,7 +38,7 @@ test('newer acceptance preserves state namespace, position and omitted refresh; 
   assert.equal(panel.widgets.trip.body.refresh, 'daily');
   assert.deepEqual(panel.order, order);
   assert.equal(panel.spaceReceipts.b.action, 'update');
-  acceptSpace(panel, a.input.widget.panel, 'a', [a, b], 3); // acknowledged retry is a no-op
+  acceptSpace(panel, a.input.widget.panel, 'a', [a, b], 3);
   assert.equal(panel.widgets.trip.body.src, widget(2).body.src);
   assert.equal(panel.widgets.trip.updatedAt, 2);
 });
@@ -111,7 +109,7 @@ test('real keep transaction: capacity failure leaves no success receipt; retry a
   await keepWidget(harness, entries, 'a', true);
   assert.equal(state.order.length, 24);
   deliver(b);
-  await keepWidget(harness, entries, 'b', true); // update works even on a full panel
+  await keepWidget(harness, entries, 'b', true);
   assert.equal(state.order.length, 24);
   assert.equal(state.widgets.trip.body.refresh, 'daily');
   await keepWidget(harness, entries, 'a', true);

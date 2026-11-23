@@ -3,7 +3,6 @@ import LuluKit
 import WebKit
 
 extension Notification.Name {
-    /// Posted with a widget id when the user asks for a space's card to be refreshed.
     static let spaceRefresh = Notification.Name("spaceRefresh")
 }
 
@@ -53,7 +52,6 @@ final class SpaceBridge: NSObject, WKScriptMessageHandlerWithReply {
     })();
     """#
 
-    /// What a previewed page saved, held here instead of being written to the saved state.
     private final class Draft: @unchecked Sendable {
         var value: String?
     }
@@ -109,7 +107,6 @@ final class SpaceBridge: NSObject, WKScriptMessageHandlerWithReply {
         return ["status": 200, "text": "OK", "headers": ["Content-Type": "application/json"], "body": encoded.base64EncodedString(), "at": data["updatedAt"] ?? NSNull()]
     }
 
-    /// `refresh` is the space's refresh setting when the page is open full screen, nil for a card face.
     @MainActor
     init(botId: String, space: String, refresh: SpaceRefresh?, preview: Bool = false, api: Api, updates: SpaceUpdate? = nil) {
         self.botId = botId

@@ -121,12 +121,10 @@ public struct PanelWidget: Decodable, Identifiable, Equatable, Sendable {
             case "timeline": self = .timeline(try c.decode([Event].self, forKey: .events))
             case "note": self = .note(try c.decode(String.self, forKey: .markdown))
             case "media": self = .media(src: try c.decode(String.self, forKey: .src), caption: try c.decodeIfPresent(String.self, forKey: .caption))
-            // "web" is what the first release called a space; keep reading widgets stored under it.
             case "space", "web": self = .space(
                     src: try c.decode(String.self, forKey: .src),
                     summary: try c.decodeIfPresent(String.self, forKey: .summary),
                     refresh: (try? c.decodeIfPresent(SpaceRefresh.self, forKey: .refresh)).flatMap { $0 } ?? .manual,
-                    // Historical panel documents predate dedicated covers.
                     preview: try c.decodeIfPresent(String.self, forKey: .preview)
                 )
             case "weather": self = .weather(city: try c.decode(String.self, forKey: .city))

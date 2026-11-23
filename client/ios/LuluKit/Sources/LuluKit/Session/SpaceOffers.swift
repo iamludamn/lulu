@@ -25,8 +25,6 @@ extension PanelWidget {
     }
 }
 
-/// Reconstructed from delivered offers and durable panel receipts, never a local
-/// hidden-card set. Pending network commands do not count as accepted updates.
 public func spaceOfferStates(_ entries: [ChatEntry], panel: PanelState) -> [String: SpaceOfferState] {
     var latest: [String: (origin: String, version: Int)] = [:]
     for entry in entries {

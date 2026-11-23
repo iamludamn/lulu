@@ -128,7 +128,6 @@ export class D1ArtifactMetadata implements ArtifactMetadataStore {
         WHERE bot = ?1 AND id = ?2 AND EXISTS (
           SELECT 1 FROM artifact_pending WHERE bot = ?1 AND id = ?2 AND eligible AND used_bytes - size + ?3 <= ?4
         )`, uploadId, size, quota),
-      // The bucket copy may finish after a concurrent delete already collected this key.
       this.#sql(`INSERT OR REPLACE INTO artifact_garbage (bot, object_key)
         SELECT ?1, ?3 WHERE NOT EXISTS (SELECT 1 FROM artifact_uploads WHERE bot = ?1 AND id = ?2)`, uploadId, key),
       this.#sql(`INSERT OR REPLACE INTO artifact_garbage (bot, object_key)
@@ -175,7 +174,6 @@ type LegacyHead = { next: number; latest: number; minimumVersion?: number; delet
 type LegacyVersion = ArtifactVersion & { createdAt: number };
 type LegacyUpload = Omit<ArtifactUpload, "staged" | "baseVersion"> & { staged?: string; baseVersion?: number };
 
-// Bound values stay below D1's per-value limit without sending one statement per record.
 function appendImport<T>(
   db: D1Database, statements: D1PreparedStatement[], bot: string, token: string,
   table: string, columns: string, fields: string[], rows: T[],
@@ -225,6 +223,5 @@ async function importArtifactMetadata(db: D1Database, bot: string, source: Recor
     ["uploadId", "name", "version", "key", "size", "contentType", "staged", "baseVersion", "requestId", "committed"], uploads);
   appendImport(db, statements, bot, token, "artifact_garbage", "object_key", ["key"], discarded);
 
-  // Only the transaction that inserted the marker can import. Failed batches roll back the marker too.
   await db.batch(statements);
 }

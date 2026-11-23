@@ -108,7 +108,6 @@ struct WidgetFace: View {
     var onPrompt: (String) -> Void = { _ in }
     var onCheck: (Int, Bool) -> Void = { _, _ in }
 
-    /// Two rows of the 158pt cards and the gap between them.
     static let spaceHeight: CGFloat = 328
 
     private var checklistCount: Int? { interactive ? widget.pendingChecklistCount : nil }

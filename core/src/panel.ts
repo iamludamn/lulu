@@ -175,8 +175,6 @@ function spaceVersion(widget: WidgetInput | undefined): number | undefined {
   return match === null ? undefined : Number(match[2]);
 }
 
-// Keep a durable receipt even when a legacy Space is removed. This prevents old
-// chat cards from becoming a rollback path once the panel entry is gone.
 export function rememberSpace(panel: PanelState, widget: Widget | undefined): void {
   const version = spaceVersion(widget);
   if (widget?.origin === undefined || version === undefined) return;
@@ -193,12 +191,9 @@ export function acceptSpace(panel: PanelState, widget: WidgetInput, origin: stri
   if (previewProblem !== undefined) throw new Error(previewProblem);
   const previous = panel.widgets[widget.id];
   const receipts = Object.values(panel.spaceReceipts ?? {}).filter((receipt) => receipt.id === widget.id);
-  // Early Spaces used spaces/<id>.html. Migrating that exact namespace starts
-  // a new index.html version sequence, while retaining widget identity/state.
   const previousBody = spaceBody(previous);
   const legacyPath = previousBody !== undefined && ARTIFACT_REF.exec(previousBody.src)?.[1] === `spaces/${widget.id}.html`;
   if (previous !== undefined && spaceVersion(previous) === undefined && !legacyPath) throw new Error("不能将其他组件替换为 Space，请使用新的 ID");
-  // A retry after a successful acceptance must never replace a subsequent revision.
   if (previous !== undefined && panel.spaceReceipts?.[origin] !== undefined) return;
   const latest = offers.reduce<{ origin: string; version: number } | undefined>((latest, offer) => {
     const card = offer.input.widget;

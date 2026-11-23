@@ -41,8 +41,6 @@ export function startupData(data: BotData): StartupData {
   return { panel: { ...projectScheduleOverview(panel, savedJobs(data)), spaceUpdates }, assets: assets?.items ?? [] };
 }
 
-/** Keep Pi Durable's transaction semantics for the live copies. Publish the external state
- * before acknowledging a commit, and resume interrupted publication from the pending marker. */
 export class BotDataPersistence {
   readonly storage: Storage;
   readonly #marker: string;

@@ -14,7 +14,6 @@ function batches(rows: readonly unknown[][]): string[] {
   for (const row of rows) {
     const part = JSON.stringify(row);
     const size = encoder.encode(part).length + 1;
-    // Leave room below D1's 2 MB bound value limit for the JSON array.
     if (parts.length > 0 && bytes + size > 1_900_000) {
       result.push("[" + parts.join(",") + "]");
       parts = [];

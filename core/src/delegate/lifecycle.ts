@@ -45,7 +45,6 @@ export async function createRun(tx: Tx, start: RunStart): Promise<{ runId: strin
   if (!index.ids.includes(start.runId)) index.ids.push(start.runId);
   const anchor = await tx.createTask(DelegateAnchor, { runId: start.runId }, { ownership: { kind: "conversation" }, conversationId: start.parentId, background: true });
   const child = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
-  // Delegates use the default extensions, including the coding tools excluded by the main conversation.
   await configure(tx, child.id, { extensions: null });
   const binding = await tx.doc(SandboxDoc, child.id);
   binding.key = start.runId;

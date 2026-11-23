@@ -32,9 +32,12 @@ This builds the core and Web configuration assets. Follow [Local development and
 
 Open [Lulu.xcodeproj](client/ios/Lulu.xcodeproj) in Xcode to build the iOS app with the Lulu scheme. Run `swift test --package-path client/ios/LuluKit` and `scripts/test-ios-experience.sh` from the repository root to check the client.
 
+Run `npm run lint` after `npm run check`. This rejects source comments in JS, TS, Metal, shell, Python, HTML, SVG, CSS, JSONC, and YAML. Run `scripts/lint-swift.sh` on macOS to check Swift source comments. Keep the SwiftPM tools-version directive and script shebangs at the start of their files.
+
 ## Documentation
 
-- [Architecture, repository map, and feature guides](docs/ARCHITECTURE.md)
+- [Repository overview](docs/ARCHITECTURE.md)
+- [Domain glossary](docs/GLOSSARY.md)
 - [Deployment and configuration](docs/deployment.md)
 - [Telemetry and operations](docs/observability.md)
 - [Security policy](SECURITY.md)

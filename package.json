@@ -11,9 +11,10 @@
     "build": "npm run build -w @lulu/core -w @lulu/web",
     "check": "grep -rnE '(from|import)[^[:alnum:]_]*(node|cloudflare):' core/src; test $? -eq 1 && npm run build -w @lulu/core && npm run check -w @lulu/cf -w @lulu/web",
     "test": "npm run test --workspaces --if-present",
-    "lint": "oxlint --type-aware core/src apps/cf/src client/web/src"
+    "lint": "node scripts/no-comments.mjs && oxlint --type-aware core/src apps/cf/src client/web/src"
   },
   "devDependencies": {
+    "@ast-grep/cli": "0.51.3",
     "@types/node": "^22.15.0",
     "oxlint": "^1.93.0",
     "oxlint-tsgolint": "^7.0.2006"

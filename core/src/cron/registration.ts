@@ -77,7 +77,6 @@ export class CronTriggerRegistration {
       const previous = this.#applied;
       this.#retryAt = Infinity;
       try {
-        // Invalidate the saved result before replacing the whole remote rule set.
         await this.storage.delete(this.#key);
         await this.target.replace(desired);
         const readyAt = Date.now() + PROPAGATION_MS;

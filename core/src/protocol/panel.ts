@@ -122,7 +122,6 @@ export const panelWidgetProperties = {
   tone: Type.Optional(Tone),
 };
 
-// Stored Panel widgets and Chat offers keep their original wire formats.
 export const WidgetInput = Type.Object({
   ...panelWidgetProperties,
   body: Type.Union([Stat, Gauge, Chart, List, Timeline, Note, Media, SpaceBody, Weather, Actions, Schedules]),

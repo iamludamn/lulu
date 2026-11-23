@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// A generated cloud texture preserves the reference's light distribution;
-/// two GPU passes animate its flow and draw the translucent, integrated rings.
 struct VoiceAtmosphere: View {
     let muted: Bool
     let audioLevel: (Date) -> Double
@@ -34,8 +32,6 @@ struct VoiceAtmosphere: View {
     }
 }
 
-/// Clear native glass retains the cloud texture; the soft rim gives the lens
-/// the milky edge present in the reference without making the whole face opaque.
 struct VoiceGlassCircle: ViewModifier {
     func body(content: Content) -> some View {
         content

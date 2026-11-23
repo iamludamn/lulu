@@ -126,8 +126,6 @@ export async function fireDue(harness: Pick<Harness, "snapshot" | "commit">, now
   for (const candidate of jobs) {
     if (due(candidate, now) === undefined) continue;
     try {
-      // Pi Durable admits at most one submission per transaction, before any
-      // other table writes. Advance each job atomically with its own dispatch.
       const dispatched = await harness.commit(async (tx) => {
         const job = (await tx.doc(CronJobsDoc)).jobs.find((row) => row.id === candidate.id);
         if (job === undefined) return;
@@ -171,7 +169,6 @@ export function nextAlarm(jobs: readonly ScheduledJob[], local?: (job: Scheduled
   const times = jobs.flatMap((job) => {
     if (job.state !== "active" || job.nextRunAt === null) return [];
     if (local === undefined || local(job)) return [job.nextRunAt];
-    // Reap a one-shot trigger if Cloudflare never delivers its event.
     return job.schedule.kind === "once" ? [job.schedule.at + GRACE_MS + 1] : [];
   });
   return times.length === 0 ? undefined : Math.min(...times);
