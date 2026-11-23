@@ -20,6 +20,8 @@ struct ChatView: View {
     @State private var composerBottom: CGFloat?
     @State private var sent = 0
     @State private var syncingReference = false
+    @State private var keyboardTop: CGFloat?
+    @State private var composerContainerBottom: CGFloat?
     @State private var referenceError: String?
     @State private var preventedAccept: String?
     @State private var keeping: Set<String> = []
@@ -209,6 +211,10 @@ struct ChatView: View {
                         composerBottom = frame.maxY
                         updateBottomState()
                     }
+                    .padding(.bottom, keyboardOverlap)
+                    .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: {
+                        composerContainerBottom = $0
+                    }
             }
         }
         .overlay {
@@ -221,6 +227,14 @@ struct ChatView: View {
                 }
                 .ignoresSafeArea(.container, edges: .bottom)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+            guard let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+                  let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+                    .first(where: { $0.activationState == .foregroundActive })?.keyWindow else { return }
+            let keyboardFrame = window.convert(frame, from: window.screen.coordinateSpace)
+            let coversBottom = keyboardFrame.maxY >= window.bounds.maxY - 1 && keyboardFrame.minY < window.bounds.maxY
+            keyboardTop = coversBottom ? keyboardFrame.minY : nil
         }
         .overlayPreferenceValue(LongBubbleBounds.self) { bounds in
             GeometryReader { proxy in
@@ -293,6 +307,11 @@ struct ChatView: View {
         let target = min(maximum, max(minimum, offset.y + shift))
         guard abs(target - offset.y) >= 0.5 else { return }
         scroll.setContentOffset(CGPoint(x: offset.x, y: target), animated: false)
+    }
+
+    private var keyboardOverlap: CGFloat {
+        guard composing.wrappedValue, let keyboardTop, let composerContainerBottom else { return 0 }
+        return max(0, composerContainerBottom - keyboardTop)
     }
 
     private func transcribed(_ text: String, sendImmediately: Bool) {

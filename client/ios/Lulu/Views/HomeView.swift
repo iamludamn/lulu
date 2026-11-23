@@ -358,6 +358,7 @@ struct HomeView: View {
 
     private func selectPage(_ next: Page) {
         guard page != next else { return }
+        if next != .chat { composing = false }
         withAnimation(reduceMotion ? nil : .snappy) { page = next }
     }
 
