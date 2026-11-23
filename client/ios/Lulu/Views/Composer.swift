@@ -40,7 +40,7 @@ struct Composer: View {
     }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        let controls = HStack(alignment: .bottom, spacing: 8) {
             HStack(alignment: .bottom, spacing: 6) {
                 TextField("", text: $draft, axis: .vertical)
                     .font(.body)
@@ -87,6 +87,7 @@ struct Composer: View {
             if listening { Color.clear.frame(width: 52, height: 1) }
             microphone
         }
+        GlassEffectContainer(spacing: 6) { controls }
         .padding(.horizontal, 16)
         .padding(.bottom, 4)
         .overlay(alignment: .top) {
@@ -149,8 +150,6 @@ struct Composer: View {
         }
         .foregroundStyle(listening || tapRecording ? .primary : .secondary)
         .frame(width: 48, height: 48)
-        .glassEffect(.regular, in: .circle)
-        .scaleEffect(listening ? 1.08 : 1)
         .overlay {
             VoiceInteraction(
                 isEnabled: !transcription.processing,
@@ -162,6 +161,8 @@ struct Composer: View {
                 onCancel: cancelListening
             )
         }
+        .glassEffect(.regular.interactive(), in: .circle)
+        .scaleEffect(listening ? 1.08 : 1)
     }
 
     private func toggleTranscription() {
