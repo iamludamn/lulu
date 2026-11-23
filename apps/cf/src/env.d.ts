@@ -1,9 +1,16 @@
+declare namespace Cloudflare {
+  interface GlobalProps {
+    mainModule: typeof import("./worker.js");
+  }
+}
+
 interface Env {
   readonly ASSETS: Fetcher;
   readonly AI?: Ai;
   readonly BOTS: DurableObjectNamespace<import("./objects.js").Bot>;
   readonly MEMORY: DurableObjectNamespace<import("./objects.js").Memory>;
   readonly ARTIFACTS: DurableObjectNamespace<import("./objects.js").Artifact>;
+  readonly LULU_METADATA: D1Database;
   readonly S3_ENDPOINT?: string;
   readonly S3_BUCKET?: string;
   readonly S3_REGION?: string;
@@ -14,6 +21,9 @@ interface Env {
   readonly DEEPSEEK_API_KEY?: string;
   readonly LULU_MODEL?: string;
   readonly LULU_CHAT_TOKEN?: string;
+  readonly LULU_CRON_ACCOUNT_ID?: string;
+  readonly LULU_CRON_WORKER_NAME?: string;
+  readonly LULU_CRON_API_TOKEN?: string;
   readonly LULU_OBSERVABILITY_TOKEN?: string;
   readonly E2B_API_KEY?: string;
   readonly E2B_TEMPLATE?: string;

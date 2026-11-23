@@ -36,9 +36,13 @@ export async function scheduleOverviewCard(harness: Pick<Harness, "snapshot">, c
 }
 
 export async function withScheduleOverview(harness: Pick<Harness, "snapshot">, panel: PanelState, context: Context): Promise<PanelState> {
+  if (panel.widgets[SCHEDULE_WIDGET_ID]?.body.kind !== "schedules") return panel;
+  return projectScheduleOverview(panel, (await harness.snapshot(CronJobsDoc, context))?.jobs ?? []);
+}
+
+export function projectScheduleOverview(panel: PanelState, jobs: readonly ScheduledJob[]): PanelState {
   const widget = panel.widgets[SCHEDULE_WIDGET_ID];
   if (widget?.body.kind !== "schedules") return panel;
-  const jobs = (await harness.snapshot(CronJobsDoc, context))?.jobs ?? [];
   const rows = jobs.map((job) => scheduleRow(job)).reverse();
   return {
     ...panel,

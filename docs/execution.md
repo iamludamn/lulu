@@ -19,3 +19,7 @@ Each new delegate starts a fresh conversation. The task supplies the context the
 | Scheduled Job | `jobId` in `CronJobsDoc`. Stores the schedule and the latest run or submission reference. A one-time job marked `done` has been dispatched. |
 | Alarm | A reminder job. At its due time the Bot durably queues a schedule event in the main conversation, and Lulu delivers the reminder in Chat through `send_to_user`. The Schedule Overview shows its job alongside scheduled tasks. |
 | Sandbox Workspace | `SandboxDoc` tracks the owner, provider reference, and workspace epoch. Child conversations can share the owner's E2B workspace. |
+
+Cloudflare Cron triggers daily schedules, including scheduled Space pulls, and one-time reminders with enough lead time. The Worker checks the saved jobs and forwards the occurrence to the existing Bot. The Bot admits the reminder or delegated run and advances the job in the same Pi Durable commit. Expired occurrences are dropped. A consumed one-time rule is removed when no other job needs that rule.
+
+The Bot alarm handles short reminders and time during Cron propagation or registration failure. It also wakes Pi Durable for task recovery, request deadlines, provider retries, and immediate Space actions.

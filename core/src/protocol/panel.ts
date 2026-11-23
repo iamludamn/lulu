@@ -1,4 +1,5 @@
 import { Type, type Static } from "typebox";
+import type { JsonObject } from "@earendil-works/pi-durable";
 
 const enumOf = <T extends string>(values: readonly T[], description?: string) =>
   Type.Unsafe<T>({ type: "string", enum: [...values], ...(description && { description }) });
@@ -62,11 +63,20 @@ const Media = Type.Object({
   caption: Type.Optional(Type.String()),
 });
 
+export const SpaceMonitor = Type.Object({
+  url: Type.String({ description: "Public HTTPS page to monitor" }),
+  goal: Type.String({ description: "What fresh data to extract and what counts as a meaningful change", minLength: 1, maxLength: 1000 }),
+  schema: Type.Unsafe<JsonObject>({ type: "object", additionalProperties: true, description: "JSON Schema object defining the data the Space renders" }),
+  notify: Type.Optional(Type.Boolean({ description: "Notify when validated data changes" })),
+}, { additionalProperties: false });
+export type SpaceMonitor = Static<typeof SpaceMonitor>;
+
 const Space = Type.Object({
   kind: Type.Literal("space"),
   src: Type.String({ description: "artifact://spaces/<widget id>/index.html@version of the page; the widget id is the page's saved-state key" }),
   preview: Type.String({ description: "artifact://spaces/<widget id>/cover.html@version of the separate static cover" }),
   summary: Type.Optional(Type.String({ description: "One line on what the space shows, displayed on its card" })),
+  monitor: Type.Optional(SpaceMonitor),
   refresh: Type.Optional(
     enumOf(
       ["manual", "open", "daily"] as const,
@@ -120,6 +130,9 @@ const widgetProperties = {
 };
 
 export const ChecklistWidgetInput = Type.Object({ ...widgetProperties, body: Checklist });
+export const MonitoredSpaceInput = Type.Object({
+  ...widgetProperties, body: Type.Object({ ...Space.properties, monitor: SpaceMonitor }),
+});
 
 // Stored Panel widgets and Chat offers keep their original wire formats.
 export const WidgetInput = Type.Object({
@@ -135,7 +148,8 @@ export type ScheduleReceipt = { action: "add" | "update"; requestIds: string[] }
 export type MonitorProvider = "context" | "perplexity";
 export type SpaceStatus = {
   mode: { kind: "manual" } | { kind: "scheduled"; url: string; time: string; tz: string } | {
-    kind: "subscription"; provider?: MonitorProvider; goal: string; source: { kind: "search"; query: string } | { kind: "page"; urls: string[] };
+    kind: "subscription"; provider?: MonitorProvider; goal: string;
+    source: { kind: "search"; query: string } | { kind: "page"; urls: string[] } | { kind: "extract"; url: string; schema: SpaceMonitor["schema"] };
   };
   enabled: boolean;
   checkedAt: number | null;

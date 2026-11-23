@@ -1,7 +1,7 @@
 import { defineDoc, defineDocFamily, type Harness } from "@earendil-works/pi-durable";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { Tx } from "@earendil-works/pi-durable";
-import type { SpaceStatus } from "../protocol/panel.js";
+import type { SpaceMonitor, SpaceStatus } from "../protocol/panel.js";
 import { STORED_DOC_KINDS } from "../durable-names.js";
 
 export type Mode = SpaceStatus["mode"];
@@ -16,6 +16,7 @@ export type Refresh = {
   archived: boolean;
   notify: boolean;
   nextAt: number | null;
+  immediatePull?: boolean;
   retryAt: number | null;
   monitor: string | null;
   sealedWebhookSecret?: string;
@@ -38,6 +39,9 @@ export type Refresh = {
   reconciledAt?: number;
   cost: number;
   credits?: number;
+  baselineAt?: number;
+  schemaFailure?: string;
+  replacement?: SpaceMonitor;
 };
 
 export const SpaceRefreshIndex = defineDoc<{ ids: string[]; devices?: string[]; pushRetryAt?: number | null }>({
@@ -57,11 +61,11 @@ export const SpaceRefreshDoc = defineDocFamily<{ entry?: Refresh }, null>({
   initial: () => ({}),
 });
 
-export async function spaceEntry(harness: Harness, id: string): Promise<Refresh | undefined> {
+export async function spaceEntry(harness: Pick<Harness, "snapshot">, id: string): Promise<Refresh | undefined> {
   return (await harness.snapshot(SpaceRefreshDoc, id, context))?.entry;
 }
 
-export async function spaceEntries(harness: Harness, ids?: readonly string[]): Promise<[string, Refresh][]> {
+export async function spaceEntries(harness: Pick<Harness, "snapshot">, ids?: readonly string[]): Promise<[string, Refresh][]> {
   const requested = ids ?? (await harness.snapshot(SpaceRefreshIndex, context))?.ids ?? [];
   const pairs = await Promise.all(requested.map(async (id) => [id, await spaceEntry(harness, id)] as const));
   return pairs.flatMap(([id, entry]) => entry === undefined ? [] : [[id, entry]]);
@@ -97,6 +101,7 @@ export async function archiveRefresh(tx: Tx, id: string): Promise<void> {
   entry.archived = true;
   entry.nextAt = null;
   entry.inbox = [];
+  delete entry.replacement;
   if (entry.mode.kind === "subscription") {
     if (entry.providerState !== "deleted") {
       entry.providerState = "delete";

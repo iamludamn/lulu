@@ -19,6 +19,7 @@ import { artifactConfigured } from "../artifact/s3.js";
 import type { McpHost } from "./mcp.js";
 import type { DurableHost } from "../host/types.js";
 import { STORED_EXTENSION_NAMES } from "../durable-names.js";
+import { contextMonitorConfigured } from "../space/refresh.js";
 
 export type HarnessDeps = { host: DurableHost; mcp: McpHost };
 
@@ -52,7 +53,7 @@ export const CATALOG: Record<string, (deps: HarnessDeps) => Extension> = {
   delegate: ({ host }) => createDelegateExtension(DelegateAgents, sandboxProvider(host)),
   cron: () => CronExtension,
   panel: () => createPanelExtension(),
-  send: ({ host }) => createSendExtension(artifactCheck(host)),
+  send: ({ host }) => createSendExtension(artifactCheck(host), contextMonitorConfigured(host.env)),
   chat: () =>
     defineExtension({
       name: STORED_EXTENSION_NAMES.chat,

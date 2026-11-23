@@ -8,6 +8,7 @@ const request = (key: string, path: string, method = "GET", body?: unknown, requ
 const info = (result: Record<string, unknown>) => ({
   id: monitorId(result.id), secret: string(record(result.webhook).secret), status: string(result.status),
   error: string(record(result.last_error).code),
+  baseline: record(result.baseline),
 });
 
 export async function contextMonitor(key: string, id: string) {
@@ -25,7 +26,10 @@ export async function findContextMonitor(key: string, tag: string): Promise<stri
   }
 }
 
-export async function createContextMonitor(key: string, tag: string, name: string, url: string, target: { type: "page"; url: string; instructions: string } | { type: "search"; query: string; instructions: string }) {
+type ContextTarget = { type: "page"; url: string; instructions: string } | { type: "search"; query: string; instructions: string } |
+  { type: "extract"; url: string; instructions: string; schema: Record<string, unknown>; max_pages: 1; max_depth: 0 };
+
+export async function createContextMonitor(key: string, tag: string, name: string, url: string, target: ContextTarget) {
   return info(await request(key, "", "POST", {
     mode: "web", name, target, tags: [tag], change_detection: { type: "semantic" },
     schedule: { type: "interval", frequency: 1, unit: "days" },
