@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { NOOP_TELEMETRY_CONTEXT as telemetry } from '@earendil-works/pi-telemetry';
-import { deferredMcp } from '../dist/agent/mcp.js';
-import { handleMcpRegistry } from '../dist/agent/mcp-registry.js';
-import { mcpStore } from '../dist/agent/mcp-store.js';
+import { deferredMcp } from '../dist/mcp/extension.js';
+import { handleMcpRegistry } from '../dist/mcp/registry.js';
+import { mcpStore } from '../dist/mcp/store.js';
 
 const registry = 'https://lulu.test/mcp';
 const issuer = 'https://provider.test';

@@ -1,5 +1,5 @@
 import type { McpOAuthServerStore, McpOAuthState } from "@earendil-works/pi-mcp/oauth";
-import { mcpStore, type McpStoreHost } from "./mcp-store.js";
+import { mcpStore, type McpStoreHost } from "./store.js";
 
 type AuthEntry = McpOAuthState & { expiresAt?: number };
 type AuthDoc = Record<string, AuthEntry>;

@@ -1,14 +1,15 @@
+import type { DurableHost } from "../host/types.js";
 import { contextCoverage } from "./context.js";
 import { injectionContext } from "./injection.js";
-import type { createDreamingTask } from "./dreaming.js";
+import { createDreamingTask } from "./dreaming.js";
 import { NOOP_TELEMETRY_CONTEXT, type TelemetryContext } from "@earendil-works/pi-telemetry";
 import { getCurrentSystemMessage } from "@earendil-works/pi-ai/utils/transcript";
 import { defineExtension, GenerationTask, hook, LiveDoc, section } from "@earendil-works/pi-durable";
-import { memorySpan } from "./telemetry.js";
+import { memorySpan, memoryTelemetry } from "./telemetry.js";
 import { InjectionBindings, InjectionFamily, injectionRequest } from "./doc.js";
 import { SandboxDoc } from "../sandbox/doc.js";
 import { RunFamily } from "../delegate/runs.js";
-import type { createMemoryUpdate } from "./schedule.js";
+import { createMemoryUpdate } from "./schedule.js";
 import { RENAMED_TASKS, STORED_EXTENSION_NAMES, withPreviousTaskName } from "../durable-names.js";
 
 export type MemoryExtensionOptions = {
@@ -49,5 +50,13 @@ export function createMemoryExtension({ telemetry = NOOP_TELEMETRY_CONTEXT, upda
         return undefined;
       }
     }), { tag: false })],
+  });
+}
+
+export function memoryExtensionFor(host: DurableHost) {
+  return createMemoryExtension({
+    telemetry: memoryTelemetry(host.telemetry, host.name),
+    update: createMemoryUpdate(host),
+    dreaming: createDreamingTask(host),
   });
 }

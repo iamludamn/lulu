@@ -1,5 +1,5 @@
 import { MCP_MASK, MCP_SERVER_NAME, type McpServerInput } from "../protocol/mcp.js";
-import type { McpServerConfig } from "./mcp.js";
+import type { McpServerConfig } from "./extension.js";
 
 type Stored = Pick<McpServerConfig, "url" | "headers">;
 

@@ -1,3 +1,4 @@
+import { artifactMcpServer } from "../artifact/extension.js";
 import { serviceUsage } from "../telemetry/service.js";
 import type { CodemodeToolOptions } from "@earendil-works/pi-durable/codemode";
 import type { TSchema } from "typebox";
@@ -7,8 +8,8 @@ import { McpAuthRequiredError, McpClient, normalizeMcpInputSchema, StreamableHtt
 import { createMcpAuthProvider, McpOAuthAuthorizationRequiredError } from "@earendil-works/pi-mcp/oauth";
 import type { McpStatus } from "../protocol/contract.js";
 import type { DurableHost } from "../host/types.js";
-import { mcpAuthStore } from "./mcp-auth.js";
-import type { McpStoreHost } from "./mcp-store.js";
+import { mcpAuthStore } from "./auth.js";
+import type { McpStoreHost } from "./store.js";
 import { STORED_EXTENSION_NAMES } from "../durable-names.js";
 
 const MAX_SERVER_DESCRIPTION_CHARS = 250;
@@ -257,4 +258,14 @@ export async function deferredMcp(servers: Record<string, McpServerConfig>, host
     }];
   }));
   return mcpHost(new Map(sessions), host);
+}
+
+export function platformServers(host: DurableHost): Record<string, McpServerConfig> {
+  const { env } = host;
+  const servers: Record<string, McpServerConfig> = {};
+  const artifact = artifactMcpServer(host);
+  if (artifact !== undefined) servers.artifact = artifact;
+  if (env.TAVILY_API_KEY) servers.tavily = { url: `https://mcp.tavily.com/mcp/?tavilyApiKey=${env.TAVILY_API_KEY}` };
+  servers.exa = { url: env.EXA_API_KEY ? `https://mcp.exa.ai/mcp?exaApiKey=${env.EXA_API_KEY}` : "https://mcp.exa.ai/mcp" };
+  return servers;
 }

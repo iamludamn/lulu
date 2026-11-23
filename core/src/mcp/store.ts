@@ -1,5 +1,5 @@
 import type { DurableHost } from "../host/types.js";
-import type { McpServerConfig } from "./mcp.js";
+import type { McpServerConfig } from "./extension.js";
 
 function bytesOf(text: string): Uint8Array<ArrayBuffer> {
   return new TextEncoder().encode(text);

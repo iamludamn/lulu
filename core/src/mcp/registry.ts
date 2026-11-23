@@ -1,9 +1,9 @@
 import type { McpStatus } from "../protocol/contract.js";
 import { MCP_MASK, type McpRegistryView } from "../protocol/mcp.js";
-import { McpRegistryError, checkName, maskUrl, parseInput, resolve } from "./mcp-config.js";
-import { loginMcp, callbackMcp } from "./mcp-oauth.js";
-import { mcpAuthStore } from "./mcp-auth.js";
-import { mcpStore, type McpStoreHost } from "./mcp-store.js";
+import { McpRegistryError, checkName, maskUrl, parseInput, resolve } from "./config.js";
+import { loginMcp, callbackMcp } from "./oauth.js";
+import { mcpAuthStore } from "./auth.js";
+import { mcpStore, type McpStoreHost } from "./store.js";
 
 export interface RegistryHooks {
   statuses(): readonly McpStatus[];

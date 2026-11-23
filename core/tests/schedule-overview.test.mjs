@@ -9,9 +9,9 @@ import { fireSchedules, nextScheduleAlarm, scheduleEntries } from '../dist/cron/
 import { CronJobsDoc } from '../dist/cron/schedule.js';
 import { fireDue } from '../dist/cron/alarm.js';
 import { withScheduleOverview } from '../dist/cron/schedule.js';
-import { ScheduleTool } from '../dist/cron/tool.js';
+import { scheduleSend, ScheduleTool } from '../dist/cron/tool.js';
 import { DelegateIndex } from '../dist/delegate/runs.js';
-import { PanelDoc } from '../dist/panel.js';
+import { checklistSend, PanelDoc } from '../dist/panel.js';
 import { checkItem } from '../dist/panel.js';
 import { SCHEDULE_WIDGET_ID } from '../dist/protocol/panel.js';
 import { SEND_TOOL } from '../dist/protocol/send.js';
@@ -35,7 +35,7 @@ async function fixture(t) {
   const entries = async () => (await session.commit(tx => tx.scanEntries({ conversationId: id, order: 'ascending' }, 100), ctx)).items;
   const state = () => session.snapshot(PanelDoc, ctx);
   const projected = async () => withScheduleOverview(session, await state(), ctx);
-  const sendTool = createSendTool(undefined);
+  const sendTool = createSendTool([checklistSend, scheduleSend]);
   const execute = (taskId, args, commit = session.commit.bind(session)) => ScheduleTool.execute(args, {
     taskId,
     conversationId: id,
@@ -239,7 +239,7 @@ async function chatFixture(t, steps) {
     },
   });
   const registry = createRegistry();
-  registry.install(defineExtension({ name: 'test-chat', tools: [ScheduleTool, createSendTool(undefined)] }));
+  registry.install(defineExtension({ name: 'test-chat', tools: [ScheduleTool, createSendTool([checklistSend, scheduleSend])] }));
   const harness = await Harness.open(new MemoryStorage(), { registry, models }, ctx);
   t.after(() => harness.close(ctx));
   const selected = { provider: model.provider, modelId: model.id };

@@ -119,12 +119,13 @@ export function deliveredSentIn(entries: readonly EntryRecord[]): Sent[] {
       const result = delivered.get(sent.id);
       if (result === undefined) return [];
       const { widget: requested, ...input } = call;
+      const prepared = input.type === "widget" && result.toolName === SEND_TOOL ? result.details?.widget : undefined;
       if (requested?.kind === "schedule_overview" || isScheduleOverviewRequest(requested)) {
-        const widget = result.details?.widget;
-        if (result.toolName !== SEND_TOOL || widget?.kind !== "panel" || widget.panel.body.kind !== "schedules") return [];
-        return [{ ...sent, input: { ...input, widget } }];
+        if (prepared?.kind !== "panel" || prepared.panel.body.kind !== "schedules") return [];
+        return [{ ...sent, input: { ...input, widget: prepared } }];
       }
-      return [{ ...sent, input: { ...input, ...(requested && { widget: requested }) } }];
+      const widget = prepared ?? requested;
+      return [{ ...sent, input: { ...input, ...(widget && { widget }) } }];
     });
   });
 }

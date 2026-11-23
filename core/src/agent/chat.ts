@@ -1,22 +1,10 @@
 import type { Models } from "@earendil-works/pi-ai/models";
 import { createRegistry, type HarnessOptions, type Registry } from "@earendil-works/pi-durable";
-import { deferredMcp, type McpHost, type McpServerConfig } from "./mcp.js";
-import { artifactConfigured } from "../artifact/s3.js";
-import { mcpStore } from "./mcp-store.js";
-import { DEFAULT_HARNESS, installHarness } from "./catalog.js";
+import { deferredMcp, platformServers, type McpHost, type McpServerConfig } from "../mcp/extension.js";
+import { mcpStore } from "../mcp/store.js";
+import { DEFAULT_EXTENSIONS, installHarness } from "./catalog.js";
 import type { DurableHost } from "../host/types.js";
 import type { McpStatus } from "../protocol/contract.js";
-
-function platformServers(host: DurableHost): Record<string, McpServerConfig> {
-  const { env } = host;
-  const servers: Record<string, McpServerConfig> = {};
-  if (artifactConfigured(env)) {
-    servers.artifact = { url: "https://artifact/mcp", fetch: (input, init) => host.objects.ARTIFACTS.getByName(host.name).fetch(input, init) };
-  }
-  if (env.TAVILY_API_KEY) servers.tavily = { url: `https://mcp.tavily.com/mcp/?tavilyApiKey=${env.TAVILY_API_KEY}` };
-  servers.exa = { url: env.EXA_API_KEY ? `https://mcp.exa.ai/mcp?exaApiKey=${env.EXA_API_KEY}` : "https://mcp.exa.ai/mcp" };
-  return servers;
-}
 
 async function openChatMcp(host: DurableHost, botServers: Record<string, McpServerConfig>): Promise<{ host: McpHost; statuses: McpStatus[] }> {
   const platform = platformServers(host);
@@ -37,7 +25,7 @@ export async function reconnectChatMcp(
   const opened = { host: mcp, statuses: mcp.statuses.map((status): McpStatus => ({ ...status, source: Object.hasOwn(platform, status.name) ? "platform" : "bot" })) };
   installHarness(
     registry,
-    DEFAULT_HARNESS.extensions.filter((name) => name === "mcp" || name === "codemode" || name === "delegate"),
+    DEFAULT_EXTENSIONS.filter((name) => name === "mcp" || name === "codemode" || name === "delegate"),
     { host, mcp: opened.host },
   );
   await previous.close();
@@ -51,7 +39,7 @@ export async function createChatHarnessOptions(
   const botServers = await mcpStore(host).servers();
   const { host: mcp, statuses } = await openChatMcp(host, botServers);
   const registry = createRegistry();
-  installHarness(registry, DEFAULT_HARNESS.extensions, { host, mcp });
+  installHarness(registry, DEFAULT_EXTENSIONS, { host, mcp });
   return {
     options: {
       models,

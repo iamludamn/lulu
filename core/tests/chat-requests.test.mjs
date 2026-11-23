@@ -41,7 +41,7 @@ async function openChat(t, steps) {
     },
   });
   const registry = createRegistry();
-  registry.install(createSendExtension(undefined));
+  registry.install(createSendExtension([]));
   registry.install(createMemoryExtension({}));
   const harness = await Harness.open(new MemoryStorage(), { registry, models }, context);
   t.after(() => harness.close(context));

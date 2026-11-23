@@ -1,3 +1,4 @@
+import type { SendGuidance } from "../send/tool.js";
 import { defineExtension, section, type ToolRegistration } from "@earendil-works/pi-durable";
 import { SEND_TOOL } from "../protocol/send.js";
 import { CODING_TOOLS } from "../sandbox/extension.js";
@@ -77,3 +78,7 @@ export const createDelegateExtension = (presets: DelegatePresets, sandboxes: San
       ...CODING_TOOLS.map((tool) => ({ tool, wrap: guard(sandboxRefusal(presets)) })),
     ],
   });
+
+export const delegateSendGuidance: SendGuidance = {
+  instructions: ["Dispatch any outstanding additions or corrections to delegated work before sending the final card."],
+};

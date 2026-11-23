@@ -1,8 +1,8 @@
 import { authorizeMcp, McpOAuthProvider, type McpOAuthStateStore } from "@earendil-works/pi-mcp/oauth";
-import { mcpAuthStore } from "./mcp-auth.js";
-import type { RegistryHooks } from "./mcp-registry.js";
-import { McpRegistryError } from "./mcp-config.js";
-import { mcpStore, type McpStoreHost } from "./mcp-store.js";
+import { mcpAuthStore } from "./auth.js";
+import type { RegistryHooks } from "./registry.js";
+import { McpRegistryError } from "./config.js";
+import { mcpStore, type McpStoreHost } from "./store.js";
 
 function provider(host: McpStoreHost, origin: string, serverUrl: string, store: McpOAuthStateStore, onRedirect = (_url: URL) => {}): McpOAuthProvider {
   return new McpOAuthProvider({

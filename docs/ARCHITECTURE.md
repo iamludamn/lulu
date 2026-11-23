@@ -23,6 +23,12 @@ Run `npm run lint` after `npm run check` to check the TypeScript sources for run
 | [`/api/bots/main/*`](../core/src/server/api.ts) | HTTP access to schedules, memory, artifacts, Spaces, and MCP configuration. |
 | [Pi Durable extensions](../core/src/agent/catalog.ts) | Register tools and model context. Persist recoverable state in Docs and use request IDs for replayable side effects. |
 
+## Tool assembly
+
+Feature modules own each tool's schema, instructions, and execution. The [Agent catalog](../core/src/agent/catalog.ts) selects those extensions and assembles the main conversation's instructions. The [MCP extension](../core/src/mcp/extension.ts) adapts remote tools into that same registry.
+
+[Send](../core/src/send/tool.ts) builds one `send_to_user` tool from the catalog's contributions. Panel, scheduling, artifacts, and Spaces each supply a model-facing card schema, guidance, and a function that prepares the delivered card. A feature can also provide guidance by itself. The tool handles request correlation and end-of-turn behavior. Chat reads the prepared card from the tool result and can still read stored cards from earlier versions.
+
 ## Core entities
 
 | Entity | Owns |
@@ -34,7 +40,7 @@ Run `npm run lint` after `npm run check` to check the TypeScript sources for run
 | [Bot data](../core/src/conversation/bot-data.ts) | D1 stores Panel, accepted Asset references, Space refresh metadata, and schedules. The Bot keeps transaction-local copies and can restore them from D1. The bucket holds the derived startup snapshot. |
 | [Artifact Worker](../apps/cf/src/artifacts.ts) | File bodies in the object bucket. D1 transactions own version metadata, upload reservations, request IDs, and quota. Pinned file references retain their original object keys. |
 | [Cloudflare Cron](execution.md) | Wakes the Worker at registered times. The Worker reads the saved schedules and invokes the existing Bot for due work. |
-| [MCP configuration](../core/src/agent/mcp-store.ts) | Encrypted connection configuration in Workers KV. Bot storage holds OAuth authorization. |
+| [MCP configuration](../core/src/mcp/store.ts) | Encrypted connection configuration in Workers KV. Bot storage holds OAuth authorization. |
 
 ```mermaid
 flowchart LR

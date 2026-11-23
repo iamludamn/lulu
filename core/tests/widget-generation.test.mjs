@@ -2,14 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { validateToolArguments } from '@earendil-works/pi-ai/utils/validation';
-import { createSession, MemoryStorage } from '@earendil-works/pi-durable';
-import { checkItem } from '../dist/panel.js';
-import { PanelDoc } from '../dist/panel.js';
-import { createPanelTool } from '../dist/panel.js';
+import { createRegistry, createSession, MemoryStorage } from '@earendil-works/pi-durable';
+import { Type } from 'typebox';
+import { installHarness } from '../dist/agent/catalog.js';
+import { checkItem, createPanelTool, keepWidget, PanelDoc } from '../dist/panel.js';
 import { SendInput } from '../dist/protocol/send.js';
-import { keepWidget } from '../dist/panel.js';
 import { deliveredSentIn } from '../dist/conversation/transcript.js';
-import { createSendTool } from '../dist/send/tool.js';
+import { createSendTool, defineSendCard } from '../dist/send/tool.js';
 
 const ctx = BACKGROUND_CONTEXT;
 const send = body => ({
@@ -29,7 +28,9 @@ const ordinaryBodies = [
 ];
 const checklist = send({ kind: 'list', items: [{ title: 'Pack', done: false }] });
 const space = send({ kind: 'space', src: 'artifact://spaces/space/index.html@1', preview: 'artifact://spaces/space/cover.html@1' });
-const sendTool = createSendTool(undefined);
+const registry = createRegistry();
+installHarness(registry, ['send'], { host: { env: {} } });
+const [{ tool: sendTool }] = registry.snapshot().tools();
 const panelTool = createPanelTool();
 const validate = (tool, args) => validateToolArguments(tool, { name: tool.name, arguments: args });
 
@@ -99,4 +100,73 @@ test('completed checklists stay saved without using a visible Panel slot', async
   const panel = await session.snapshot(PanelDoc, ctx);
   assert.ok(panel.widgets['new-checklist']);
   assert.equal(panel.widgets[completed.id].body.items[0].done, true);
+});
+
+test('a contribution supplies a model schema, guidance, and the card that Chat keeps', async () => {
+  const card = { kind: 'asset', ref: 'artifact://report.md@2', title: 'Report' };
+  const extension = defineSendCard({
+    schema: Type.Object({ kind: Type.Literal('saved-report'), report: Type.String() }),
+    instructions: ['Use saved-report to deliver a previous report.'],
+    prepare(input) {
+      if (input.report !== 'known') return { error: 'Unknown report' };
+      return { card };
+    },
+  });
+  const tool = createSendTool([extension, { instructions: ['Include a message after background work.'] }]);
+  const input = { type: 'widget', widget: { kind: 'saved-report', report: 'known' }, end_turn: true };
+  const api = { conversationId: 'root', snapshot: async () => undefined };
+  assert.match(tool.description, /Use saved-report/);
+  assert.match(tool.description, /after background work/);
+  assert.deepEqual(validate(tool, input), input);
+  assert.throws(() => validate(createSendTool([]), input), /Validation failed/);
+  const rejected = await tool.execute({ ...input, widget: { ...input.widget, report: 'missing' } }, api, ctx);
+  assert.equal(rejected.isError, true);
+  const result = await tool.execute(input, api, ctx);
+  assert.deepEqual(result.details.widget, card);
+  assert.deepEqual(result.control, { terminate: true });
+  const entries = [
+    { id: 1, kind: 'pi.assistant', model: [{ content: [{ type: 'toolCall', name: tool.name, id: 'report', arguments: input }] }] },
+    { id: 2, kind: 'pi.tool-result', model: [{ role: 'toolResult', toolName: tool.name, toolCallId: 'report', details: result.details }] },
+  ];
+  assert.deepEqual(deliveredSentIn(entries).map(offer => offer.input.widget), [card]);
+});
+
+test('the registered Artifact and Space contributions validate their own offers', async () => {
+  const registry = createRegistry();
+  const checked = [];
+  installHarness(registry, ['send'], {
+    host: {
+      name: 'test',
+      env: {
+        S3_ENDPOINT: 'https://s3.example.test', S3_BUCKET: 'test',
+        S3_ACCESS_KEY_ID: 'test', S3_SECRET_ACCESS_KEY: 'test',
+        CONTEXT_DEV_API_KEY: 'test', LULU_SPACE_WEBHOOK_SECRET: 'test'.repeat(8),
+        LULU_SPACE_WEBHOOK_ORIGIN: 'https://hooks.example.test',
+        LULU_SPACE_PRIVATE_ORIGIN: 'https://private.example.test',
+      },
+      objects: { ARTIFACTS: { getByName: () => ({ fetch: async url => {
+        const { pathname, searchParams } = new URL(url);
+        assert.equal(pathname, '/stat');
+        const name = searchParams.get('name');
+        checked.push([name, searchParams.get('version')]);
+        return new Response(null, { status: name === 'missing.html' ? 404 : 204 });
+      } }) } },
+    },
+  });
+  const [{ tool }] = registry.snapshot().tools();
+  const api = { conversationId: 'root', snapshot: async () => undefined };
+  const asset = { type: 'widget', widget: { kind: 'asset', title: 'File', ref: 'artifact://missing.html@3' } };
+  const missing = await tool.execute(validate(tool, asset), api, ctx);
+  assert.equal(missing.isError, true);
+  assert.match(missing.output[0].text, /does not exist/);
+
+  const offer = send({
+    ...space.widget.panel.body,
+    monitor: { url: 'https://example.test/data', goal: 'Find changes', schema: { type: 'object', properties: {} } },
+  });
+  const accepted = await tool.execute(validate(tool, offer), api, ctx);
+  assert.deepEqual(accepted.details.widget, offer.widget);
+  assert.deepEqual(checked, [['missing.html', '3'], ['spaces/space/index.html', '1'], ['spaces/space/cover.html', '1']]);
+  const unconfigured = await sendTool.execute(validate(sendTool, offer), api, ctx);
+  assert.match(unconfigured.output[0].text, /monitoring is unavailable/);
 });

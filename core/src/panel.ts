@@ -3,11 +3,12 @@ import { defineDoc, defineExtension, defineTool, section, type DocumentReader, t
 import { Type, type Static } from "typebox";
 import { spaceRefProblem, spacePreviewProblem } from "./artifact/space.js";
 import { deliveredSentIn, type Sent } from "./conversation/transcript.js";
-import { CronJobsDoc, scheduleRow, withScheduleOverview } from "./cron/schedule.js";
+import { withScheduleOverview } from "./cron/schedule.js";
 import { STORED_DOC_KINDS, STORED_EXTENSION_NAMES } from "./durable-names.js";
-import { ChecklistWidgetInput, EMPTY_PANEL, SCHEDULE_ORIGIN_PREFIX, SCHEDULE_WIDGET_ID, type PanelState, type Widget, type WidgetInput } from "./protocol/panel.js";
-import { ARTIFACT_REF, artifactName, type AssetItem, type SendCard } from "./protocol/send.js";
+import { EMPTY_PANEL, ListItem, panelWidgetProperties, SCHEDULE_ORIGIN_PREFIX, SCHEDULE_WIDGET_ID, type PanelState, type Widget, type WidgetInput } from "./protocol/panel.js";
+import { ARTIFACT_REF, artifactName, type AssetItem } from "./protocol/send.js";
 import type { Environment } from "./host/types.js";
+import { defineSendCard, type CardContribution } from "./send/tool.js";
 import { archiveRefresh, keepMonitoredSpace } from "./space/doc.js";
 
 export const PanelDoc = defineDoc<PanelState>({
@@ -35,22 +36,35 @@ export async function checkItem(harness: Harness, id: string, index: number, don
   }, BACKGROUND_CONTEXT);
 }
 
-export async function scheduleOverviewCard(read: Pick<DocumentReader, "snapshot">, context: Context): Promise<SendCard | undefined> {
+export async function scheduleOfferRevision(read: Pick<DocumentReader, "snapshot">, context: Context): Promise<number | undefined> {
   const panel = await read.snapshot(PanelDoc, context);
   if (panel?.widgets[SCHEDULE_WIDGET_ID]?.body.kind === "schedules") return;
-  const cron = await read.snapshot(CronJobsDoc, context);
-  const rows = [...(cron?.deleted ?? []), ...(cron?.jobs ?? []).map((job) => scheduleRow(job))].reverse();
-  return {
-    kind: "panel",
-    panel: {
-      id: SCHEDULE_WIDGET_ID,
-      size: "m",
-      title: "定时任务",
-      icon: "clock",
-      body: { kind: "schedules", revision: panel?.scheduleRevision ?? 1, rows },
-    },
-  };
+  return panel?.scheduleRevision ?? 1;
 }
+
+export function panelOfferProblem(id: string): string | undefined {
+  if (id === SCHEDULE_WIDGET_ID) return "Use widget { kind: panel, panel: { body: { kind: schedules } } } to send the Schedule Overview.";
+}
+
+const ChecklistWidgetInput = Type.Object({
+  ...panelWidgetProperties,
+  body: Type.Object({
+    kind: Type.Literal("list"),
+    items: Type.Array(Type.Object({ ...ListItem.properties, done: Type.Boolean() }), { minItems: 1, maxItems: 8 }),
+  }, { description: "A Checklist. Every item must have a done boolean so the user can check it off on Panel." }),
+});
+
+export const checklistSend: CardContribution = defineSendCard({
+  schema: Type.Object({ kind: Type.Literal("panel"), panel: ChecklistWidgetInput }),
+  preamble: ["For items the user wants to check off over time, offer a Checklist."],
+  instructions: [
+    "Offer a Checklist when the user wants items they can check off over time. Use kind panel with body { kind: list, items } and a done boolean on every item. Use size m for up to three short items and l for up to eight.",
+  ],
+  prepare(card) {
+    const error = panelOfferProblem(card.panel.id);
+    return error === undefined ? { card } : { error };
+  },
+});
 
 const MAX_PANEL_WIDGETS = 24;
 
