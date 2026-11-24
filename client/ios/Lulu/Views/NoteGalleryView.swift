@@ -62,6 +62,7 @@ struct NoteGalleryView: View {
     let onOpenNote: (UUID) -> Void
     let newNote: () -> Void
     let onDropFile: (String) -> Void
+    let onOpenSource: (String) -> Void
     @State private var query = ""
     @State private var previewFile: NoteFile?
     @Environment(\.topInset) private var topInset
@@ -193,7 +194,12 @@ struct NoteGalleryView: View {
         case .note(let note):
             Button { onOpenNote(note.id) } label: { galleryCard(entry) }
                 .buttonStyle(.plain)
-                .contextMenu { pinButton(entry) }
+                .contextMenu {
+                    pinButton(entry)
+                    if let source = note.source {
+                        Button("查看原对话", systemImage: "bubble.left") { onOpenSource(source) }
+                    }
+                }
         case .file(let file):
             let source = "note-gallery-\(file.id)"
             Button {
@@ -290,7 +296,6 @@ struct NoteDetailView: View {
     let api: Api
     let store: BotStore
     let noteStore: NoteStore
-    let onSource: (String) -> Void
     @FocusState private var titleFocused: Bool
     @FocusState private var focusedBlock: UUID?
     @FocusState private var messageFocused: Bool
@@ -303,6 +308,7 @@ struct NoteDetailView: View {
     @State private var failure: Failure?
     @State private var restored = false
     @State private var contentBottom: CGFloat = 0
+    @State private var continuationID = UUID()
     @State private var selections: [UUID: TextSelection] = [:]
     @State private var fileInsertion: InsertionPoint?
     @State private var showsFiles = false
@@ -322,7 +328,7 @@ struct NoteDetailView: View {
     }
 
     private struct DictationPoint {
-        let block: UUID?
+        let block: UUID
         let text: String
         let offsets: Range<Int>?
     }
@@ -348,13 +354,15 @@ struct NoteDetailView: View {
     var body: some View {
         let value = note
         let updated = noteStore.updatedBlocks(in: value)
+        let editorBlocks = value.blocks.last?.isText == true
+            ? value.blocks : value.blocks + [Note.Block(id: continuationID, content: .text(""))]
         ScrollView {
             VStack(alignment: .leading, spacing: 13) {
                 TextField("新笔记", text: $note.title, axis: .vertical)
                     .font(.largeTitle.bold())
                     .focused($titleFocused)
                     .accessibilityLabel("笔记标题")
-                ForEach(value.blocks) { block in
+                ForEach(editorBlocks) { block in
                     editBlock(block)
                         .background {
                             if updated.contains(block.id) {
@@ -363,19 +371,6 @@ struct NoteDetailView: View {
                                     .padding(-5)
                             }
                         }
-                }
-                if value.blocks.last?.isText != true {
-                    Button("继续写正文") {
-                        let block = Note.Block(content: .text(""))
-                        note.blocks.append(block)
-                        focusedBlock = block.id
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                }
-                if let source = value.source {
-                    Button("查看 Lulu 原对话", systemImage: "bubble") { onSource(source) }
-                    .font(.footnote)
                 }
             }
             .frame(maxWidth: 660)
@@ -557,7 +552,7 @@ struct NoteDetailView: View {
     private var dictationPoint: DictationPoint {
         let block = note.blocks.first { $0.id == focusedBlock && $0.isText } ?? note.blocks.last
         guard let block, case .text(let text) = block.content else {
-            return DictationPoint(block: nil, text: "", offsets: nil)
+            return DictationPoint(block: continuationID, text: "", offsets: nil)
         }
         let offsets = selectionRange(for: block.id, in: text).map { range in
             text.distance(from: text.startIndex, to: range.lowerBound)..<text.distance(from: text.startIndex, to: range.upperBound)
@@ -566,7 +561,12 @@ struct NoteDetailView: View {
     }
 
     private func insertDictation(_ text: String, at point: DictationPoint) {
-        guard let id = point.block, let index = note.blocks.firstIndex(where: { $0.id == id }),
+        let id = point.block
+        if id == continuationID {
+            appendContinuation(text)
+            return
+        }
+        guard let index = note.blocks.firstIndex(where: { $0.id == id }),
               case .text(var current) = note.blocks[index].content else {
             note.blocks.append(.init(content: .text(text)))
             return
@@ -583,6 +583,11 @@ struct NoteDetailView: View {
         } else {
             note.blocks[index].content = .text(current.isEmpty ? text : current + "\n" + text)
         }
+    }
+
+    private func appendContinuation(_ text: String) {
+        note.blocks.append(.init(id: continuationID, content: .text(text)))
+        continuationID = UUID()
     }
 
     private struct InsertionPoint {
@@ -622,10 +627,11 @@ struct NoteDetailView: View {
     private func editBlock(_ block: Note.Block) -> some View {
         switch block.content {
         case .text:
-            TextField("开始记录…", text: textBinding(for: block.id), selection: selectionBinding(for: block.id), axis: .vertical)
+            let emptyNote = note.blocks.isEmpty || (note.blocks.count == 1 && note.blocks.first?.id == block.id)
+            TextField(emptyNote ? "开始记录…" : "", text: textBinding(for: block.id), selection: selectionBinding(for: block.id), axis: .vertical)
                 .lineSpacing(4)
                 .focused($focusedBlock, equals: block.id)
-                .accessibilityLabel("笔记正文")
+                .accessibilityLabel(block.id == continuationID && !emptyNote ? "笔记末尾" : "笔记正文")
         case .check(let check):
             HStack(spacing: 8) {
                 Button {
@@ -688,7 +694,12 @@ struct NoteDetailView: View {
             default: ""
             }
         } set: { text in
-            guard let index = note.blocks.firstIndex(where: { $0.id == id }) else { return }
+            guard let index = note.blocks.firstIndex(where: { $0.id == id }) else {
+                if id == continuationID, !text.isEmpty, note.blocks.last?.isText != true {
+                    appendContinuation(text)
+                }
+                return
+            }
             switch note.blocks[index].content {
             case .text:
                 note.blocks[index].content = .text(text)

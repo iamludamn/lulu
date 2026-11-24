@@ -161,7 +161,7 @@ struct HomeView: View {
                 let detail = NoteDetailView(
                     note: Binding(get: { noteStore.notes.first { $0.id == opening.id } ?? note }, set: noteStore.update),
                     files: noteFiles, botId: bot.id, api: api, store: store,
-                    noteStore: noteStore, onSource: showNoteSource
+                    noteStore: noteStore
                 )
                 .id(opening.id)
                 if opening.fromCard {
@@ -203,7 +203,7 @@ struct HomeView: View {
                      reading: $reading, onReaderFrame: { readerFrame = $0 })
         case .notes:
             NoteGalleryView(notes: noteStore.notes, files: noteFiles, pinnedIDs: noteStore.pinnedIDs, noteZoom: noteZoom, botId: bot.id, api: api,
-                            syncError: noteStore.syncError, onRetry: { Task { await noteStore.refresh() } }, onTogglePin: noteStore.togglePin, onOpenNote: { openedNote = NoteOpening(id: $0, fromCard: true) }, newNote: newNote, onDropFile: store.drop)
+                            syncError: noteStore.syncError, onRetry: { Task { await noteStore.refresh() } }, onTogglePin: noteStore.togglePin, onOpenNote: { openedNote = NoteOpening(id: $0, fromCard: true) }, newNote: newNote, onDropFile: store.drop, onOpenSource: showNoteSource)
         }
     }
 
@@ -217,7 +217,6 @@ struct HomeView: View {
 
     private func showNoteSource(_ id: String) {
         noteStore.requestedRow = id
-        openedNote = nil
         fadeToChat()
     }
 
