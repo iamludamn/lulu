@@ -110,6 +110,16 @@ public struct Api: Sendable {
         try decode(NoteRevision.self, try await call("/api/bots/\(bot)/notes", method: "PUT", body: mutation, token: token, failure: "同步笔记失败"))
     }
 
+    public func askNote(_ bot: String, note: NotePayload, question: String, previous: NoteExchange?, token: String) async throws -> NoteAnswer {
+        struct Question: Encodable {
+            let note: NotePayload
+            let question: String
+            let previous: NoteExchange?
+        }
+        return try decode(NoteAnswer.self, try await call("/api/bots/\(bot)/notes/ask", method: "POST",
+            body: Question(note: note, question: question, previous: previous), token: token, failure: "笔记提问失败，请重试"))
+    }
+
     public func pinNoteCard(_ bot: String, key: String, pinned: Bool, token: String) async throws {
         struct Pin: Encodable { let key: String; let pinned: Bool }
         _ = try await call("/api/bots/\(bot)/notes/pin", method: "PUT", body: Pin(key: key, pinned: pinned), token: token, failure: "同步置顶失败")

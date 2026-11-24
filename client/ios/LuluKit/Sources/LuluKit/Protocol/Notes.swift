@@ -76,3 +76,23 @@ public struct NoteAcceptance: Decodable, Equatable, Sendable {
     public let id: UUID
     public let editing: Bool
 }
+
+public struct NoteExchange: Codable, Sendable {
+    public let question: String
+    public let reply: String
+
+    public init(question: String, reply: String) {
+        self.question = question
+        self.reply = reply
+    }
+}
+
+public struct NoteAnswer: Decodable, Sendable {
+    public let reply: String
+    public let content: NotePayload?
+
+    public init(reply: String, content: NotePayload? = nil) {
+        self.reply = reply
+        self.content = content
+    }
+}

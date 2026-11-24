@@ -289,24 +289,59 @@ struct NoteDetailView: View {
     let botId: String
     let api: Api
     let store: BotStore
-    let onDiscuss: (UUID) -> Void
-    let onSend: (UUID, String) async throws -> Void
+    let noteStore: NoteStore
     let onSource: (String) -> Void
     @FocusState private var titleFocused: Bool
     @FocusState private var focusedBlock: UUID?
     @FocusState private var messageFocused: Bool
     @State private var message = ""
+    @State private var questionExpanded = false
+    @State private var questionOpening = false
     @State private var transcription = VoiceTranscription()
+    @State private var voiceTarget: VoiceTarget?
     @State private var sendTask: Task<Void, Never>?
-    @State private var sendError: String?
+    @State private var failure: Failure?
+    @State private var restored = false
     @State private var selections: [UUID: TextSelection] = [:]
     @State private var fileInsertion: InsertionPoint?
     @State private var showsFiles = false
     @State private var previewFile: NoteFile?
     @Environment(\.openArtifact) private var openArtifact
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+
+    private struct Failure {
+        let title: String
+        let message: String
+    }
+
+    private enum VoiceTarget {
+        case question
+        case body(DictationPoint)
+    }
+
+    private struct DictationPoint {
+        let block: UUID?
+        let text: String
+        let offsets: Range<Int>?
+    }
+
+    private var editingNote: Bool { titleFocused || focusedBlock != nil }
+    private var sending: Bool { sendTask != nil }
+    private var dockAnimation: Animation? { reduceMotion ? nil : .easeOut(duration: 0.27) }
+
+    private var voiceStatus: String? {
+        guard let voiceTarget else { return nil }
+        let status = transcription.processing ? "正在转写" : transcription.recording ? "正在录音" : "正在准备"
+        switch voiceTarget {
+        case .question: return "语音问 lulu · \(status)"
+        case .body: return "语音记笔记 · \(status)"
+        }
+    }
 
     var body: some View {
         let value = note
+        let updated = noteStore.updatedBlocks(in: value)
         ScrollView {
             VStack(alignment: .leading, spacing: 13) {
                 TextField("新笔记", text: $note.title, axis: .vertical)
@@ -315,6 +350,13 @@ struct NoteDetailView: View {
                     .accessibilityLabel("笔记标题")
                 ForEach(value.blocks) { block in
                     editBlock(block)
+                        .background {
+                            if updated.contains(block.id) {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.accentColor.opacity(0.09))
+                                    .padding(-5)
+                            }
+                        }
                 }
                 if value.blocks.last?.isText != true {
                     Button("继续写正文") {
@@ -335,65 +377,225 @@ struct NoteDetailView: View {
             .padding(.top, 8)
         }
         .scrollDismissesKeyboard(.interactively)
+        .simultaneousGesture(TapGesture().onEnded {
+            if voiceTarget == nil { collapseQuestion() }
+        }, including: questionExpanded ? .gesture : .none)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !titleFocused && focusedBlock == nil {
-                Composer(draft: $message, store: store, transcription: transcription,
-                         onTranscribed: transcribed, busy: false, placeholder: "和 lulu 聊聊这篇笔记",
-                         focused: $messageFocused, onSend: { send(message) }, onVoiceConversation: nil)
-                    .frame(maxWidth: 720)
-                    .padding(.bottom, 4)
-                    .modifier(ComposerKeyboardAvoidance(focused: messageFocused))
-            }
+            detailDock
         }
         .background(Color.paper.ignoresSafeArea())
         .toolbarVisibility(.visible, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("带回对话", systemImage: "arrow.turn.down.left") { onDiscuss(value.id) }
+                if noteStore.canUndo(value) {
+                    Button("撤回笔记更新", systemImage: "arrow.uturn.backward") {
+                        if noteStore.undoUpdate(in: value.id) { restored = true }
+                    }
+                }
             }
             ToolbarItemGroup(placement: .keyboard) {
-                if titleFocused || focusedBlock != nil {
-                    if !titleFocused { insertionControls }
+                if editingNote {
+                    if let voiceStatus {
+                        Button("取消录音", action: cancelVoice)
+                            .accessibilityHint(voiceStatus)
+                    } else if !titleFocused {
+                        insertionControls
+                    }
                     Spacer()
+                    if transcription.starting || transcription.processing {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel(voiceStatus ?? "语音记笔记")
+                    } else {
+                        Button(transcription.recording ? "停止录音并转写" : "语音记笔记",
+                               systemImage: transcription.recording ? "stop.fill" : "mic.fill", action: toggleVoice)
+                            .tint(transcription.recording ? .red : .primary)
+                    }
                     Button("完成") {
                         titleFocused = false
                         focusedBlock = nil
                     }
+                    .disabled(voiceTarget != nil)
                 }
             }
         }
-        .alert("无法发送", isPresented: Binding(get: { sendError != nil }, set: { if !$0 { sendError = nil } })) {
-            Button("好", role: .cancel) { sendError = nil }
+        .alert(failure?.title ?? "笔记", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
+            Button("好", role: .cancel) { failure = nil }
         } message: {
-            Text(sendError ?? "")
+            Text(failure?.message ?? "")
         }
-        .onDisappear { sendTask?.cancel() }
+        .onChange(of: editingNote) { _, editing in
+            if editing {
+                if case .question? = voiceTarget { cancelVoice() }
+                collapseQuestion()
+            }
+        }
+        .onChange(of: messageFocused) { wasFocused, isFocused in
+            if wasFocused && !isFocused && voiceTarget == nil { collapseQuestion() }
+        }
+        .onChange(of: transcription.error) { _, error in
+            guard let error else { return }
+            voiceTarget = nil
+            failure = Failure(title: "语音转写失败", message: error)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { cancelVoice() }
+        }
+        .onDisappear {
+            sendTask?.cancel()
+            cancelVoice()
+        }
+        .task(id: restored) {
+            guard restored else { return }
+            do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            restored = false
+        }
         .sheet(isPresented: $showsFiles) { filePicker }
         .sheet(item: $previewFile) { NoteMockFileSheet(file: $0, botId: botId, api: api) }
     }
 
-    private func transcribed(_ text: String, sendImmediately: Bool) {
-        message += text
-        if sendImmediately {
-            send(message)
-        } else {
-            messageFocused = true
+    @ViewBuilder
+    private var detailDock: some View {
+        if !editingNote {
+            VStack(spacing: 8) {
+                if voiceTarget == nil { replyCard }
+                NoteComposer(draft: $message, focused: $messageFocused, expanded: questionExpanded,
+                             opening: questionOpening, sending: sending, transcription: transcription, voiceStatus: voiceStatus,
+                             onOpen: openQuestion, onSend: send, onMicrophone: toggleVoice, onCancelVoice: cancelVoice)
+            }
+            .frame(maxWidth: 720)
+            .padding(.bottom, 4)
+            .modifier(ComposerKeyboardAvoidance(focused: messageFocused))
         }
     }
 
-    private func send(_ draft: String) {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, sendTask == nil else { return }
+    @ViewBuilder
+    private var replyCard: some View {
+        if sending {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("lulu 正在回复…")
+            }
+            .font(.footnote)
+            .modifier(NoteReplySurface())
+        } else if restored {
+            Label("已恢复到更新前的笔记", systemImage: "checkmark")
+                .font(.footnote)
+                .modifier(NoteReplySurface())
+        } else if let reply = noteStore.reply(in: note.id) {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 9) {
+                    Text("lulu").foregroundStyle(.secondary)
+                    if reply.updated {
+                        Label("已更新笔记", systemImage: "checkmark").foregroundStyle(.tint)
+                    }
+                    Spacer()
+                    Button {
+                        noteStore.dismissReply(in: note.id)
+                    } label: {
+                        Image(systemName: "xmark").padding(6).contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("关闭笔记回复")
+                }
+                .font(.caption.weight(.medium))
+                Text(reply.text).font(.subheadline)
+            }
+            .modifier(NoteReplySurface())
+        }
+    }
+
+    private func openQuestion() {
+        guard !questionExpanded, voiceTarget == nil, !sending else { return }
+        questionOpening = true
+        withAnimation(dockAnimation, completionCriteria: .logicallyComplete) {
+            questionExpanded = true
+        } completion: {
+            questionOpening = false
+            if questionExpanded, !editingNote { messageFocused = true }
+        }
+    }
+
+    private func collapseQuestion() {
+        messageFocused = false
+        if questionExpanded { withAnimation(dockAnimation) { questionExpanded = false } }
+    }
+
+    private func send() {
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, sendTask == nil, voiceTarget == nil else { return }
         let id = note.id
+        collapseQuestion()
+        restored = false
         sendTask = Task {
             defer { sendTask = nil }
             do {
-                try await onSend(id, text)
-                messageFocused = false
+                try await noteStore.ask(text, in: id)
+                message = ""
             } catch {
-                if !Task.isCancelled { sendError = error.localizedDescription }
+                guard !Task.isCancelled else { return }
+                if !editingNote, voiceTarget == nil { withAnimation(dockAnimation) { questionExpanded = true } }
+                failure = Failure(title: "无法发送", message: error.localizedDescription)
             }
+        }
+    }
+
+    private func toggleVoice() {
+        guard !transcription.starting, !transcription.processing else { return }
+        if let target = voiceTarget, transcription.recording {
+            transcription.finish { text in
+                voiceTarget = nil
+                switch target {
+                case .question:
+                    message += message.isEmpty ? text : "\n" + text
+                    if questionExpanded, !editingNote { messageFocused = true }
+                case .body(let point):
+                    insertDictation(text, at: point)
+                }
+            }
+        } else if voiceTarget == nil {
+            let asking = questionExpanded && !editingNote
+            voiceTarget = asking ? .question : .body(dictationPoint)
+            if asking { messageFocused = false }
+            transcription.start(store)
+        }
+    }
+
+    private func cancelVoice() {
+        transcription.cancel()
+        voiceTarget = nil
+    }
+
+    private var dictationPoint: DictationPoint {
+        let block = note.blocks.first { $0.id == focusedBlock && $0.isText } ?? note.blocks.last
+        guard let block, case .text(let text) = block.content else {
+            return DictationPoint(block: nil, text: "", offsets: nil)
+        }
+        let offsets = selectionRange(for: block.id, in: text).map { range in
+            text.distance(from: text.startIndex, to: range.lowerBound)..<text.distance(from: text.startIndex, to: range.upperBound)
+        }
+        return DictationPoint(block: block.id, text: text, offsets: offsets)
+    }
+
+    private func insertDictation(_ text: String, at point: DictationPoint) {
+        guard let id = point.block, let index = note.blocks.firstIndex(where: { $0.id == id }),
+              case .text(var current) = note.blocks[index].content else {
+            note.blocks.append(.init(content: .text(text)))
+            return
+        }
+        if current == point.text, let offsets = point.offsets {
+            let start = current.index(current.startIndex, offsetBy: offsets.lowerBound)
+            let end = current.index(current.startIndex, offsetBy: offsets.upperBound)
+            let caretOffset = (String(current[..<start]) + text).count
+            current.replaceSubrange(start..<end, with: text)
+            note.blocks[index].content = .text(current)
+            if focusedBlock == id {
+                selections[id] = TextSelection(insertionPoint: current.index(current.startIndex, offsetBy: min(caretOffset, current.count)))
+            }
+        } else {
+            note.blocks[index].content = .text(current.isEmpty ? text : current + "\n" + text)
         }
     }
 
@@ -420,11 +622,16 @@ struct NoteDetailView: View {
         let block = focusedBlock ?? note.blocks.last?.id
         guard let focusedBlock,
               case .text(let text) = note.blocks.first(where: { $0.id == focusedBlock })?.content,
-              let selection = selections[focusedBlock], case .selection(let range) = selection.indices,
-              range.upperBound >= text.startIndex, range.upperBound <= text.endIndex else {
+              let range = selectionRange(for: focusedBlock, in: text) else {
             return InsertionPoint(block: block, offset: nil)
         }
         return InsertionPoint(block: block, offset: text.distance(from: text.startIndex, to: range.upperBound))
+    }
+
+    private func selectionRange(for block: UUID, in text: String) -> Range<String.Index>? {
+        guard let selection = selections[block], case .selection(let range) = selection.indices,
+              range.lowerBound >= text.startIndex, range.upperBound <= text.endIndex else { return nil }
+        return range
     }
 
     @ViewBuilder

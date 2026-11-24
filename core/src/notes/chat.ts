@@ -5,7 +5,8 @@ import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { deliveredSentIn, entryRange, episodesOf } from "../conversation/transcript.js";
 import { attachedNote } from "./context.js";
-import { NoteContent, type NoteRevision, type NotesStore } from "./store.js";
+import { editNote, NoteEdit } from "./edit.js";
+import type { NoteContent, NoteRevision, NotesStore } from "./store.js";
 
 type Proposal = { id: string; base: NoteRevision | null; content: NoteContent; at: number };
 const Proposals = defineDocFamily<Proposal, Proposal>({
@@ -150,32 +151,16 @@ export const createNotesExtension = (store?: NotesStore) => defineExtension({
   tools: [defineTool({
     name: "propose_note_edit",
     description: "Propose a title change or replace specified existing text or checklist blocks in the attached note. The user must accept the card before changes apply.",
-    parameters: Type.Object({
-      title: Type.Optional(Type.String({ maxLength: 512 })),
-      edits: Type.Optional(Type.Array(Type.Object({
-        id: Type.String(), text: Type.Optional(Type.String({ maxLength: 48000 })), done: Type.Optional(Type.Boolean()),
-      }), { maxItems: 250 })),
-      append: Type.Optional(Type.String({ maxLength: 48000 })),
-    }),
+    parameters: NoteEdit,
     replay: "safe", executionMode: "sequential", callers: ["model"],
     execute: async (input, api, context) => {
       const note = await attachedNote(api, api.conversationId, context, store);
       if (!note) return { isError: true, output: [{ type: "text", text: "Attach a note before proposing an edit." }] };
-      const edits = new Map(input.edits?.map((edit) => [edit.id, edit]));
-      if ([...edits.values()].some((edit) => !note.blocks.some((block) =>
-        block.id === edit.id && (block.kind === "check" || (block.kind === "text" && edit.done === undefined))))) {
-        return { isError: true, output: [{ type: "text", text: "Each edit must reference an existing text or checklist block." }] };
-      }
-      const updated = note.blocks.map((block) => {
-        const edit = edits.get(block.id);
-        if (!edit || block.kind === "file") return block;
-        const text = edit.text ?? block.text;
-        return block.kind === "check" ? { ...block, text, done: edit.done ?? block.done } : { ...block, text };
-      });
-      if (input.append) updated.push({ id: crypto.randomUUID(), kind: "text", text: input.append });
-      const content = { title: input.title ?? note.title, blocks: updated, ...(note.source === undefined ? {} : { source: note.source }) };
-      if (!Value.Check(NoteContent, content) || JSON.stringify(content).length > 120000) {
-        return { isError: true, output: [{ type: "text", text: "The edited note exceeds its storage limits." }] };
+      let content: NoteContent;
+      try {
+        content = editNote(note, input);
+      } catch (error) {
+        return { isError: true, output: [{ type: "text", text: error instanceof Error ? error.message : String(error) }] };
       }
       const key = "edit:" + api.callId;
       await api.commit(async (tx) => {

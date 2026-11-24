@@ -11,10 +11,10 @@ struct ChatView: View {
     let api: Api
     let containerBottomInset: CGFloat
     @Binding var draft: String
-    @Binding var sent: Int
     var composing: FocusState<Bool>.Binding
     let onKept: (Page) -> Void
     let onVoiceConversation: () -> Void
+    @State private var sent = 0
     @Binding var reading: ChatRow?
     let onReaderFrame: (ReaderFrame) -> Void
     @State private var bottomState = ChatBottomState()

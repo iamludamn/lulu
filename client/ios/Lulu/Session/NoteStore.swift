@@ -140,6 +140,23 @@ final class NoteStore {
         }
     }
 
+    struct Reply {
+        let text: String
+        let updated: Bool
+    }
+
+    private struct NoteDiscussion: Codable {
+        struct Undo: Codable {
+            let before: NotePayload
+            let after: NotePayload
+        }
+
+        var last: NoteExchange?
+        var updated = false
+        var hidden = false
+        var undo: Undo?
+    }
+
     private struct LocalRow {
         let row: ChatRow
         let anchor: String?
@@ -172,6 +189,7 @@ final class NoteStore {
         let pending: [UUID: NoteMutation]
         let pinChanges: [String: Bool]
         let context: UUID?
+        let discussions: [UUID: NoteDiscussion]?
     }
 
     private struct SyncEndpoint {
@@ -185,6 +203,7 @@ final class NoteStore {
     private var dirty: Set<UUID> = []
     private var pending: [UUID: NoteMutation] = [:]
     private var pinChanges: [String: Bool] = [:]
+    private var discussions: [UUID: NoteDiscussion] = [:]
     private(set) var syncError: String?
     @ObservationIgnored private var debounce: Task<Void, Never>?
     @ObservationIgnored private var uploads: [UUID: Task<Void, Error>] = [:]
@@ -208,6 +227,7 @@ final class NoteStore {
                     pending = saved.pending
                     pinChanges = saved.pinChanges
                     contextID = saved.context
+                    discussions = saved.discussions ?? [:]
                 }
             } catch { syncError = "无法读取本地笔记" }
             return
@@ -254,6 +274,81 @@ final class NoteStore {
         markChanged(note.id)
     }
 
+    func reply(in id: UUID) -> Reply? {
+        guard let discussion = discussions[id], !discussion.hidden, let last = discussion.last else { return nil }
+        return Reply(text: last.reply, updated: discussion.updated)
+    }
+
+    func dismissReply(in id: UUID) {
+        discussions[id]?.hidden = true
+        saveLocally()
+    }
+
+    func ask(_ text: String, in id: UUID) async throws {
+        guard let original = notes.first(where: { $0.id == id }) else { throw ApiError.message("找不到这篇笔记") }
+        guard text.utf16.count <= 4000 else { throw ApiError.message("提问太长，请缩短后重试") }
+        let answer: NoteAnswer
+        if let endpoint {
+            answer = try await endpoint.api.askNote(endpoint.bot, note: original.payload, question: text,
+                                                    previous: discussions[id]?.last, token: endpoint.token)
+        } else if mockData {
+            try await Task.sleep(for: .milliseconds(420))
+            answer = mockAnswer(text, note: original)
+        } else {
+            throw ApiError.message("笔记服务未连接")
+        }
+        try Task.checkCancellation()
+        guard let current = notes.first(where: { $0.id == id }) else { throw ApiError.message("找不到这篇笔记") }
+        let content = answer.content.flatMap { $0 == original.payload ? nil : $0 }
+        if content != nil, current.payload != original.payload {
+            throw ApiError.message("笔记在回复期间已有改动，请重新提问")
+        }
+        var discussion = discussions[id] ?? NoteDiscussion()
+        discussion.last = NoteExchange(question: text, reply: answer.reply)
+        discussion.hidden = false
+        discussion.updated = content != nil
+        if let content { discussion.undo = .init(before: original.payload, after: content) }
+        discussions[id] = discussion
+        if let content {
+            update(Note(id: id, revision: current.revision, date: .now, payload: content))
+        } else {
+            saveLocally()
+        }
+    }
+
+    func canUndo(_ note: Note) -> Bool {
+        discussions[note.id]?.undo?.after == note.payload
+    }
+
+    func updatedBlocks(in note: Note) -> Set<UUID> {
+        guard let undo = discussions[note.id]?.undo, undo.after == note.payload else { return [] }
+        let previous = Dictionary(uniqueKeysWithValues: undo.before.blocks.map { ($0.id, $0) })
+        return Set(undo.after.blocks.filter { $0 != previous[$0.id] }.map(\.id))
+    }
+
+    @discardableResult
+    func undoUpdate(in id: UUID) -> Bool {
+        guard var discussion = discussions[id], let undo = discussion.undo,
+              let current = notes.first(where: { $0.id == id }), current.payload == undo.after else { return false }
+        discussion.undo = nil
+        if discussion.updated {
+            discussion.last = nil
+            discussion.updated = false
+        }
+        discussions[id] = discussion
+        update(Note(id: id, revision: current.revision, date: .now, payload: undo.before))
+        return true
+    }
+
+    private func mockAnswer(_ text: String, note: Note) -> NoteAnswer {
+        let rain = ["雨", "室内"].contains(where: text.contains)
+        let edit = ["补上", "补一", "加上", "加入", "改成", "写入", "更新", "修改"].contains(where: text.contains)
+        guard edit else { return NoteAnswer(reply: rain ? "下雨的话，上午可以去苏州博物馆，下午留给室内展览。" : "可以从「\(note.displayTitle)」里最重要的一点开始。") }
+        var updated = note
+        updated.blocks.append(.init(content: .text(rain ? "雨天备选\n上午去苏州博物馆，下午留给室内展览。" : text)))
+        return NoteAnswer(reply: rain ? "已补上雨天备选。" : "已补充到笔记里。", content: updated.payload)
+    }
+
     private func markChanged(_ id: UUID) {
         guard endpoint != nil else { return }
         dirty.insert(id)
@@ -279,7 +374,8 @@ final class NoteStore {
         guard let database else { throw ApiError.message("无法打开本地笔记") }
         try database.save(LocalState(
             notes: notes.map { SavedNote(id: $0.id, revision: $0.revision, date: $0.date, payload: $0.payload) },
-            pinned: pinnedIDs, dirty: dirty, pending: pending, pinChanges: pinChanges, context: contextID
+            pinned: pinnedIDs, dirty: dirty, pending: pending, pinChanges: pinChanges, context: contextID,
+            discussions: discussions
         ))
     }
 

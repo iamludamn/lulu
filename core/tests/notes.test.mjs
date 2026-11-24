@@ -9,7 +9,9 @@ import { createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durab
 import { parseFrame } from "../dist/conversation/frame.js";
 import { entryRange } from "../dist/conversation/transcript.js";
 import { noteApi } from "../dist/notes/api.js";
+import { askNote } from "../dist/notes/ask.js";
 import { acceptNote, generateNote, createNotesExtension } from "../dist/notes/chat.js";
+import { handleApi } from "../dist/server/api.js";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -27,6 +29,58 @@ test("note writes reject malformed or duplicate blocks before calling storage", 
   const store = { write() { assert.fail("Invalid notes must never reach storage"); } };
   const response = await noteApi(new Request("https://test.invalid/notes", { method: "PUT", body: JSON.stringify(mutation) }), "/notes", store);
   assert.equal(response.status, 400);
+});
+
+test("questions inside a note keep their context and edits outside the chat protocol", async () => {
+  const paragraph = { id: randomUUID(), kind: "text", text: "Original paragraph" };
+  const file = { id: randomUUID(), kind: "file", ref: "artifact://map.pdf@3" };
+  const note = { title: "Trip", blocks: [paragraph, file], source: "original-chat-card" };
+  const model = { id: "fixture" };
+  const telemetry = { startSpan: async (_, run) => run({ setAttributes() {}, setStatus() {} }) };
+  const models = {
+    getAvailable: async () => [model],
+    async completeSimple(_model, context) {
+      assert.equal(context.messages.length, 1);
+      const input = JSON.parse(context.messages[0].content);
+      assert.deepEqual(input.note, note);
+      assert.match(context.systemPrompt, /latest question explicitly asks/);
+      const reply = input.question === "What is this about?" ? { reply: "A trip." } :
+        { reply: "I updated the paragraph.", edit: { edits: [{ id: paragraph.id, text: "Revised paragraph" }] } };
+      if (reply.edit) assert.deepEqual(input.previous, { question: "What is this about?", reply: "A trip." });
+      return {
+        stopReason: "stop", provider: "fixture", model: "fixture",
+        usage: { input: 1, output: 1, totalTokens: 2, cacheRead: 0, cacheWrite: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        content: [{ type: "text", text: JSON.stringify(reply) }],
+      };
+    },
+  };
+  let forwarded = 0;
+  const host = {
+    env: { LULU_CHAT_TOKEN: "fixture" }, telemetry,
+    objects: { BOTS: { getByName: () => ({
+      fetch(url, init) {
+        assert.equal(url, "https://bot/notes/ask");
+        forwarded++;
+        return askNote(new Request(url, { ...init, duplex: "half" }), models, { provider: "fixture", modelId: "fixture" }, telemetry);
+      },
+    }) } },
+  };
+  const call = (body, authorized = true) => handleApi(new Request("https://test.invalid/api/bots/main/notes/ask", {
+    method: "POST",
+    headers: authorized ? { Authorization: "Bearer fixture" } : {},
+    body: JSON.stringify(body),
+  }), host);
+  const first = { note, question: "What is this about?" };
+  assert.equal((await call(first, false)).status, 401);
+  assert.deepEqual(await (await call(first)).json(), { reply: "A trip." });
+  const edit = await (await call({
+    note, question: "Update the first paragraph",
+    previous: { question: first.question, reply: "A trip." },
+  })).json();
+  assert.equal(forwarded, 2);
+  assert.deepEqual(edit.content, { ...note, blocks: [{ ...paragraph, text: "Revised paragraph" }, file] });
+  assert.equal(note.blocks[0].text, "Original paragraph");
 });
 
 test("a durable child drafts one card and acceptance can be replayed", { timeout: 5000 }, async t => {

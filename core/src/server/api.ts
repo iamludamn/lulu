@@ -142,6 +142,13 @@ async function route(request: Request, host: ApiHost, pathname: string): Promise
     if (!await authorizeSocket(request, host.env.LULU_CHAT_TOKEN)) return unauthorized();
     return noteApi(request, rest, host.notes);
   }
+  if (rest === "/notes/ask") {
+    if (!await authorizeSocket(request, host.env.LULU_CHAT_TOKEN)) return unauthorized();
+    if (request.method !== "POST") return json({ error: "Method not allowed" }, 405, { Allow: "POST" });
+    return host.objects.BOTS.getByName(BOT_ID).fetch("https://bot/notes/ask", {
+      method: "POST", headers: request.headers, body: request.body, signal: request.signal,
+    });
+  }
   if (rest === "/ws") return botSocket(request, host);
   if (rest === "/observability/api/v1/query") {
     if (request.method !== "GET") return json({ error: "Method not allowed" }, 405, { Allow: "GET" });

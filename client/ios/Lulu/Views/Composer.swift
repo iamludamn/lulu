@@ -12,7 +12,7 @@ struct Composer: View {
     let placeholder: String
     var focused: FocusState<Bool>.Binding
     let onSend: () -> Void
-    let onVoiceConversation: (() -> Void)?
+    let onVoiceConversation: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var listening = false
@@ -103,7 +103,7 @@ struct Composer: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            if listening, onVoiceConversation != nil {
+            if listening {
                 conversationOption
                     .padding(.trailing, 16)
                     .offset(y: -(voiceRadius + 8))
@@ -206,7 +206,7 @@ struct Composer: View {
         case .text:
             transcription.finish { text in onTranscribed(text, false) }
         case .cancel: transcription.cancel(); showNotice("已取消")
-        case .conversation: transcription.cancel(); notice = nil; onVoiceConversation?()
+        case .conversation: transcription.cancel(); notice = nil; onVoiceConversation()
         }
         listening = false
         voiceTarget = .send
@@ -231,7 +231,7 @@ struct Composer: View {
 
     private func target(for translation: CGSize) -> VoiceTarget {
         let x = translation.width, y = translation.height
-        if onVoiceConversation != nil, hypot(x, y + voiceRadius) < 32 { return .conversation }
+        if hypot(x, y + voiceRadius) < 32 { return .conversation }
         if x < -77 && abs(y) < 30 { return .text }
         return hypot(x, y) <= 30 ? .send : .cancel
     }

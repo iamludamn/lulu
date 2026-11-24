@@ -1,4 +1,5 @@
 import { acceptNote, generateNote } from "../notes/chat.js";
+import { askNote } from "../notes/ask.js";
 import { SEND_TOOL, type AssetItem } from "../protocol/send.js";
 import { nextPushAlarm, sendSpacePushes, spaceDevice } from "../space/push.js";
 import { calendarPull, handleSpaceRefresh, nextSpaceAlarm, receiveSpaceEvent, refreshDueSpaces, spaceError } from "../space/refresh.js";
@@ -301,6 +302,9 @@ export class BotSession {
 
   fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
+    if (pathname === "/notes/ask") {
+      return askNote(request, this.#models, chatModelRef(this.#host.env, this.#selected), this.#host.telemetry);
+    }
     if (pathname === "/startup") return this.#layout(BACKGROUND_CONTEXT).then((data) => Response.json(data, { headers: { "Cache-Control": "private, no-store" } }));
     if (pathname === "/chat-delivery-window") return chatDeliveryQuery(request, this.#harness);
     if (pathname === "/sandbox-window") return this.#accountingReady().then(() => sandboxWindowQuery(request, this.#harness, BACKGROUND_CONTEXT));

@@ -29,3 +29,15 @@ import Testing
     #expect(reference["id"] as? String == id.uuidString)
     #expect(reference["revision"] as? Int == 3)
 }
+
+@Test func noteAnswersDecodeAnOptionalUpdate() throws {
+    let reply = try JSONDecoder().decode(NoteAnswer.self, from: Data("""
+    {"reply":"A trip."}
+    """.utf8))
+    #expect(reply.reply == "A trip.")
+    #expect(reply.content == nil)
+    let edit = try JSONDecoder().decode(NoteAnswer.self, from: Data("""
+    {"reply":"Updated.","content":{"title":"Trip","blocks":[]}}
+    """.utf8))
+    #expect(edit.content?.title == "Trip")
+}

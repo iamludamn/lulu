@@ -28,7 +28,6 @@ struct HomeView: View {
     @State private var openedNote: NoteOpening?
     @Namespace private var noteZoom
     @State private var draft: ChatDraft
-    @State private var sent = 0
     @State private var inspector = false
     @State private var landed: Page?
     @State private var targets: [Page: CGPoint] = [:]
@@ -162,7 +161,7 @@ struct HomeView: View {
                 let detail = NoteDetailView(
                     note: Binding(get: { noteStore.notes.first { $0.id == opening.id } ?? note }, set: noteStore.update),
                     files: noteFiles, botId: bot.id, api: api, store: store,
-                    onDiscuss: discuss, onSend: sendFromNote, onSource: showNoteSource
+                    noteStore: noteStore, onSource: showNoteSource
                 )
                 .id(opening.id)
                 if opening.fromCard {
@@ -196,7 +195,7 @@ struct HomeView: View {
                     .environment(\.startupSpaceSettled, onCoverSettled)
             }
         case .chat:
-            ChatView(bot: bot, store: store, noteStore: noteStore, noteFiles: noteFiles, transcription: transcription, api: api, containerBottomInset: bottomInset, draft: Binding(get: { draft.text }, set: { draft.text = $0 }), sent: $sent, composing: $composing, onKept: land, onVoiceConversation: {
+            ChatView(bot: bot, store: store, noteStore: noteStore, noteFiles: noteFiles, transcription: transcription, api: api, containerBottomInset: bottomInset, draft: Binding(get: { draft.text }, set: { draft.text = $0 }), composing: $composing, onKept: land, onVoiceConversation: {
                 guard !noteStore.mockData else { return }
                 composing = false
                 voiceOpen = true
@@ -214,30 +213,6 @@ struct HomeView: View {
 
     private func newNote() {
         openedNote = NoteOpening(id: noteStore.create(), fromCard: false)
-    }
-
-    private func discuss(_ id: UUID) {
-        noteStore.attach(id)
-        noteStore.requestedRow = nil
-        openedNote = nil
-        fadeToChat()
-    }
-
-    private func sendFromNote(_ id: UUID, text: String) async throws {
-        guard let note = noteStore.notes.first(where: { $0.id == id }) else {
-            throw ApiError.message("找不到这篇笔记")
-        }
-        let reference = noteStore.mockData ? note : try await noteStore.synchronizedReference(note)
-        try Task.checkCancellation()
-        guard openedNote?.id == id else { throw CancellationError() }
-        guard noteStore.mockData || store.snapshot.link == .online else {
-            throw ApiError.message("当前未连接，请联网后重试")
-        }
-        discuss(id)
-        if !noteStore.handleSend(text, anchor: store.transcriptEntries.last?.id) {
-            store.submit(text, noteId: reference.id, revision: reference.revision)
-        }
-        sent += 1
     }
 
     private func showNoteSource(_ id: String) {
