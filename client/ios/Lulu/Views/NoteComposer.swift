@@ -126,6 +126,7 @@ struct NoteComposer: View {
             Label(title, systemImage: systemImage)
                 .labelStyle(.iconOnly)
                 .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(Color.secondary)
                 .frame(width: controlSize, height: controlSize)
                 .contentShape(.rect)
         }
