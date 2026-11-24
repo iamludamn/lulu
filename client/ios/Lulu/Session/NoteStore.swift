@@ -259,6 +259,11 @@ final class NoteStore {
         changed()
     }
 
+    func uploadAttachment(_ data: Data, filename: String) async throws -> String {
+        guard let endpoint else { throw ApiError.message("当前笔记没有连接到 Lulu") }
+        return try await endpoint.api.uploadNoteAttachment(endpoint.bot, filename: filename, data: data, token: endpoint.token)
+    }
+
     func create() -> UUID {
         let note = Note()
         notes.append(note)

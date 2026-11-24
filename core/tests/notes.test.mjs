@@ -10,6 +10,7 @@ import { parseFrame } from "../dist/conversation/frame.js";
 import { entryRange } from "../dist/conversation/transcript.js";
 import { noteApi } from "../dist/notes/api.js";
 import { askNote } from "../dist/notes/ask.js";
+import { ArtifactService } from "../dist/artifact/service.js";
 import { acceptNote, generateNote, createNotesExtension } from "../dist/notes/chat.js";
 import { handleApi } from "../dist/server/api.js";
 
@@ -177,4 +178,44 @@ test("model edit leaves files and unchecked fields intact, and a stale offer is 
   assert.deepEqual(data.content.blocks, [{ ...paragraph, text: "Revised" }, file]);
   await assert.rejects(acceptNote(harness, root, { write: async () => undefined }, data.id), /原笔记已更新/);
   assert.ok(!(await entries()).some(entry => entry.kind === "lulu.note.accepted"));
+});
+
+test("note attachments require authorization, keep binary bytes, and reject oversized bodies", async () => {
+  const id = randomUUID();
+  const filename = "散步.png";
+  const name = `notes/${id}/${filename}`;
+  const contents = new Uint8Array([137, 80, 78, 71, 0, 255]);
+  const telemetry = { startSpan: async (_, work) => work({ setAttributes() {}, setStatus() {} }) };
+  let reservation;
+  let written;
+  const service = new ArtifactService(telemetry, {
+    async writeOnce(_key, bytes) { written = bytes; },
+    async size() { return written.length; },
+  }, {
+    async reserve(input) {
+      assert.equal(input.name, name);
+      assert.equal(input.requestId, "note-attachment:" + id);
+      reservation = { ...input, uploadId: id, key: "key", version: 1, staged: null, committed: false };
+      return reservation;
+    },
+    async commit() { return reservation; },
+    async discarded() { return []; },
+  });
+  const host = { env: { LULU_CHAT_TOKEN: "fixture" }, telemetry, objects: {
+    ARTIFACTS: { getByName: () => ({ fetch: (url, init) => service.fetch(new Request(url, { ...init, duplex: "half" })) }) },
+  } };
+  const put = (body, token, file = filename) => {
+    const query = new URLSearchParams({ id, name: file });
+    return handleApi(new Request(`https://test.invalid/api/bots/main/notes/attachment?${query}`, {
+      method: "PUT", body, headers: token ? { Authorization: "Bearer fixture" } : {},
+    }), host);
+  };
+  assert.equal((await put(contents, false)).status, 401);
+  assert.equal((await put(contents, true, "../map.png")).status, 400);
+  assert.equal((await put(new Uint8Array(10 * 1024 * 1024 + 1), true)).status, 413);
+  assert.equal(written, undefined);
+  const result = await put(contents, true);
+  assert.equal(result.status, 200);
+  assert.equal((await result.json()).ref, `artifact://${name}@1`);
+  assert.deepEqual(written, contents);
 });

@@ -48,6 +48,7 @@ public struct Api: Sendable {
         query: [URLQueryItem] = [],
         body: Encodable? = nil,
         data raw: Data? = nil,
+        contentType: String = "application/json",
         token: String = "",
         failure: String
     ) async throws -> Data {
@@ -63,7 +64,7 @@ public struct Api: Sendable {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONEncoder().encode(AnyEncodable(body))
         } else if let raw {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
             request.httpBody = raw
         }
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -108,6 +109,13 @@ public struct Api: Sendable {
 
     public func saveNote(_ bot: String, mutation: NoteMutation, token: String) async throws -> NoteRevision {
         try decode(NoteRevision.self, try await call("/api/bots/\(bot)/notes", method: "PUT", body: mutation, token: token, failure: "同步笔记失败"))
+    }
+
+    public func uploadNoteAttachment(_ bot: String, filename: String, data: Data, token: String) async throws -> String {
+        struct Attachment: Decodable { let ref: String }
+        let query = [URLQueryItem(name: "name", value: filename), URLQueryItem(name: "id", value: UUID().uuidString)]
+        return try decode(Attachment.self, try await call("/api/bots/\(bot)/notes/attachment", method: "PUT",
+            query: query, data: data, contentType: "application/octet-stream", token: token, failure: "上传附件失败")).ref
     }
 
     public func askNote(_ bot: String, note: NotePayload, question: String, previous: NoteExchange?, token: String) async throws -> NoteAnswer {

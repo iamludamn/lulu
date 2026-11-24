@@ -1,106 +1,7 @@
+import LuluKit
 import SwiftUI
 
-private enum Block {
-    case paragraph(String)
-    case heading(level: Int, text: String)
-    case item(marker: String, depth: Int, text: String)
-    case quote(String)
-    case rule
-    case code(language: String, body: String)
-    case table([[String]])
-}
-
-private func parse(_ text: String) -> [Block] {
-    var result: [Block] = []
-    var prose: [String] = []
-    var table: [String] = []
-    var fence: (language: String, lines: [String])?
-    func flushProse() {
-        if !prose.isEmpty { result.append(.paragraph(prose.joined(separator: "\n"))) }
-        prose = []
-    }
-    func flushTable() {
-        if !table.isEmpty { result.append(.table(cells(of: table))) }
-        table = []
-    }
-    for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        let line = String(raw)
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        if var open = fence {
-            if trimmed.hasPrefix("```") {
-                result.append(.code(language: open.language, body: open.lines.joined(separator: "\n")))
-                fence = nil
-            } else {
-                open.lines.append(line)
-                fence = open
-            }
-            continue
-        }
-        if trimmed.hasPrefix("|") {
-            flushProse()
-            table.append(trimmed)
-            continue
-        }
-        flushTable()
-        let depth = (line.count - line.drop(while: { $0 == " " }).count) / 2
-        if trimmed.hasPrefix("```") {
-            flushProse()
-            fence = (trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces), [])
-        } else if trimmed.isEmpty {
-            flushProse()
-        } else if let block = heading(trimmed) ?? rule(trimmed) ?? item(trimmed, depth: depth) {
-            flushProse()
-            result.append(block)
-        } else if trimmed.hasPrefix(">") {
-            flushProse()
-            let body = trimmed.dropFirst().trimmingCharacters(in: .whitespaces)
-            if case .quote(let previous)? = result.last {
-                result[result.count - 1] = .quote(previous + "\n" + body)
-            } else {
-                result.append(.quote(body))
-            }
-        } else {
-            prose.append(line)
-        }
-    }
-    flushProse()
-    flushTable()
-    if let fence { result.append(.code(language: fence.language, body: fence.lines.joined(separator: "\n"))) }
-    return result
-}
-
-private func heading(_ line: String) -> Block? {
-    let level = line.prefix(while: { $0 == "#" }).count
-    guard (1...6).contains(level), line.dropFirst(level).first == " " else { return nil }
-    return .heading(level: level, text: line.dropFirst(level).trimmingCharacters(in: .whitespaces))
-}
-
-private func rule(_ line: String) -> Block? {
-    guard line.count >= 3, let first = line.first, "-*_".contains(first), line.allSatisfy({ $0 == first }) else { return nil }
-    return .rule
-}
-
-private func item(_ line: String, depth: Int) -> Block? {
-    for bullet in ["- ", "* ", "+ "] where line.hasPrefix(bullet) {
-        return .item(marker: "•", depth: depth, text: String(line.dropFirst(2)))
-    }
-    let digits = line.prefix(while: \.isNumber)
-    let rest = line.dropFirst(digits.count)
-    guard (1...3).contains(digits.count), rest.hasPrefix(". ") || rest.hasPrefix(") ") else { return nil }
-    return .item(marker: "\(digits).", depth: depth, text: String(rest.dropFirst(2)))
-}
-
-private func cells(of lines: [String]) -> [[String]] {
-    lines.compactMap { line in
-        var parts = line.split(separator: "|", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
-        if parts.first == "" { parts.removeFirst() }
-        if parts.last == "" { parts.removeLast() }
-        let divider = parts.allSatisfy { !$0.isEmpty && $0.allSatisfy { "-: ".contains($0) } }
-        return divider ? nil : parts
-    }
-}
-
-private func inline(_ text: String) -> AttributedString {
+func markdownInline(_ text: String) -> AttributedString {
     let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
     var result = (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
     let code = result.runs.filter { $0.inlinePresentationIntent?.contains(.code) == true }.map(\.range)
@@ -131,6 +32,7 @@ struct MarkdownText: View, Equatable {
     var selectable = false
     var document = false
     var airy = false
+    var section: MarkdownBlock.Content? = nil
 
     var body: some View {
         if selectable {
@@ -141,7 +43,7 @@ struct MarkdownText: View, Equatable {
     }
 
     private var content: some View {
-        let blocks = parse(text)
+        let blocks = section.map { [$0] } ?? MarkdownBlock.parse(text).map(\.content)
         return VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
                 view(block).padding(.top, index == 0 ? 0 : gap(blocks[index - 1], block))
@@ -149,9 +51,9 @@ struct MarkdownText: View, Equatable {
         }
     }
 
-    private func gap(_ previous: Block, _ next: Block) -> CGFloat {
+    private func gap(_ previous: MarkdownBlock.Content, _ next: MarkdownBlock.Content) -> CGFloat {
         switch (previous, next) {
-        case (.item, .item): document ? 6 : (airy ? 5 : 4)
+        case (.item, .item), (.task, .task), (.item, .task), (.task, .item): document ? 6 : (airy ? 5 : 4)
         case (_, .heading(let level, _)): document ? (level <= 2 ? 30 : 22) : 14
         case (.heading, _): document ? 10 : 8
         default: document ? 16 : (airy ? 11 : 8)
@@ -169,22 +71,28 @@ struct MarkdownText: View, Equatable {
     }
 
     @ViewBuilder
-    private func view(_ block: Block) -> some View {
+    private func view(_ block: MarkdownBlock.Content) -> some View {
         switch block {
         case .paragraph(let text):
-            Text(inline(text))
+            Text(markdownInline(text))
         case .heading(let level, let text):
-            Text(inline(text)).font(headingFont(level))
+            Text(markdownInline(text)).font(headingFont(level))
         case .item(let marker, let depth, let text):
             HStack(alignment: .firstTextBaseline, spacing: document ? 10 : 6) {
                 Text(marker).monospacedDigit().foregroundStyle(.secondary)
-                Text(inline(text))
+                Text(markdownInline(text))
+            }
+            .padding(.leading, CGFloat(depth) * (document ? 22 : 16))
+        case .task(let done, let depth, let text, _):
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: done ? "checkmark.circle.fill" : "circle").foregroundStyle(.tint)
+                Text(markdownInline(text))
             }
             .padding(.leading, CGFloat(depth) * (document ? 22 : 16))
         case .quote(let text):
             HStack(spacing: document ? 14 : 8) {
                 Capsule().fill(document ? AnyShapeStyle(Color.accentColor.opacity(0.6)) : AnyShapeStyle(.tertiary)).frame(width: 3)
-                Text(inline(text)).foregroundStyle(.secondary).italic(document)
+                Text(markdownInline(text)).foregroundStyle(.secondary).italic(document)
             }
             .fixedSize(horizontal: false, vertical: true)
         case .rule:
@@ -197,7 +105,7 @@ struct MarkdownText: View, Equatable {
                     ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                         GridRow {
                             ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
-                                Text(inline(cell)).fontWeight(index == 0 ? .semibold : .regular)
+                                Text(markdownInline(cell)).fontWeight(index == 0 ? .semibold : .regular)
                             }
                         }
                         if index == 0 { Divider().gridCellColumns(max(row.count, 1)) }

@@ -1,5 +1,6 @@
 import LuluKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct NoteFile: Identifiable {
     let id: String
@@ -260,13 +261,29 @@ struct NoteThumbnail: View {
     let note: Note
     var inComposer = false
 
+    private var previewText: AttributedString {
+        let text = MarkdownBlock.parse(String(note.body.prefix(400))).prefix(3).compactMap { section in
+            switch section.content {
+            case .paragraph(let text), .heading(_, let text), .quote(let text): text
+            case .item(let marker, _, let text): marker + " " + text
+            case .task(let done, _, let text, _): (done ? "☑ " : "☐ ") + text
+            case .code(_, let body): body
+            case .table(let rows): rows.first?.joined(separator: " · ")
+            case .rule: nil
+            }
+        }.joined(separator: "\n")
+        var preview = markdownInline(text)
+        preview.link = nil
+        return preview
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(note.displayTitle)
                 .font(.system(size: inComposer ? 10 : 8, weight: .semibold))
                 .lineLimit(1)
                 .padding(.trailing, inComposer ? 19 : 0)
-            Text(note.body)
+            Text(previewText)
                 .font(.system(size: inComposer ? 8 : 6))
                 .lineLimit(inComposer ? 2 : 3)
             if let first = note.checks.first {
@@ -297,7 +314,8 @@ struct NoteDetailView: View {
     let store: BotStore
     let noteStore: NoteStore
     @FocusState private var titleFocused: Bool
-    @FocusState private var focusedBlock: UUID?
+    @State private var editing: ParagraphEdit?
+    @State private var selection = NSRange(location: 0, length: 0)
     @FocusState private var messageFocused: Bool
     @State private var message = ""
     @State private var questionExpanded = false
@@ -309,7 +327,7 @@ struct NoteDetailView: View {
     @State private var restored = false
     @State private var contentBottom: CGFloat = 0
     @State private var continuationID = UUID()
-    @State private var selections: [UUID: TextSelection] = [:]
+    @State private var uploadingAttachment = false
     @State private var fileInsertion: InsertionPoint?
     @State private var showsFiles = false
     @State private var previewFile: NoteFile?
@@ -327,18 +345,35 @@ struct NoteDetailView: View {
         case body(DictationPoint)
     }
 
-    private struct DictationPoint {
+    private struct ParagraphEdit {
+        let id = UUID()
         let block: UUID
-        let text: String
-        let offsets: Range<Int>?
+        let before: String
+        let after: String
+        let preservesChecklist: Bool
+        var text: String
+
+        var source: String { before + text + after }
     }
 
-    private var editingNote: Bool { titleFocused || focusedBlock != nil }
+    private struct DictationPoint {
+        let block: UUID
+        let source: String
+        let range: NSRange?
+        let editor: UUID?
+    }
+
+    private struct InsertionPoint {
+        let block: UUID
+        let source: String
+        let location: Int
+    }
+
+    private var editingNote: Bool { titleFocused || editing != nil }
     private var sending: Bool { sendTask != nil }
     private var dockAnimation: Animation? { reduceMotion ? nil : .easeOut(duration: 0.27) }
     private var composerMode: NoteComposer.Mode {
-        if titleFocused { return .editingTitle }
-        if focusedBlock != nil { return .editingBody }
+        if editingNote { return .editing }
         return questionExpanded ? .question : .reading
     }
 
@@ -385,7 +420,7 @@ struct NoteDetailView: View {
                 collapseQuestion()
             } else if editingNote, tap.location.y > contentBottom {
                 titleFocused = false
-                focusedBlock = nil
+                editing = nil
             }
         }, including: editingNote || questionExpanded ? .all : .none)
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -407,6 +442,12 @@ struct NoteDetailView: View {
             Button("好", role: .cancel) { failure = nil }
         } message: {
             Text(failure?.message ?? "")
+        }
+        .onChange(of: value.payload) { _, _ in
+            if let editing, !isCurrent(editing) { self.editing = nil }
+        }
+        .onChange(of: titleFocused) { _, focused in
+            if focused { editing = nil }
         }
         .onChange(of: editingNote) { _, editing in
             if editing {
@@ -440,11 +481,14 @@ struct NoteDetailView: View {
 
     private var detailDock: some View {
         VStack(spacing: 8) {
-            if !editingNote, voiceTarget == nil { replyCard }
+            if uploadingAttachment {
+                ProgressView("正在上传附件").font(.footnote).modifier(NoteReplySurface())
+            } else if !editingNote, voiceTarget == nil {
+                replyCard
+            }
             NoteComposer(draft: $message, focused: $messageFocused, mode: composerMode,
                          opening: questionOpening, sending: sending, transcription: transcription, voiceStatus: voiceStatus,
-                         onOpen: openQuestion, onSend: send, onMicrophone: toggleVoice, onCancelVoice: cancelVoice,
-                         onAddChecklist: addChecklist, onChooseFile: chooseFile)
+                         onOpen: openQuestion, onSend: send, onMicrophone: toggleVoice, onCancelVoice: cancelVoice)
         }
         .frame(maxWidth: 720)
         .padding(.bottom, 4)
@@ -549,40 +593,65 @@ struct NoteDetailView: View {
         voiceTarget = nil
     }
 
-    private var dictationPoint: DictationPoint {
-        let block = note.blocks.first { $0.id == focusedBlock && $0.isText } ?? note.blocks.last
-        guard let block, case .text(let text) = block.content else {
-            return DictationPoint(block: continuationID, text: "", offsets: nil)
+    private func source(of block: Note.Block) -> String {
+        switch block.content {
+        case .text(let source): source
+        case .check(let check): "- [\(check.done ? "x" : " ")] \(check.text)"
+        case .file: ""
         }
-        let offsets = selectionRange(for: block.id, in: text).map { range in
-            text.distance(from: text.startIndex, to: range.lowerBound)..<text.distance(from: text.startIndex, to: range.upperBound)
-        }
-        return DictationPoint(block: block.id, text: text, offsets: offsets)
     }
 
-    private func insertDictation(_ text: String, at point: DictationPoint) {
-        let id = point.block
-        if id == continuationID {
-            appendContinuation(text)
+    private func beginEditing(_ block: Note.Block, in source: String, range: NSRange) {
+        guard Range(range, in: source) != nil else { return }
+        let raw = source as NSString
+        let text = raw.substring(with: range)
+        let preservesChecklist: Bool
+        if case .check = block.content { preservesChecklist = true } else { preservesChecklist = false }
+        titleFocused = false
+        selection = NSRange(location: text.utf16.count, length: 0)
+        editing = ParagraphEdit(block: block.id, before: raw.substring(to: range.location),
+                                after: raw.substring(from: NSMaxRange(range)), preservesChecklist: preservesChecklist, text: text)
+    }
+
+    private func isCurrent(_ edit: ParagraphEdit) -> Bool {
+        if let block = note.blocks.first(where: { $0.id == edit.block }) {
+            if case .file = block.content { return false }
+            return source(of: block) == edit.source
+        }
+        return edit.block == continuationID && edit.source.isEmpty && note.blocks.last?.isText != true
+    }
+
+    private func changeParagraph(_ id: UUID, text: String, selection: NSRange) {
+        guard let previous = editing, previous.id == id else { return }
+        guard isCurrent(previous) else {
+            editing = nil
             return
         }
-        guard let index = note.blocks.firstIndex(where: { $0.id == id }),
-              case .text(var current) = note.blocks[index].content else {
-            note.blocks.append(.init(content: .text(text)))
+        if previous.text != text {
+            var next = previous
+            next.text = text
+            editing = next
+            writeSource(next.source, to: next.block, preservesChecklist: next.preservesChecklist)
+        }
+        self.selection = selection
+    }
+
+    private func writeSource(_ text: String, to id: UUID, preservesChecklist: Bool = false) {
+        guard let index = note.blocks.firstIndex(where: { $0.id == id }) else {
+            if id == continuationID, !text.isEmpty { appendContinuation(text) }
             return
         }
-        if current == point.text, let offsets = point.offsets {
-            let start = current.index(current.startIndex, offsetBy: offsets.lowerBound)
-            let end = current.index(current.startIndex, offsetBy: offsets.upperBound)
-            let caretOffset = (String(current[..<start]) + text).count
-            current.replaceSubrange(start..<end, with: text)
-            note.blocks[index].content = .text(current)
-            if focusedBlock == id {
-                selections[id] = TextSelection(insertionPoint: current.index(current.startIndex, offsetBy: min(caretOffset, current.count)))
-            }
+        var block = note.blocks[index]
+        if preservesChecklist, !text.contains(where: \.isNewline), text.hasPrefix("- [x] ") || text.hasPrefix("- [ ] ") {
+            var check = Note.Check()
+            if case .check(let previous) = block.content { check = previous }
+            check.text = String(text.dropFirst(6))
+            check.done = text.hasPrefix("- [x] ")
+            block.content = .check(check)
         } else {
-            note.blocks[index].content = .text(current.isEmpty ? text : current + "\n" + text)
+            block.content = .text(text)
         }
+        if block != note.blocks[index] { note.blocks[index] = block }
     }
 
     private func appendContinuation(_ text: String) {
@@ -590,72 +659,217 @@ struct NoteDetailView: View {
         continuationID = UUID()
     }
 
-    private struct InsertionPoint {
-        let block: UUID?
-        let offset: Int?
+    private var dictationPoint: DictationPoint {
+        if let editing {
+            let range = NSRange(location: editing.before.utf16.count + selection.location, length: selection.length)
+            return DictationPoint(block: editing.block, source: editing.source, range: range, editor: editing.id)
+        }
+        if let last = note.blocks.last, case .text(let text) = last.content {
+            return DictationPoint(block: last.id, source: text, range: nil, editor: nil)
+        }
+        return DictationPoint(block: continuationID, source: "", range: nil, editor: nil)
     }
 
-    private func addChecklist() {
-        let block = Note.Block(content: .check(.init()))
-        let point = insertionPoint
-        note.insert(block, after: point.block, splittingAt: point.offset)
-        focusedBlock = block.id
+    private func insertDictation(_ text: String, at point: DictationPoint) {
+        if let edit = editing, edit.id == point.editor, edit.source == point.source, isCurrent(edit),
+           let range = point.range {
+            let local = NSRange(location: range.location - edit.before.utf16.count, length: range.length)
+            if Range(local, in: edit.text) != nil {
+                changeParagraph(edit.id, text: (edit.text as NSString).replacingCharacters(in: local, with: text),
+                                selection: NSRange(location: local.location + text.utf16.count, length: 0))
+                return
+            }
+        }
+        if point.block == continuationID {
+            appendContinuation(text)
+        } else if let block = note.blocks.first(where: { $0.id == point.block }) {
+            let current = source(of: block)
+            if current == point.source, let range = point.range, Range(range, in: current) != nil {
+                let updated = (current as NSString).replacingCharacters(in: range, with: text)
+                let preservesChecklist: Bool
+                if case .check = block.content { preservesChecklist = true } else { preservesChecklist = false }
+                writeSource(updated, to: block.id, preservesChecklist: preservesChecklist)
+            } else if case .text(let current) = block.content {
+                writeSource(current.isEmpty ? text : current + "\n" + text, to: block.id)
+            } else {
+                note.insert(.init(content: .text(text)), after: block.id)
+            }
+        } else {
+            note.blocks.append(.init(content: .text(text)))
+        }
     }
 
-    private func chooseFile() {
-        fileInsertion = insertionPoint
+    private func insertionPoint(_ selection: NSRange, in edit: ParagraphEdit) -> InsertionPoint {
+        let location = edit.before.utf16.count + NSMaxRange(selection)
+        return InsertionPoint(block: edit.block, source: edit.source, location: location)
+    }
+
+    private func chooseFile(_ selection: NSRange, in edit: ParagraphEdit) {
+        fileInsertion = insertionPoint(selection, in: edit)
+        editing = nil
         showsFiles = true
     }
 
-    private var insertionPoint: InsertionPoint {
-        let block = focusedBlock ?? note.blocks.last?.id
-        guard let focusedBlock,
-              case .text(let text) = note.blocks.first(where: { $0.id == focusedBlock })?.content,
-              let range = selectionRange(for: focusedBlock, in: text) else {
-            return InsertionPoint(block: block, offset: nil)
+    private func paste(_ clipboard: UIPasteboard, at point: InsertionPoint) -> Bool {
+        if clipboard.hasStrings, let text = clipboard.string,
+           let existing = files.first(where: { $0.id == text.trimmingCharacters(in: .whitespacesAndNewlines) }) {
+            insertFile(existing.id, at: point)
+            return true
         }
-        return InsertionPoint(block: block, offset: text.distance(from: text.startIndex, to: range.upperBound))
+        do {
+            if clipboard.contains(pasteboardTypes: [UTType.fileURL.identifier]),
+               let url = clipboard.urls?.first(where: \.isFileURL) {
+                let access = url.startAccessingSecurityScopedResource()
+                defer { if access { url.stopAccessingSecurityScopedResource() } }
+                let handle = try FileHandle(forReadingFrom: url)
+                defer { try? handle.close() }
+                let data = try handle.read(upToCount: Self.attachmentLimit + 1) ?? Data()
+                uploadPastedFile(data, filename: url.lastPathComponent, at: point)
+                return true
+            }
+            if clipboard.contains(pasteboardTypes: [UTType.pdf.identifier]),
+               let data = clipboard.data(forPasteboardType: UTType.pdf.identifier) {
+                uploadPastedFile(data, filename: "文档.pdf", at: point)
+                return true
+            }
+            if clipboard.hasImages {
+                if let type = clipboard.types.compactMap(UTType.init).first(where: { $0.conforms(to: .image) && $0.preferredFilenameExtension != nil }),
+                   let ext = type.preferredFilenameExtension, let data = clipboard.data(forPasteboardType: type.identifier) {
+                    uploadPastedFile(data, filename: "图片." + ext, at: point)
+                } else if let data = clipboard.image?.pngData() {
+                    uploadPastedFile(data, filename: "图片.png", at: point)
+                } else {
+                    throw ApiError.message("无法读取剪贴板中的图片")
+                }
+                return true
+            }
+        } catch {
+            failure = Failure(title: "无法插入附件", message: error.localizedDescription)
+            return true
+        }
+        return false
     }
 
-    private func selectionRange(for block: UUID, in text: String) -> Range<String.Index>? {
-        guard let selection = selections[block], case .selection(let range) = selection.indices,
-              range.lowerBound >= text.startIndex, range.upperBound <= text.endIndex else { return nil }
-        return range
+    private static let attachmentLimit = 10 * 1024 * 1024
+
+    private func uploadPastedFile(_ data: Data, filename: String, at point: InsertionPoint) {
+        guard !uploadingAttachment else {
+            failure = Failure(title: "无法插入附件", message: "请等当前附件上传完成")
+            return
+        }
+        guard !data.isEmpty, data.count <= Self.attachmentLimit else {
+            failure = Failure(title: "无法插入附件", message: "请选择 10 MB 以内的非空文件")
+            return
+        }
+        let invalid = CharacterSet.controlCharacters.union(CharacterSet(charactersIn: "/\\@"))
+        let sanitized = filename.components(separatedBy: invalid).joined(separator: "_")
+        let path = sanitized as NSString
+        let ext = path.pathExtension
+        let suffix = ext.utf16.count <= 20 && !ext.isEmpty ? "." + ext : ""
+        let stem = String(decoding: path.deletingPathExtension.utf16.prefix(175), as: UTF16.self)
+        let usable = stem.isEmpty || stem == "." || stem == ".." ? "附件" : stem
+        uploadingAttachment = true
+        Task {
+            defer { uploadingAttachment = false }
+            do {
+                let ref = try await noteStore.uploadAttachment(data, filename: usable + suffix)
+                insertFile(ref, at: point)
+            } catch {
+                failure = Failure(title: "无法插入附件", message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func insertFile(_ ref: String, at point: InsertionPoint?) {
+        guard !note.fileIDs.contains(ref) else { return }
+        let anchor = point?.block
+        var offset: Int?
+        if let point, let block = note.blocks.first(where: { $0.id == anchor }),
+           case .text(let text) = block.content, text == point.source,
+           let caret = Range(NSRange(location: point.location, length: 0), in: text)?.lowerBound {
+            offset = text.distance(from: text.startIndex, to: caret)
+        }
+        if let edit = editing, edit.block == anchor, offset != nil { editing = nil }
+        note.insert(.init(content: .file(ref)), after: anchor, splittingAt: offset)
+    }
+
+    @ViewBuilder
+    private func markdownPreview(_ source: String, in block: Note.Block, offset: Int = 0) -> some View {
+        let sections = MarkdownBlock.parse(source)
+        if !sections.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(sections, id: \.range.location) { section in
+                    let range = NSRange(location: section.range.location + offset, length: section.range.length)
+                    if case .task(let done, let depth, let text, let marker) = section.content {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            taskButton(done, in: block) {
+                                editing = nil
+                                if case .check(var check) = block.content {
+                                    check.done.toggle()
+                                    if let index = note.blocks.firstIndex(where: { $0.id == block.id }) {
+                                        note.blocks[index].content = .check(check)
+                                    }
+                                } else {
+                                    let full = self.source(of: block)
+                                    let target = NSRange(location: offset + marker.location, length: 1)
+                                    writeSource((full as NSString).replacingCharacters(in: target, with: done ? " " : "x"), to: block.id)
+                                }
+                            }
+                            MarkdownText(text: "", section: .paragraph(text.isEmpty ? " " : text))
+                                .modifier(NoteEditTarget { beginEditing(block, in: self.source(of: block), range: range) })
+                        }
+                        .padding(.leading, CGFloat(depth) * 16)
+                    } else {
+                        MarkdownText(text: "", section: section.content)
+                            .modifier(NoteEditTarget { beginEditing(block, in: self.source(of: block), range: range) })
+                    }
+                }
+            }
+        }
+    }
+
+    private func taskButton(_ done: Bool, in block: Note.Block, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                .frame(width: 28, height: 28)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.tint)
+        .accessibilityLabel(done ? "取消勾选" : "勾选")
+        .contextMenu {
+            if case .check = block.content {
+                Button("移除清单项", systemImage: "trash", role: .destructive) { removeBlock(block.id) }
+            }
+        }
     }
 
     @ViewBuilder
     private func editBlock(_ block: Note.Block) -> some View {
         switch block.content {
-        case .text:
-            let emptyNote = note.blocks.isEmpty || (note.blocks.count == 1 && note.blocks.first?.id == block.id)
-            TextField(emptyNote ? "开始记录…" : "", text: textBinding(for: block.id), selection: selectionBinding(for: block.id), axis: .vertical)
-                .lineSpacing(4)
-                .focused($focusedBlock, equals: block.id)
-                .accessibilityLabel(block.id == continuationID && !emptyNote ? "笔记末尾" : "笔记正文")
-        case .check(let check):
-            HStack(spacing: 8) {
-                Button {
-                    var updated = check
-                    updated.done.toggle()
-                    updateBlock(block.id, content: .check(updated))
-                } label: {
-                    Image(systemName: check.done ? "checkmark.circle.fill" : "circle")
+        case .text, .check:
+            let source = source(of: block)
+            if let edit = editing, edit.block == block.id {
+                VStack(alignment: .leading, spacing: 8) {
+                    markdownPreview(edit.before, in: block)
+                    NoteMarkdownEditor(text: edit.text, selection: selection, label: "编辑 Markdown",
+                                       onText: { changeParagraph(edit.id, text: $0, selection: $1) },
+                                       onSelection: { if editing?.id == edit.id { selection = $0 } },
+                                       onEnd: { if editing?.id == edit.id { editing = nil } },
+                                       onChooseFile: { chooseFile($0, in: edit) },
+                                       onPaste: { paste($0, at: insertionPoint($1, in: edit)) })
+                        .id(edit.id)
+                    markdownPreview(edit.after, in: block, offset: edit.before.utf16.count + edit.text.utf16.count)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.tint)
-                .accessibilityLabel(check.done ? "取消勾选" : "勾选")
-                .contextMenu {
-                    Button("移除清单项", systemImage: "trash", role: .destructive) { removeBlock(block.id) }
-                }
-                TextField("清单项", text: textBinding(for: block.id))
-                    .focused($focusedBlock, equals: block.id)
-                    .onSubmit { continueChecklist(after: block.id) }
-                if focusedBlock == block.id {
-                    Button("移除清单项", systemImage: "minus.circle") { removeBlock(block.id) }
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
-                }
+            } else if source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let prompt = note.blocks.isEmpty || (note.blocks.count == 1 && note.blocks.first?.id == block.id)
+                Text(prompt ? "开始记录…" : " ")
+                    .foregroundStyle(.secondary)
+                    .frame(minHeight: 22)
+                    .accessibilityLabel(prompt ? "笔记正文" : "笔记末尾")
+                    .modifier(NoteEditTarget { beginEditing(block, in: source, range: NSRange(location: 0, length: source.utf16.count)) })
+            } else {
+                markdownPreview(source, in: block)
             }
         case .file(let id):
             if let file = files.first(where: { $0.id == id }) ?? NoteFile(reference: id) {
@@ -686,67 +900,9 @@ struct NoteDetailView: View {
         }
     }
 
-    private func textBinding(for id: UUID) -> Binding<String> {
-        Binding {
-            switch note.blocks.first(where: { $0.id == id })?.content {
-            case .text(let text): text
-            case .check(let check): check.text
-            default: ""
-            }
-        } set: { text in
-            guard let index = note.blocks.firstIndex(where: { $0.id == id }) else {
-                if id == continuationID, !text.isEmpty, note.blocks.last?.isText != true {
-                    appendContinuation(text)
-                }
-                return
-            }
-            switch note.blocks[index].content {
-            case .text:
-                note.blocks[index].content = .text(text)
-            case .check(var check):
-                check.text = text
-                note.blocks[index].content = .check(check)
-            case .file:
-                break
-            }
-        }
-    }
-
-    private func selectionBinding(for id: UUID) -> Binding<TextSelection?> {
-        Binding { selections[id] } set: { selections[id] = $0 }
-    }
-
-    private func updateBlock(_ id: UUID, content: Note.Block.Content) {
-        if let index = note.blocks.firstIndex(where: { $0.id == id }) {
-            note.blocks[index].content = content
-        }
-    }
-
     private func removeBlock(_ id: UUID) {
-        if focusedBlock == id { focusedBlock = nil }
-        selections.removeValue(forKey: id)
+        if editing?.block == id { editing = nil }
         note.blocks.removeAll { $0.id == id }
-    }
-
-    private func continueChecklist(after id: UUID) {
-        guard let index = note.blocks.firstIndex(where: { $0.id == id }),
-              case .check(let check) = note.blocks[index].content else { return }
-        if check.text.isEmpty {
-            let next = index + 1
-            if note.blocks.indices.contains(next), case .text = note.blocks[next].content {
-                let nextID = note.blocks[next].id
-                note.blocks.remove(at: index)
-                focusedBlock = nextID
-            } else {
-                let paragraph = Note.Block(content: .text(""))
-                note.blocks[index] = paragraph
-                focusedBlock = paragraph.id
-            }
-        } else {
-            let item = Note.Block(content: .check(.init()))
-            note.insert(item, after: id)
-            focusedBlock = item.id
-        }
     }
 
     private func open(_ file: NoteFile) {
@@ -761,12 +917,13 @@ struct NoteDetailView: View {
         NavigationStack {
             List(files) { file in
                 Button {
-                    if !note.fileIDs.contains(file.id) {
-                        note.insert(.init(content: .file(file.id)), after: fileInsertion?.block, splittingAt: fileInsertion?.offset)
-                    }
+                    insertFile(file.id, at: fileInsertion)
                     showsFiles = false
                 } label: { Label(file.filename, systemImage: "doc") }
                     .disabled(note.fileIDs.contains(file.id))
+            }
+            .overlay {
+                if files.isEmpty { ContentUnavailableView("没有可插入的文件", systemImage: "paperclip") }
             }
             .navigationTitle("从画廊选择文件")
             .navigationBarTitleDisplayMode(.inline)
@@ -774,6 +931,17 @@ struct NoteDetailView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { showsFiles = false } }
             }
         }
+    }
+}
+
+private struct NoteEditTarget: ViewModifier {
+    let edit: () -> Void
+
+    func body(content: Content) -> some View {
+        content.frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
+            .onTapGesture(perform: edit)
+            .accessibilityAction(named: Text("编辑此段"), edit)
     }
 }
 

@@ -41,3 +41,32 @@ import Testing
     """.utf8))
     #expect(edit.content?.title == "Trip")
 }
+
+@Test func markdownReadSectionsRetainTheirSourceAndTaskOffsets() throws {
+    let source = "## 周末\r\n\r\n路线 🗺️\r\n散步。\r\n  - [X] 预约\r\n\r\n| 项目 | 费用 |\r\n| --- | ---: |\r\n| 门票 | 30 |\r\n\r\n~~~text\r\n- [ ] 字面量\r\n~~~"
+    let sections = MarkdownBlock.parse(source)
+    #expect(sections.map { (source as NSString).substring(with: $0.range) } == [
+        "## 周末", "路线 🗺️\r\n散步。", "  - [X] 预约", "| 项目 | 费用 |\r\n| --- | ---: |\r\n| 门票 | 30 |", "~~~text\r\n- [ ] 字面量\r\n~~~"
+    ])
+    let task = try #require(sections.first { if case .task = $0.content { true } else { false } })
+    guard case .task(let done, let depth, let text, let marker) = task.content else { return }
+    #expect(done)
+    #expect(depth == 1)
+    #expect(text == "预约")
+    #expect((source as NSString).substring(with: marker) == "X")
+    #expect((source as NSString).replacingCharacters(in: marker, with: " ").contains("  - [ ] 预约"))
+    #expect(sections.contains { $0.content == .table([["项目", "费用"], ["门票", "30"]]) })
+}
+
+@Test func markdownReturnContinuesTasksAndExitsAnEmptyItem() throws {
+    let source = "  - [x] 预约 🎫"
+    let caret = NSRange(location: source.utf16.count, length: 0)
+    let continued = try #require(MarkdownBlock.listReturn(in: source, replacing: caret))
+    #expect(continued.range == caret)
+    #expect(continued.text == "\n  - [ ] ")
+    let second = source + continued.text
+    let empty = try #require(MarkdownBlock.listReturn(in: second, replacing: NSRange(location: second.utf16.count, length: 0)))
+    #expect((second as NSString).replacingCharacters(in: empty.range, with: empty.text) == source + "\n")
+    let code = "```text\n- [ ] 示例"
+    #expect(MarkdownBlock.listReturn(in: code, replacing: NSRange(location: code.utf16.count, length: 0)) == nil)
+}

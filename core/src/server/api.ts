@@ -1,4 +1,5 @@
 import { noteApi } from "../notes/api.js";
+import { NOTE_ID } from "../notes/store.js";
 import type { DurableHost } from "../host/types.js";
 import { SPACE_ID } from "../protocol/panel.js";
 import { mcpCatalog } from "./mcp-catalog.js";
@@ -141,6 +142,19 @@ async function route(request: Request, host: ApiHost, pathname: string): Promise
   if (rest === "/notes" || rest === "/notes/pin") {
     if (!await authorizeSocket(request, host.env.LULU_CHAT_TOKEN)) return unauthorized();
     return noteApi(request, rest, host.notes);
+  }
+  if (rest === "/notes/attachment") {
+    if (!await authorizeSocket(request, host.env.LULU_CHAT_TOKEN)) return unauthorized();
+    if (request.method !== "PUT") return json({ error: "Method not allowed" }, 405, { Allow: "PUT" });
+    const query = new URL(request.url).searchParams;
+    const id = query.get("id") ?? "";
+    const filename = query.get("name") ?? "";
+    if (!NOTE_ID.test(id) || !filename || filename.length > 200 || filename === "." || filename === ".." ||
+        /[\\/@\u0000-\u001f]/.test(filename)) return json({ error: "Invalid attachment name" }, 400);
+    const destination = new URLSearchParams({ name: `notes/${id.toLowerCase()}/${filename}`, requestId: "note-attachment:" + id.toLowerCase() });
+    return host.objects.ARTIFACTS.getByName(BOT_ID).fetch("https://artifact/note-attachment?" + destination, {
+      method: "PUT", body: request.body,
+    });
   }
   if (rest === "/notes/ask") {
     if (!await authorizeSocket(request, host.env.LULU_CHAT_TOKEN)) return unauthorized();
