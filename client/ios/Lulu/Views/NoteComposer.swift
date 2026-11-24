@@ -1,9 +1,11 @@
 import SwiftUI
 
 struct NoteComposer: View {
+    enum Mode { case reading, editingTitle, editingBody, question }
+
     @Binding var draft: String
     var focused: FocusState<Bool>.Binding
-    let expanded: Bool
+    let mode: Mode
     let opening: Bool
     let sending: Bool
     let transcription: VoiceTranscription
@@ -12,12 +14,20 @@ struct NoteComposer: View {
     let onSend: () -> Void
     let onMicrophone: () -> Void
     let onCancelVoice: () -> Void
+    let onAddChecklist: () -> Void
+    let onChooseFile: () -> Void
     @Namespace private var glass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let controlSize: CGFloat = 48
+    private var expanded: Bool { mode == .question }
     private var canSend: Bool { !usingVoice && !sending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var usingVoice: Bool { voiceStatus != nil }
+    private var showsEditingTools: Bool { mode == .editingBody && !usingVoice }
+    private var leadingWidth: CGFloat {
+        if mode == .reading { return controlSize }
+        return showsEditingTools ? 2 * controlSize : 0
+    }
 
     var body: some View {
         VStack(spacing: 3) {
@@ -26,15 +36,22 @@ struct NoteComposer: View {
                     expandedInput
                         .transition(.opacity.animation(reduceMotion ? nil : .easeOut(duration: 0.12).delay(0.15)))
                 } else {
-                    Button(action: onOpen) {
-                        Image(systemName: "bubble.left")
-                            .font(.system(size: 20, weight: .medium))
-                            .frame(width: controlSize, height: controlSize)
-                            .contentShape(.circle)
+                    if mode == .reading {
+                        Button(action: onOpen) {
+                            Image(systemName: "bubble.left")
+                                .font(.system(size: 20, weight: .medium))
+                                .frame(width: controlSize, height: controlSize)
+                                .contentShape(.circle)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(sending || usingVoice)
+                        .accessibilityLabel("提问")
+                    } else if showsEditingTools {
+                        HStack(spacing: 0) {
+                            editingTool("添加清单项", systemImage: "checklist", action: onAddChecklist)
+                            editingTool("引用已有文件", systemImage: "paperclip", action: onChooseFile)
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .disabled(sending || usingVoice)
-                    .accessibilityLabel("提问")
                     Spacer(minLength: 0)
                 }
                 microphone
@@ -58,15 +75,17 @@ struct NoteComposer: View {
                 }
             }
 
-            HStack {
-                caption("提问")
-                    .frame(width: controlSize)
-                Spacer(minLength: 0)
-                caption("语音记笔记")
-                    .frame(width: controlSize)
+            if mode == .reading || expanded {
+                HStack {
+                    caption("提问")
+                        .frame(width: controlSize)
+                    Spacer(minLength: 0)
+                    caption("语音记笔记")
+                        .frame(width: controlSize)
+                }
+                .opacity(expanded ? 0 : 1)
+                .accessibilityHidden(true)
             }
-            .opacity(expanded ? 0 : 1)
-            .accessibilityHidden(true)
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 4)
@@ -83,20 +102,34 @@ struct NoteComposer: View {
         GeometryReader { geometry in
             GlassEffectContainer(spacing: 18) {
                 ZStack(alignment: .bottomTrailing) {
-                    Color.clear
-                        .frame(width: expanded ? geometry.size.width : controlSize, height: geometry.size.height)
-                        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: controlSize / 2))
-                        .glassEffectID("note-question", in: glass)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    if expanded || leadingWidth > 0 {
+                        Color.clear
+                            .frame(width: expanded ? geometry.size.width : leadingWidth, height: geometry.size.height)
+                            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: controlSize / 2))
+                            .glassEffectID("note-leading-control", in: glass)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    }
                     Color.clear
                         .frame(width: controlSize, height: controlSize)
                         .glassEffect(.regular.interactive(), in: .circle)
                         .glassEffectID("note-microphone", in: glass)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             }
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+
+    private func editingTool(_ title: LocalizedStringKey, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .labelStyle(.iconOnly)
+                .font(.system(size: 20, weight: .medium))
+                .frame(width: controlSize, height: controlSize)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
     }
 
     private var expandedInput: some View {

@@ -302,6 +302,7 @@ struct NoteDetailView: View {
     @State private var sendTask: Task<Void, Never>?
     @State private var failure: Failure?
     @State private var restored = false
+    @State private var contentBottom: CGFloat = 0
     @State private var selections: [UUID: TextSelection] = [:]
     @State private var fileInsertion: InsertionPoint?
     @State private var showsFiles = false
@@ -329,6 +330,11 @@ struct NoteDetailView: View {
     private var editingNote: Bool { titleFocused || focusedBlock != nil }
     private var sending: Bool { sendTask != nil }
     private var dockAnimation: Animation? { reduceMotion ? nil : .easeOut(duration: 0.27) }
+    private var composerMode: NoteComposer.Mode {
+        if titleFocused { return .editingTitle }
+        if focusedBlock != nil { return .editingBody }
+        return questionExpanded ? .question : .reading
+    }
 
     private var voiceStatus: String? {
         guard let voiceTarget else { return nil }
@@ -375,11 +381,18 @@ struct NoteDetailView: View {
             .frame(maxWidth: 660)
             .padding(.horizontal, 22)
             .padding(.top, 8)
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { contentBottom = $0 }
         }
         .scrollDismissesKeyboard(.interactively)
-        .simultaneousGesture(TapGesture().onEnded {
-            if voiceTarget == nil { collapseQuestion() }
-        }, including: questionExpanded ? .gesture : .none)
+        .simultaneousGesture(SpatialTapGesture(coordinateSpace: .global).onEnded { tap in
+            guard voiceTarget == nil else { return }
+            if questionExpanded {
+                collapseQuestion()
+            } else if editingNote, tap.location.y > contentBottom {
+                titleFocused = false
+                focusedBlock = nil
+            }
+        }, including: editingNote || questionExpanded ? .all : .none)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             detailDock
         }
@@ -392,31 +405,6 @@ struct NoteDetailView: View {
                     Button("撤回笔记更新", systemImage: "arrow.uturn.backward") {
                         if noteStore.undoUpdate(in: value.id) { restored = true }
                     }
-                }
-            }
-            ToolbarItemGroup(placement: .keyboard) {
-                if editingNote {
-                    if let voiceStatus {
-                        Button("取消录音", action: cancelVoice)
-                            .accessibilityHint(voiceStatus)
-                    } else if !titleFocused {
-                        insertionControls
-                    }
-                    Spacer()
-                    if transcription.starting || transcription.processing {
-                        ProgressView()
-                            .controlSize(.small)
-                            .accessibilityLabel(voiceStatus ?? "语音记笔记")
-                    } else {
-                        Button(transcription.recording ? "停止录音并转写" : "语音记笔记",
-                               systemImage: transcription.recording ? "stop.fill" : "mic.fill", action: toggleVoice)
-                            .tint(transcription.recording ? .red : .primary)
-                    }
-                    Button("完成") {
-                        titleFocused = false
-                        focusedBlock = nil
-                    }
-                    .disabled(voiceTarget != nil)
                 }
             }
         }
@@ -455,19 +443,17 @@ struct NoteDetailView: View {
         .sheet(item: $previewFile) { NoteMockFileSheet(file: $0, botId: botId, api: api) }
     }
 
-    @ViewBuilder
     private var detailDock: some View {
-        if !editingNote {
-            VStack(spacing: 8) {
-                if voiceTarget == nil { replyCard }
-                NoteComposer(draft: $message, focused: $messageFocused, expanded: questionExpanded,
-                             opening: questionOpening, sending: sending, transcription: transcription, voiceStatus: voiceStatus,
-                             onOpen: openQuestion, onSend: send, onMicrophone: toggleVoice, onCancelVoice: cancelVoice)
-            }
-            .frame(maxWidth: 720)
-            .padding(.bottom, 4)
-            .modifier(ComposerKeyboardAvoidance(focused: messageFocused))
+        VStack(spacing: 8) {
+            if !editingNote, voiceTarget == nil { replyCard }
+            NoteComposer(draft: $message, focused: $messageFocused, mode: composerMode,
+                         opening: questionOpening, sending: sending, transcription: transcription, voiceStatus: voiceStatus,
+                         onOpen: openQuestion, onSend: send, onMicrophone: toggleVoice, onCancelVoice: cancelVoice,
+                         onAddChecklist: addChecklist, onChooseFile: chooseFile)
         }
+        .frame(maxWidth: 720)
+        .padding(.bottom, 4)
+        .modifier(ComposerKeyboardAvoidance(focused: editingNote || messageFocused))
     }
 
     @ViewBuilder
@@ -604,18 +590,16 @@ struct NoteDetailView: View {
         let offset: Int?
     }
 
-    @ViewBuilder
-    private var insertionControls: some View {
-        Button("添加清单项", systemImage: "checklist") {
-            let block = Note.Block(content: .check(.init()))
-            let point = insertionPoint
-            note.insert(block, after: point.block, splittingAt: point.offset)
-            focusedBlock = block.id
-        }
-        Button("引用已有文件", systemImage: "paperclip") {
-            fileInsertion = insertionPoint
-            showsFiles = true
-        }
+    private func addChecklist() {
+        let block = Note.Block(content: .check(.init()))
+        let point = insertionPoint
+        note.insert(block, after: point.block, splittingAt: point.offset)
+        focusedBlock = block.id
+    }
+
+    private func chooseFile() {
+        fileInsertion = insertionPoint
+        showsFiles = true
     }
 
     private var insertionPoint: InsertionPoint {
