@@ -419,8 +419,7 @@ struct NoteDetailView: View {
             if questionExpanded {
                 collapseQuestion()
             } else if editingNote, tap.location.y > contentBottom {
-                titleFocused = false
-                editing = nil
+                finishEditing()
             }
         }, including: editingNote || questionExpanded ? .all : .none)
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -435,6 +434,12 @@ struct NoteDetailView: View {
                     Button("撤回笔记更新", systemImage: "arrow.uturn.backward") {
                         if noteStore.undoUpdate(in: value.id) { restored = true }
                     }
+                }
+            }
+            if editingNote {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(role: .confirm, action: finishEditing)
+                        .accessibilityLabel("完成编辑")
                 }
             }
         }
@@ -611,6 +616,14 @@ struct NoteDetailView: View {
         selection = NSRange(location: text.utf16.count, length: 0)
         editing = ParagraphEdit(block: block.id, before: raw.substring(to: range.location),
                                 after: raw.substring(from: NSMaxRange(range)), preservesChecklist: preservesChecklist, text: text)
+    }
+
+    private func finishEditing() {
+        if editing != nil {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+        titleFocused = false
+        editing = nil
     }
 
     private func isCurrent(_ edit: ParagraphEdit) -> Bool {
