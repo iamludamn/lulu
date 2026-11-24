@@ -1,11 +1,10 @@
 import SwiftUI
 
 struct NoteComposer: View {
-    enum Mode { case reading, editing, question }
-
     @Binding var draft: String
     var focused: FocusState<Bool>.Binding
-    let mode: Mode
+    let expanded: Bool
+    let editingNote: Bool
     let opening: Bool
     let sending: Bool
     let transcription: VoiceTranscription
@@ -18,7 +17,6 @@ struct NoteComposer: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let controlSize: CGFloat = 48
-    private var expanded: Bool { mode == .question }
     private var canSend: Bool { !usingVoice && !sending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var usingVoice: Bool { voiceStatus != nil }
     var body: some View {
@@ -28,17 +26,16 @@ struct NoteComposer: View {
                     expandedInput
                         .transition(.opacity.animation(reduceMotion ? nil : .easeOut(duration: 0.12).delay(0.15)))
                 } else {
-                    if mode == .reading {
-                        Button(action: onOpen) {
-                            Image(systemName: "bubble.left")
-                                .font(.system(size: 20, weight: .medium))
-                                .frame(width: controlSize, height: controlSize)
-                                .contentShape(.circle)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(sending || usingVoice)
-                        .accessibilityLabel("提问")
+                    Button(action: onOpen) {
+                        Image(systemName: "bubble.left")
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundStyle(Color.secondary)
+                            .frame(width: controlSize, height: controlSize)
+                            .contentShape(.circle)
                     }
+                    .buttonStyle(.plain)
+                    .disabled(sending || usingVoice)
+                    .accessibilityLabel("提问")
                     Spacer(minLength: 0)
                 }
                 microphone
@@ -62,7 +59,7 @@ struct NoteComposer: View {
                 }
             }
 
-            if mode == .reading || expanded {
+            if !editingNote && !focused.wrappedValue {
                 HStack {
                     caption("提问")
                         .frame(width: controlSize)
@@ -89,13 +86,11 @@ struct NoteComposer: View {
         GeometryReader { geometry in
             GlassEffectContainer(spacing: 18) {
                 ZStack(alignment: .bottomTrailing) {
-                    if expanded || mode == .reading {
-                        Color.clear
-                            .frame(width: expanded ? geometry.size.width : controlSize, height: geometry.size.height)
-                            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: controlSize / 2))
-                            .glassEffectID("note-leading-control", in: glass)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                    }
+                    Color.clear
+                        .frame(width: expanded ? geometry.size.width : controlSize, height: geometry.size.height)
+                        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: controlSize / 2))
+                        .glassEffectID("note-leading-control", in: glass)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     Color.clear
                         .frame(width: controlSize, height: controlSize)
                         .glassEffect(.regular.interactive(), in: .circle)

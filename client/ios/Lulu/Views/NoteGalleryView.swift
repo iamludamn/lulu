@@ -372,10 +372,6 @@ struct NoteDetailView: View {
     private var editingNote: Bool { titleFocused || editing != nil }
     private var sending: Bool { sendTask != nil }
     private var dockAnimation: Animation? { reduceMotion ? nil : .easeOut(duration: 0.27) }
-    private var composerMode: NoteComposer.Mode {
-        if editingNote { return .editing }
-        return questionExpanded ? .question : .reading
-    }
 
     private var voiceStatus: String? {
         guard let voiceTarget else { return nil }
@@ -491,7 +487,7 @@ struct NoteDetailView: View {
             } else if !editingNote, voiceTarget == nil {
                 replyCard
             }
-            NoteComposer(draft: $message, focused: $messageFocused, mode: composerMode,
+            NoteComposer(draft: $message, focused: $messageFocused, expanded: questionExpanded, editingNote: editingNote,
                          opening: questionOpening, sending: sending, transcription: transcription, voiceStatus: voiceStatus,
                          onOpen: openQuestion, onSend: send, onMicrophone: toggleVoice, onCancelVoice: cancelVoice)
         }
@@ -544,7 +540,7 @@ struct NoteDetailView: View {
             questionExpanded = true
         } completion: {
             questionOpening = false
-            if questionExpanded, !editingNote { messageFocused = true }
+            if questionExpanded { messageFocused = true }
         }
     }
 
@@ -586,7 +582,7 @@ struct NoteDetailView: View {
                 }
             }
         } else if voiceTarget == nil {
-            let asking = questionExpanded && !editingNote
+            let asking = questionExpanded
             voiceTarget = asking ? .question : .body(dictationPoint)
             if asking { messageFocused = false }
             transcription.start(store)
