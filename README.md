@@ -34,6 +34,18 @@ Open [Lulu.xcodeproj](client/ios/Lulu.xcodeproj) in Xcode to build the iOS app w
 
 Run `npm run lint` after `npm run check`. This rejects source comments in JS, TS, Metal, shell, Python, HTML, SVG, CSS, JSONC, and YAML. Run `scripts/lint-swift.sh` on macOS to check Swift source comments. Keep the SwiftPM tools-version directive and script shebangs at the start of their files.
 
+## Web end-to-end tests
+
+Run `npm run test:e2e` on macOS or Linux with [e2e's supported Node.js version](https://e2e.com/docs/quickstart) (22.22.3+ on Node 22, or 24.8+). This builds Lulu and starts a local Worker with fresh D1 and KV state on a free loopback port. Chromium tests the MCP settings page's invalid-token handling, session persistence on reload, and explicit lock. The default suite needs no API keys. If Chromium or its Linux system libraries are missing, run `npm exec -- e2e-web install chromium --with-deps` on Linux, or omit `--with-deps` on macOS.
+
+To try the natural-language lock step, set `DEEPSEEK_API_KEY` in your environment and run:
+
+```sh
+LULU_E2E_MODEL=deepseek-flash npm run test:e2e -- tests/e2e/mcp.agent.e2e.ts
+```
+
+The first run uses the selected model on the local test page. A later run can replay the verified action from the local cache. Add `--no-cache` to force a fresh model run, or `--trace on --video on` to capture evidence for passing tests. Results are written to `.e2e/`.
+
 ## Documentation
 
 - [Repository overview](docs/ARCHITECTURE.md)
