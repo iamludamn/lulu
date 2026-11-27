@@ -85,9 +85,10 @@ jobs:
             .e2e/logs/
 
   ios-e2e:
-    runs-on: macos-26
+    runs-on: macos-15
     timeout-minutes: 25
     env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
       E2E_TELEMETRY_DISABLED: '1'
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
@@ -96,20 +97,21 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Build Lulu for iOS Simulator
+        timeout-minutes: 6
+        run: >-
+          xcodebuild -project client/ios/Lulu.xcodeproj -scheme Lulu
+          -configuration Debug -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$RUNNER_TEMP/lulu-ios-e2e" CODE_SIGNING_ALLOWED=NO build
       - name: Start a fresh iPhone 17 Pro simulator
         run: |
           set -euo pipefail
           udid=$(xcrun simctl create 'Lulu CI' \
             com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro \
-            com.apple.CoreSimulator.SimRuntime.iOS-26-5)
+            com.apple.CoreSimulator.SimRuntime.iOS-26-2)
           xcrun simctl boot "$udid"
           echo "E2E_IOS_DEVICE=$udid" >> "$GITHUB_ENV"
           echo "E2E_IOS_APP_PATH=$RUNNER_TEMP/lulu-ios-e2e/Build/Products/Debug-iphonesimulator/Lulu.app" >> "$GITHUB_ENV"
-      - name: Build Lulu for iOS Simulator
-        run: >-
-          xcodebuild -project client/ios/Lulu.xcodeproj -scheme Lulu
-          -configuration Debug -destination 'generic/platform=iOS Simulator'
-          -derivedDataPath "$RUNNER_TEMP/lulu-ios-e2e" CODE_SIGNING_ALLOWED=NO build
       - run: npm run test:e2e:ios -- --trace retain-on-failure
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         if: always()
