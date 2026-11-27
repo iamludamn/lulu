@@ -3,14 +3,32 @@ name: ci
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, 't3/**']
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run lint
+
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,11 +36,9 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run check
-      - run: npm run lint
       - run: npm test
       - name: Check live sandbox
-        if: github.event_name == 'push' && github.repository == 'iamludamn/lulu'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'iamludamn/lulu'
         run: LULU_SANDBOX_LIVE=1 node --test core/tests/sandbox-agent.test.mjs
         env:
           E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
@@ -32,6 +48,7 @@ jobs:
 
   ios:
     runs-on: macos-26
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - run: scripts/lint-swift.sh
@@ -42,3 +59,41 @@ jobs:
           xcodebuild -project client/ios/Lulu.xcodeproj -scheme Lulu
           -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/lulu-ios"
           CODE_SIGNING_ALLOWED=NO build
+
+  web-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      E2E_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm exec -- e2e-web install chromium --with-deps
+      - run: npm run test:e2e -- --trace retain-on-failure
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: web-e2e-results
+          path: |
+            .e2e/report.json
+            .e2e/junit.xml
+            .e2e/results/
+            .e2e/logs/
+
+  check:
+    name: Check
+    if: always()
+    needs: [static, verify, ios, web-e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every job to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$RESULTS"
+          jq -e 'all(.[]; .result == "success")' <<< "$RESULTS" > /dev/null

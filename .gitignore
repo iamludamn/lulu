@@ -25,3 +25,5 @@ apps/cf/wrangler.local.jsonc
 
 /output/
 /experiments/**/data/
+
+/.e2e/

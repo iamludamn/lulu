@@ -1,0 +1,32 @@
+id: core-runtime-import
+language: TypeScript
+severity: error
+message: Keep runtime-specific imports in the host adapter instead of core.
+files:
+  - core/src/**/*.ts
+rule:
+  all:
+    - any:
+        - kind: string
+        - kind: template_string
+    - regex: "^['\"\x60](node|cloudflare):"
+    - any:
+        - inside:
+            kind: import_statement
+            field: source
+        - inside:
+            kind: export_statement
+            field: source
+        - inside:
+            kind: import_require_clause
+            field: source
+        - inside:
+            kind: arguments
+            inside:
+              kind: call_expression
+              field: arguments
+              has:
+                field: function
+                any:
+                  - kind: import
+                  - pattern: require

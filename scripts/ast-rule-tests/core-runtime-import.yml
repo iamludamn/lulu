@@ -1,0 +1,17 @@
+id: core-runtime-import
+valid:
+  - 'import type { McpRegistryView } from "./protocol/mcp.js";'
+  - 'export const runtime = "node:fs";'
+  - 'loadPlugin("cloudflare:workers");'
+  - 'const cloud = { require: (name: string) => name }; cloud.require("cloudflare:workers");'
+invalid:
+  - |
+    import { readFile }
+      from
+      "node:fs";
+  - 'import "node:fs";'
+  - 'export type { Stats } from "node:fs";'
+  - 'const worker = await import(`cloudflare:workers`);'
+  - 'type Stats = import("node:fs").Stats;'
+  - 'import fs = require("node:fs");'
+  - 'const fs = require("node:fs");'

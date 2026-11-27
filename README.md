@@ -32,7 +32,26 @@ This builds the core and Web configuration assets. Follow [Local development and
 
 Open [Lulu.xcodeproj](client/ios/Lulu.xcodeproj) in Xcode to build the iOS app with the Lulu scheme. Run `swift test --package-path client/ios/LuluKit` and `scripts/test-ios-experience.sh` from the repository root to check the client.
 
-Run `npm run lint` after `npm run check`. This rejects source comments in JS, TS, Metal, shell, Python, HTML, SVG, CSS, JSONC, and YAML. Run `scripts/lint-swift.sh` on macOS to check Swift source comments. Keep the SwiftPM tools-version directive and script shebangs at the start of their files.
+## Checks
+
+Run `npm run check` and `npm run lint` locally. The first command checks TypeScript across the workspaces and e2e suite, and uses ast-grep to keep `node:` and `cloudflare:` imports out of `core/src`. Put runtime-specific imports in the host adapter. The second command runs type-aware lint and rejects source comments in JS, TS, Metal, shell, Python, HTML, SVG, CSS, JSONC, and YAML. Run `scripts/lint-swift.sh` on macOS to check Swift source comments. Keep the SwiftPM tools-version directive and script shebangs at the start of their files.
+
+The e2e.com browser tests require Node.js 24.8 or newer on the 24 line, or Node.js 22.22.3 or newer on the 22 line. On Linux, install Chromium and its system dependencies before the first run.
+
+```sh
+npm exec -- e2e-web install chromium --with-deps
+npm run test:e2e
+```
+
+On macOS, omit `--with-deps`. The suite builds the production Web assets and opens them through a loopback-only Wrangler Worker with a fresh D1 database and fixture credentials. MCP access and locking use the real Worker. Catalog search uses intercepted responses so the suite runs without a model, an account, or access to the public MCP registry.
+
+The GitHub Actions `Check` job summarizes static checks, unit tests and the Worker bundle, iOS checks and build, and Web e2e. The workflow runs on pull requests and pushes to `main` or `t3/**`. The Web job uploads its JUnit output, structured report, and diagnostic artifacts.
+
+Confirmed bugs have separate reproduction tests under `tests/bugbash/`. To reproduce the current failures after building, run the following command.
+
+```sh
+npx e2e run tests/bugbash/mcp-accessibility.e2e.ts tests/bugbash/mcp-duplicate.e2e.ts --config e2e.bugbash.config.ts --trace on
+```
 
 ## Documentation
 

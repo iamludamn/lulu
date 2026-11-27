@@ -1,3 +1,4 @@
+ruleDirs: [scripts/ast-rules]
 languageGlobs:
   cpp: ["**/*.metal"]
   html: ["**/*.svg"]

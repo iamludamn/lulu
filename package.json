@@ -9,15 +9,20 @@
   ],
   "scripts": {
     "build": "npm run build -w @lulu/core -w @lulu/web",
-    "check": "grep -rnE '(from|import)[^[:alnum:]_]*(node|cloudflare):' core/src; test $? -eq 1 && npm run build -w @lulu/core && npm run check -w @lulu/cf -w @lulu/web",
+    "check": "ast-grep test --test-dir scripts/ast-rule-tests --skip-snapshot-tests && ast-grep scan && npm run build -w @lulu/core && npm run check -w @lulu/cf -w @lulu/web && tsc -p tsconfig.e2e.json",
     "test": "npm run test --workspaces --if-present",
-    "lint": "node scripts/no-comments.mjs && oxlint --type-aware core/src apps/cf/src client/web/src"
+    "lint": "node scripts/no-comments.mjs && oxlint --type-aware core/src apps/cf/src client/web/src",
+    "test:e2e": "npm run build && e2e run"
   },
   "devDependencies": {
     "@ast-grep/cli": "0.51.3",
+    "@e2e-dev/web": "0.17.0",
     "@types/node": "^22.15.0",
+    "e2e": "0.25.0",
     "oxlint": "^1.93.0",
-    "oxlint-tsgolint": "^7.0.2006"
+    "oxlint-tsgolint": "^7.0.2006",
+    "playwright-core": "1.65.1",
+    "typescript": "7.0.2"
   },
   "license": "MIT",
   "overrides": {
