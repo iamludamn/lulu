@@ -101,16 +101,15 @@ jobs:
           xcodebuild -project client/ios/Lulu.xcodeproj -scheme Lulu
           -configuration Debug -destination 'generic/platform=iOS Simulator'
           -derivedDataPath "$RUNNER_TEMP/lulu-ios-e2e" CODE_SIGNING_ALLOWED=NO build
-      - name: Boot an iPhone 17 Pro and install Lulu
+      - name: Select the iPhone 17 Pro simulator
         run: |
           set -euo pipefail
           runtime=com.apple.CoreSimulator.SimRuntime.iOS-26-5
           udid=$(xcrun simctl list devices available -j | jq -er --arg runtime "$runtime" '
             first(.devices[$runtime][]? | select(.name == "iPhone 17 Pro") | .udid)
           ')
-          xcrun simctl bootstatus "$udid" -b
-          xcrun simctl install "$udid" "$RUNNER_TEMP/lulu-ios-e2e/Build/Products/Debug-iphonesimulator/Lulu.app"
           echo "E2E_IOS_DEVICE=$udid" >> "$GITHUB_ENV"
+          echo "E2E_IOS_APP_PATH=$RUNNER_TEMP/lulu-ios-e2e/Build/Products/Debug-iphonesimulator/Lulu.app" >> "$GITHUB_ENV"
       - run: npm run test:e2e:ios -- --trace retain-on-failure
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         if: always()

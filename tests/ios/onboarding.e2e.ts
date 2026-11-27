@@ -1,5 +1,5 @@
-import { describe, expect, test } from "e2e";
-import { serverURL } from "./fixture";
+import { describe, expect } from "e2e";
+import { iosTest as test, serverURL } from "./fixture";
 
 describe("iOS server setup", () => {
   test.beforeEach(async ({ app }) => {
@@ -11,7 +11,7 @@ describe("iOS server setup", () => {
   });
 
   test("connects to the server and opens the board", async ({ screen }) => {
-    await screen.getByRole("textbox", "https://example.com").fill(serverURL);
+    await screen.getByPlaceholder("https://example.com").fill(serverURL);
 
     await screen.getByRole("button", "连接").tap();
 
@@ -22,7 +22,7 @@ describe("iOS server setup", () => {
 describe("iOS workspace", () => {
   test.beforeEach(async ({ app, screen }) => {
     await app.clearState();
-    await screen.getByRole("textbox", "https://example.com").fill(serverURL);
+    await screen.getByPlaceholder("https://example.com").fill(serverURL);
     await screen.getByRole("button", "连接").tap();
     await screen.getByText("你的看板").waitFor();
   });
@@ -36,6 +36,6 @@ describe("iOS workspace", () => {
   test("prefills a chat draft from the board's add button", async ({ screen }) => {
     await screen.getByRole("button", "添加组件").tap();
 
-    await expect(screen.getByRole("textbox", "给 lulu 发消息")).toHaveValue("帮我在视图里加一个组件：");
+    await expect(screen.getByRole("textbox")).toHaveValue("帮我在视图里加一个组件：");
   });
 });

@@ -45,12 +45,11 @@ npm run test:e2e
 
 On macOS, omit `--with-deps`. The suite builds the production Web assets and opens them through a loopback-only Wrangler Worker with a fresh D1 database and fixture credentials. MCP access and locking use the real Worker. Catalog search uses intercepted responses so the suite runs without a model, an account, or access to the public MCP registry.
 
-The iOS e2e suite uses the same local Worker and a disposable simulator. Build Lulu for iOS Simulator, boot the simulator, and install the app before running the suite. Pick the simulator UDID from `xcrun simctl list devices booted`. The tests clear Lulu app data on the selected simulator.
+The iOS e2e suite uses the same local Worker and a disposable simulator. Build Lulu for iOS Simulator before running the suite. Pick the simulator UDID from `xcrun simctl list devices available`. e2e boots the simulator, installs the app, and clears Lulu app data between tests.
 
 ```sh
 xcodebuild -project client/ios/Lulu.xcodeproj -scheme Lulu -configuration Debug \
   -destination 'generic/platform=iOS Simulator' -derivedDataPath .e2e/ios-build CODE_SIGNING_ALLOWED=NO build
-xcrun simctl install "$E2E_IOS_DEVICE" .e2e/ios-build/Build/Products/Debug-iphonesimulator/Lulu.app
 npm run test:e2e:ios
 ```
 
