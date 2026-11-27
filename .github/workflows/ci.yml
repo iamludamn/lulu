@@ -84,10 +84,49 @@ jobs:
             .e2e/results/
             .e2e/logs/
 
+  ios-e2e:
+    runs-on: macos-26
+    timeout-minutes: 25
+    env:
+      E2E_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Build Lulu for iOS Simulator
+        run: >-
+          xcodebuild -project client/ios/Lulu.xcodeproj -scheme Lulu
+          -configuration Debug -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$RUNNER_TEMP/lulu-ios-e2e" CODE_SIGNING_ALLOWED=NO build
+      - name: Boot an iPhone 17 Pro and install Lulu
+        run: |
+          set -euo pipefail
+          runtime=com.apple.CoreSimulator.SimRuntime.iOS-26-5
+          udid=$(xcrun simctl list devices available -j | jq -er --arg runtime "$runtime" '
+            first(.devices[$runtime][]? | select(.name == "iPhone 17 Pro") | .udid)
+          ')
+          xcrun simctl bootstatus "$udid" -b
+          xcrun simctl install "$udid" "$RUNNER_TEMP/lulu-ios-e2e/Build/Products/Debug-iphonesimulator/Lulu.app"
+          echo "E2E_IOS_DEVICE=$udid" >> "$GITHUB_ENV"
+      - run: npm run test:e2e:ios -- --trace retain-on-failure
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: ios-e2e-results
+          include-hidden-files: true
+          path: |
+            .e2e/ios/report.json
+            .e2e/ios/junit.xml
+            .e2e/ios/results/
+            .e2e/ios/logs/
+
   check:
     name: Check
     if: always()
-    needs: [static, verify, ios, web-e2e]
+    needs: [static, verify, ios, web-e2e, ios-e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

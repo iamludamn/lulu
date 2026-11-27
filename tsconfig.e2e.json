@@ -16,6 +16,8 @@
   },
   "include": [
     "e2e.bugbash.config.ts",
+    "e2e.ios.config.ts",
+    "e2e.ios.bugbash.config.ts",
     "e2e.config.ts",
     "tests/**/*.e2e.ts"
   ]

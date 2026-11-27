@@ -12,12 +12,15 @@
     "check": "ast-grep test --test-dir scripts/ast-rule-tests --skip-snapshot-tests && ast-grep scan && npm run build -w @lulu/core && npm run check -w @lulu/cf -w @lulu/web && tsc -p tsconfig.e2e.json",
     "test": "npm run test --workspaces --if-present",
     "lint": "node scripts/no-comments.mjs && oxlint --type-aware core/src apps/cf/src client/web/src",
-    "test:e2e": "npm run build && e2e run"
+    "test:e2e": "npm run build && e2e run",
+    "test:e2e:ios": "npm run build && e2e run --config e2e.ios.config.ts"
   },
   "devDependencies": {
     "@ast-grep/cli": "0.51.3",
+    "@e2e-dev/mobile": "0.12.9",
     "@e2e-dev/web": "0.17.0",
     "@types/node": "^22.15.0",
+    "agent-device": "0.21.42",
     "e2e": "0.25.0",
     "oxlint": "^1.93.0",
     "oxlint-tsgolint": "^7.0.2006",

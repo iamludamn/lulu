@@ -45,12 +45,24 @@ npm run test:e2e
 
 On macOS, omit `--with-deps`. The suite builds the production Web assets and opens them through a loopback-only Wrangler Worker with a fresh D1 database and fixture credentials. MCP access and locking use the real Worker. Catalog search uses intercepted responses so the suite runs without a model, an account, or access to the public MCP registry.
 
-The GitHub Actions `Check` job summarizes static checks, unit tests and the Worker bundle, iOS checks and build, and Web e2e. The workflow runs on pull requests and pushes to `main` or `t3/**`. The Web job uploads its JUnit output, structured report, and diagnostic artifacts.
+The iOS e2e suite uses the same local Worker and a disposable simulator. Build Lulu for iOS Simulator, boot the simulator, and install the app before running the suite. Pick the simulator UDID from `xcrun simctl list devices booted`. The tests clear Lulu app data on the selected simulator.
+
+```sh
+xcodebuild -project client/ios/Lulu.xcodeproj -scheme Lulu -configuration Debug \
+  -destination 'generic/platform=iOS Simulator' -derivedDataPath .e2e/ios-build CODE_SIGNING_ALLOWED=NO build
+xcrun simctl install "$E2E_IOS_DEVICE" .e2e/ios-build/Build/Products/Debug-iphonesimulator/Lulu.app
+npm run test:e2e:ios
+```
+
+Set and export `E2E_IOS_DEVICE` before running those commands. The iOS tests use local port 9178. They cover first launch, connecting, switching to Assets, and opening a draft from the board without sending a model request.
+
+The GitHub Actions `Check` job summarizes static checks, unit tests and the Worker bundle, iOS checks and build, and both e2e suites. The workflow runs on pull requests and pushes to `main` or `t3/**`. Each e2e job uploads its JUnit output, structured report, and diagnostic artifacts.
 
 Confirmed bugs have separate reproduction tests under `tests/bugbash/`. To reproduce the current failures after building, run the following command.
 
 ```sh
 npx e2e run tests/bugbash/mcp-accessibility.e2e.ts tests/bugbash/mcp-duplicate.e2e.ts --config e2e.bugbash.config.ts --trace on
+npx e2e run --config e2e.ios.bugbash.config.ts --trace on
 ```
 
 ## Documentation
