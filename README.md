@@ -61,7 +61,7 @@ Confirmed bugs have separate reproduction tests under `tests/bugbash/`. To repro
 
 ```sh
 npx e2e run tests/bugbash/mcp-accessibility.e2e.ts tests/bugbash/mcp-duplicate.e2e.ts --config e2e.bugbash.config.ts --trace on
-npx e2e run --config e2e.ios.bugbash.config.ts --trace on
+AGENT_DEVICE_HOME="$PWD/.e2e/ios/agent-device" npx e2e run --config e2e.ios.bugbash.config.ts --trace on
 ```
 
 ## Documentation

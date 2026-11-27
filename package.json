@@ -13,7 +13,7 @@
     "test": "npm run test --workspaces --if-present",
     "lint": "node scripts/no-comments.mjs && oxlint --type-aware core/src apps/cf/src client/web/src",
     "test:e2e": "npm run build && e2e run",
-    "test:e2e:ios": "npm run build && e2e run --config e2e.ios.config.ts"
+    "test:e2e:ios": "npm run build && AGENT_DEVICE_HOME=\"$PWD/.e2e/ios/agent-device\" e2e run --config e2e.ios.config.ts"
   },
   "devDependencies": {
     "@ast-grep/cli": "0.51.3",
